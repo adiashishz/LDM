@@ -8,7 +8,9 @@ Everything here runs under **your** Fedora account; nothing is published until y
 Build once locally — this runs the tests and rpmlint the same way COPR will:
 
    ```
-   sudo dnf install rpm-build pyproject-rpm-macros python3-devel rpmlint libappstream-glib
+   sudo dnf install rpm-build pyproject-rpm-macros python3-devel rpmlint libappstream-glib \
+                    python3-hatchling python3-pytest python3-httpx+socks python3-dns yt-dlp+default \
+                    dbus-daemon ffmpeg-free rb_libtorrent-python3
    ldm/packaging/build-rpm.sh
    ```
 

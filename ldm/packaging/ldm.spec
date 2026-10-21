@@ -7,7 +7,9 @@ Release:        1%{?dist}
 Summary:        Download manager for files, videos and torrents
 License:        MIT
 URL:            https://github.com/adiashishz/LDM
-Source0:        %{name}-%{version}.tar.gz
+# GitHub's archive of the v%%{version} tag (top folder LDM-%%{version}); build-rpm.sh makes the same locally.
+Source0:        %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
+Source1:        ldm.rpmlintrc
 BuildArch:      noarch
 
 BuildRequires:  python3-devel
@@ -24,7 +26,7 @@ BuildRequires:  rb_libtorrent-python3
 
 # Python dependencies (httpx[socks], dbus-fast, yt-dlp[default], dnspython, secretstorage, cryptography) are generated
 # from pyproject.toml.
-Requires:       python3-gobject
+Requires:       python3dist(pygobject)
 Requires:       gtk4
 Requires:       libadwaita
 Requires:       (ffmpeg-free or ffmpeg)
@@ -36,13 +38,14 @@ Recommends:     nodejs
 Recommends:     (wl-clipboard or xclip)
 
 %description
-LDM is a download manager for Linux modelled on 1DM for Android: multi-part downloads with
-pause, resume and retry, video and stream downloads (yt-dlp), torrents (libtorrent), a scheduler,
-desktop notifications and a browser extension for Firefox, Chrome and Brave. Downloads run in a
-background service, so closing the window never stops them.
+LDM is a download manager for Linux, inspired by 1DM for Android: multi-part
+downloads with pause, resume and retry, video and stream downloads (yt-dlp),
+torrents (libtorrent), a scheduler, desktop notifications and a browser
+extension for Firefox, Chrome and Brave. Downloads run in a background
+service, so closing the window never stops them.
 
 %prep
-%autosetup -n %{name}-%{version}
+%autosetup -n LDM-%{version}
 
 %generate_buildrequires
 cd ldm
@@ -60,6 +63,8 @@ cd ldm
 %pyproject_save_files ldm
 %{python3} packaging/install-data.py %{buildroot} --prefix %{_prefix} --sysconfdir %{_sysconfdir}
 install -Dm644 -t %{buildroot}%{_datadir}/ldm/extension ../extension/dist/*.zip
+# Also a standalone script (copied to libexec for browsers), so keep it runnable.
+chmod 755 %{buildroot}%{python3_sitelib}/ldm/nmhost.py
 
 %check
 desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.adiashishz.LDM.desktop
@@ -96,12 +101,12 @@ cd ldm
 %{_prefix}/lib/mozilla/native-messaging-hosts/io.github.adiashishz.ldm.json
 %dir %{_sysconfdir}/opt/chrome
 %dir %{_sysconfdir}/opt/chrome/native-messaging-hosts
-%{_sysconfdir}/opt/chrome/native-messaging-hosts/io.github.adiashishz.ldm.json
+%config(noreplace) %{_sysconfdir}/opt/chrome/native-messaging-hosts/io.github.adiashishz.ldm.json
 %dir %{_sysconfdir}/chromium
 %dir %{_sysconfdir}/chromium/native-messaging-hosts
-%{_sysconfdir}/chromium/native-messaging-hosts/io.github.adiashishz.ldm.json
+%config(noreplace) %{_sysconfdir}/chromium/native-messaging-hosts/io.github.adiashishz.ldm.json
 %{_datadir}/ldm/
 
 %changelog
-* Wed Oct 21 2026 LDM contributors - 0.1.0-1
+* Wed Oct 21 2026 Aditya Ashish <adiashishz@gmail.com> - 0.1.0-1
 - First package: downloads, videos, torrents, scheduler, browser integration
