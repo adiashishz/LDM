@@ -6,6 +6,7 @@ Run with a headless GDK backend and a daemon on the session bus, e.g.
 """
 
 import faulthandler
+import os
 import sys
 from pathlib import Path
 
@@ -44,8 +45,9 @@ def steps(app: Application):
         yield 0.1
     yield 2.0
     save(window, "1-list")
-    window.open_add_dialog("https://example.com/files/ubuntu.iso")
-    yield 1.0
+    window.open_add_dialog(os.environ.get("RENDER_ADD_URL", "https://example.com/files/ubuntu.iso"),
+                           headers={"Referer": "https://example.com/page"})
+    yield 2.0  # the dialog checks the link first
     save(window, "2-add-dialog")
     close_dialog(window)
     PreferencesDialog(app.client).present(window)

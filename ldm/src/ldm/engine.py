@@ -57,6 +57,7 @@ class ProbeResult:
     filename: str
     etag: str | None
     last_modified: str | None
+    content_type: str = ""
 
 
 def sanitize_filename(name: str) -> str:
@@ -118,8 +119,9 @@ async def probe(client: httpx.AsyncClient, url: str) -> ProbeResult:
             size = 0  # empty file
         else:
             raise DownloadError(f"unexpected HTTP {r.status_code} while probing")
-        return ProbeResult(str(r.url), size, resumable, filename_for(r),
-                           r.headers.get("etag"), r.headers.get("last-modified"))
+        return ProbeResult(str(r.url), size, resumable, filename_for(r), r.headers.get("etag"),
+                           r.headers.get("last-modified"),
+                           r.headers.get("content-type", "").split(";")[0].strip())
 
 
 class Downloader:

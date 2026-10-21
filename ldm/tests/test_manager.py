@@ -228,3 +228,12 @@ def test_crashed_running_state_is_requeued(tmp_path, http_server):
     manager.store.set_state(i, "running")  # as if the daemon died mid-download
     run(manager, lambda: wait_state(manager, i, "done"))
     assert manager.store.get(i).dest.read_bytes() == data
+
+
+def test_probe_reports_size_resume_and_name(tmp_path, http_server):
+    cfg, url = http_server(data=payload(12_345), disposition='attachment; filename="clip.mkv"')
+    manager = new_manager(tmp_path)
+    info = asyncio.run(manager.probe(url, {"Referer": "https://site/"}))
+    assert {k: info[k] for k in ("size", "resumable", "filename")} == {"size": 12_345, "resumable": True,
+                                                                         "filename": "clip.mkv"}
+    assert cfg.requests[-1]["Referer"] == "https://site/"

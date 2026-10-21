@@ -14,7 +14,9 @@ from functools import partial
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
-from .engine import Downloader, new_client, probe
+import httpx
+
+from .engine import DownloadError, Downloader, new_client, probe
 from .ratelimit import TokenBucket
 from .store import DEFAULT_SETTINGS, DownloadRow, HostRule, Store
 
@@ -174,6 +176,18 @@ class Manager:
             self.store.set_state(download_id, "queued")
             self._emit_state(download_id)
             self._schedule()
+
+    async def probe(self, url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+        """Look at a link without downloading it (for the add dialog): size, resume support, name."""
+        if urlsplit(url).scheme not in ("http", "https"):
+            raise InvalidArgument(f"unsupported URL: {url}")
+        try:
+            async with new_client(headers) as client:
+                p = await probe(client, url)
+        except httpx.HTTPError as e:
+            raise DownloadError(f"could not reach the server: {e}") from e
+        return {"final_url": p.final_url, "size": p.size, "resumable": p.resumable,
+                "filename": p.filename, "content_type": p.content_type}
 
     def set_speed_limit(self, download_id: int, rate: int) -> None:
         self._get(download_id)

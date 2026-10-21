@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
 
 from ..format import parse_rate
-from .dialogs import AddDialog, ask_text, confirm, is_url, limit_text, read_clipboard_url
+from .add_dialog import AddDialog
+from .dialogs import ask_text, confirm, is_url, limit_text, read_clipboard_url
 from .model import DownloadItem
 from .row import DownloadRow
 

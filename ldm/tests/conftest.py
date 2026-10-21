@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import subprocess
 import threading
@@ -155,9 +156,11 @@ def http_server():
 # --- private D-Bus session bus + daemon -------------------------------------------------
 
 @pytest.fixture
-def bus_address(monkeypatch):
+def bus_address(monkeypatch, tmp_path_factory):
+    # Own XDG_DATA_HOME: the bus must not see the user's real ldm activation files.
+    env = {**os.environ, "XDG_DATA_HOME": str(tmp_path_factory.mktemp("bus-data"))}
     proc = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--print-address"],
-                            stdout=subprocess.PIPE, text=True)
+                            stdout=subprocess.PIPE, text=True, env=env)
     address = proc.stdout.readline().strip()
     monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", address)
     yield address

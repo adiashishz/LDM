@@ -95,3 +95,17 @@ def test_cli_talks_to_daemon(daemon, http_server, tmp_path, capsys):
 def test_cli_without_daemon(bus_address, capsys):
     assert main(["list"]) == 1
     assert "daemon is not running" in capsys.readouterr().out
+
+
+def test_probe_over_dbus(daemon, http_server):
+    cfg, url = http_server(data=b"x" * 5000, ranges=False)
+
+    async def go():
+        bus, iface = await client(daemon)
+        try:
+            return {k: v.value for k, v in (await iface.call_probe(url, {})).items()}
+        finally:
+            bus.disconnect()
+
+    info = asyncio.run(go())
+    assert (info["size"], info["resumable"], info["filename"]) == (5000, False, "test.bin")

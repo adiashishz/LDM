@@ -100,6 +100,11 @@ class ManagerInterface(ServiceInterface):
             await self.manager.set_url(download_id, url)
 
     @method()
+    async def Probe(self, url: "s", headers: "a{ss}") -> "a{sv}":
+        with _errors():
+            return to_vardict(await self.manager.probe(url, headers))
+
+    @method()
     def SetSpeedLimit(self, download_id: "t", bytes_per_second: "t"):
         with _errors():
             self.manager.set_speed_limit(download_id, bytes_per_second)
