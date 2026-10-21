@@ -213,6 +213,24 @@ class DaemonClient(GObject.Object):
     def list_logins(self, callback: Callback) -> None:
         self._call("ListLogins", "", (), callback)
 
+    def create_backup(self, target: str, password: str, callback: Callback) -> None:
+        self._call("CreateBackup", "ss", (target, password), callback, NO_TIMEOUT)
+
+    def restore_backup(self, source: str, password: str, callback: Callback) -> None:
+        self._call("RestoreBackup", "ss", (source, password), callback, NO_TIMEOUT)
+
+    def pause_all(self, callback: Callback | None = None) -> None:
+        self._call("PauseAll", "", (), callback)
+
+    def resume_all(self, callback: Callback | None = None) -> None:
+        self._call("ResumeAll", "", (), callback)
+
+    def reset_data_usage(self, callback: Callback | None = None) -> None:
+        self._call("ResetDataUsage", "", (), callback)
+
+    def get_parts(self, download_id: int, callback: Callback) -> None:
+        self._call("GetParts", "t", (download_id,), callback)
+
     def get_log(self, download_id: int, callback: Callback) -> None:
         self._call("GetLog", "t", (download_id,), callback)
 

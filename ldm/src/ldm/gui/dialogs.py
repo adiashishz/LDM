@@ -42,17 +42,19 @@ def parse_limit(text: str) -> int | None:
 
 
 def ask_text(parent: Gtk.Widget, heading: str, body: str, action: str, text: str,
-             placeholder: str, on_submit: Callable[[str], None]) -> Adw.AlertDialog:
-    """One-entry prompt; `on_submit(text)` is called when the user confirms."""
+             placeholder: str, on_submit: Callable[[str], None], password: bool = False) -> Adw.AlertDialog:
+    """One-entry prompt; `on_submit(text)` is called when the user confirms (a password is not trimmed)."""
     dialog = Adw.AlertDialog(heading=heading, body=body)
-    entry = Gtk.Entry(text=text, placeholder_text=placeholder, activates_default=True)
+    entry = (Gtk.PasswordEntry(text=text, show_peek_icon=True, activates_default=True) if password
+             else Gtk.Entry(text=text, placeholder_text=placeholder, activates_default=True))
     dialog.set_extra_child(entry)
     dialog.add_response("cancel", "Cancel")
     dialog.add_response("ok", action)
     dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
     dialog.set_default_response("ok")
     dialog.set_close_response("cancel")
-    dialog.connect("response", lambda d, response: response == "ok" and on_submit(entry.get_text().strip()))
+    dialog.connect("response", lambda d, response: response == "ok" and on_submit(
+        entry.get_text() if password else entry.get_text().strip()))
     dialog.present(parent)
     return dialog
 

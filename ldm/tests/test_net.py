@@ -266,6 +266,8 @@ def test_system_proxy_lookup_does_not_tie_the_process_to_the_bus(bus_address):
     script = ("import os, signal, time\n"
               "from ldm.net import system_proxy\n"
               "system_proxy('https://example.com/')\n"
+              "import gc; gc.collect()\n"  # GLib drops a connection nobody holds, then makes a new one
+              "system_proxy('https://example.com/')\n"
               "print('ready', flush=True)\n"
               "time.sleep(3)\n"
               "print('alive', flush=True)\n")

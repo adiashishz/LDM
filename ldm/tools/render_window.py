@@ -48,6 +48,12 @@ def steps(app: Application):
         yield 0.1
     yield 2.0
     save(window, "1-list")
+    window.toggle_search()
+    window.search_entry.set_text("backup")
+    window.sort_choice.set_selected(3)
+    yield 0.5
+    save(window, "1b-search")
+    window.toggle_search()
     window.open_add_dialog(os.environ.get("RENDER_ADD_URL", "https://example.com/files/ubuntu.iso"),
                            headers={"Referer": "https://example.com/page"})
     yield 2.0  # the dialog checks the link first
@@ -78,6 +84,9 @@ def steps(app: Application):
     preferences.set_visible_page(preferences.sites_page)
     yield 0.5
     save(window, "3d-sites")
+    preferences.set_visible_page(preferences.backup_page)
+    yield 0.5
+    save(window, "3f-backup")
     close_dialog(window)
     batch = window.batch_download()
     batch.url.set_text("https://example.com/photos/img*.jpg")

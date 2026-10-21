@@ -66,3 +66,27 @@ def test_waiting_reason_comes_and_goes():
     downloads.upsert(row(1))
     assert item.status == "Queued" and item.waiting == ""
     assert downloads.urls() == ["http://h/files/f1.bin"]
+
+
+def test_search_type_date_filters_and_sorting():
+    downloads = DownloadList()
+    downloads.upsert(row(1, url="http://h/a/ubuntu.iso", size=900, added_at=100.0, done=0))
+    downloads.upsert(row(2, url="http://h/a/song.mp3", size=50, added_at=300.0, done=25))
+    downloads.upsert(row(3, url="http://h/watch?v=1", kind="media", name="Trailer", size=500, added_at=200.0))
+    downloads.upsert(row(4, url="magnet:?xt=urn:btih:x", kind="torrent", name="Debian", size=700, added_at=50.0))
+    view = downloads.view("all")
+    assert ids(view) == [1, 2, 3, 4]
+    assert [downloads.get(i).group for i in (1, 2, 3, 4)] == ["archive", "audio", "video", "torrent"]
+
+    downloads.set_query(text="UBU")
+    assert ids(view) == [1]
+    downloads.set_query(text="", group="video")
+    assert ids(view) == [3]
+    downloads.set_query(group="", since=150.0)
+    assert ids(view) == [2, 3]
+    downloads.set_query(since=0.0)
+
+    for key, expected in (("size", [1, 4, 3, 2]), ("added", [2, 3, 1, 4]), ("name", [4, 2, 3, 1]),
+                          ("progress", [2, 1, 3, 4]), ("queue", [1, 2, 3, 4])):
+        downloads.set_sort(key)
+        assert ids(view) == expected, key

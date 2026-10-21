@@ -65,6 +65,21 @@ export function filterLinks(links, group = "files", text = "") {
   });
 }
 
+const SIZE_UNITS = { kb: 1e3, mb: 1e6, gb: 1e9, tb: 1e12, kib: 1024, mib: 1024 ** 2, gib: 1024 ** 3, tib: 1024 ** 4 };
+
+/** A file size written in a link's text ("90.55 MB", "1,5 GB", "700MiB", "1,234 MB"), in bytes, or null. */
+export function sizeHint(text) {
+  const plain = (text || "").replace(/(\d),(\d{3})(?!\d)/g, "$1$2"); // thousands separators
+  const match = /(\d+(?:[.,]\d+)?)\s*(tib|gib|mib|kib|tb|gb|mb|kb)\b/i.exec(plain);
+  if (!match) return null;
+  return Math.round(parseFloat(match[1].replace(",", ".")) * SIZE_UNITS[match[2].toLowerCase()]);
+}
+
+/** Links with a size in their text, largest first; the others after them, in page order. */
+export function linksBySize(links) {
+  return [...links].sort((a, b) => (sizeHint(b.text) ?? -1) - (sizeHint(a.text) ?? -1));
+}
+
 /** Should a browser download be handed to ldm? */
 export function shouldIntercept(item, settings) {
   const url = item.finalUrl || item.url || "";

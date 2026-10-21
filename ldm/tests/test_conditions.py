@@ -175,3 +175,29 @@ def test_schedule_settings_are_validated(tmp_path, key, value):
     manager, _, _ = new_manager(tmp_path)
     with pytest.raises(InvalidArgument):
         manager.update_settings({key: value})
+
+
+def test_data_limit_holds_downloads_until_reset(tmp_path, http_server):
+    data = payload(3_000_000)
+    cfg, url = http_server(data=data, delay=0.01)
+    manager, _, _ = new_manager(tmp_path, data_limit=500_000)
+
+    async def scenario():
+        i = manager.add(url, connections=2)
+        for _ in range(500):
+            if manager.describe(i).get("waiting") == "data limit reached":
+                break
+            await asyncio.sleep(0.01)
+        info = manager.describe(i)
+        assert info["state"] == "queued" and info["waiting"] == "data limit reached"
+        assert manager.session_bytes >= 500_000 and manager.settings()["data_used"] == manager.session_bytes
+        second = manager.add(url, name="second.bin")
+        await asyncio.sleep(0.1)
+        assert manager.describe(second)["waiting"] == "data limit reached"
+        manager.reset_data_usage()
+        manager.update_settings({"data_limit": 0})
+        assert await wait_state(manager, i, "done") == "done"
+        return i
+
+    i = run(manager, scenario)
+    assert manager.store.get(i).dest.read_bytes() == data

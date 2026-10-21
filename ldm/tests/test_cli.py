@@ -89,3 +89,21 @@ def test_batch_import_and_export_commands(daemon, monkeypatch, capsys, tmp_path)
         main(["batch", "http://127.0.0.1:9/img.jpg", "--to", "3"])
     with pytest.raises(SystemExit, match="--to"):
         main(["batch", "http://127.0.0.1:9/img*.jpg"])
+
+
+def test_backup_restore_and_session_commands(daemon, monkeypatch, capsys, tmp_path):
+    import io
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", daemon)
+    assert main(["add", "http://127.0.0.1:9/keep.iso", "--paused"]) == 0
+    monkeypatch.setattr("sys.stdin", io.StringIO("pw\n"))
+    assert main(["backup", str(tmp_path / "b"), "--encrypt", "--password-stdin"]) == 0
+    saved = capsys.readouterr().out.strip().splitlines()[-1]
+    assert saved.startswith(str(tmp_path / "b" / "ldm-backup-")) and saved.endswith(".ldmbackup")
+    assert main(["rm", "1"]) == 0
+    monkeypatch.setattr("sys.stdin", io.StringIO("pw\n"))
+    assert main(["restore", saved, "--password-stdin"]) == 0
+    assert "1 downloads restored" in capsys.readouterr().out
+    assert main(["data-usage"]) == 0
+    assert capsys.readouterr().out == "used this session: 0 B (no limit)\n"
+    assert main(["resume-all"]) == 0 and main(["pause-all"]) == 0
+    assert "1 downloads paused" in capsys.readouterr().out

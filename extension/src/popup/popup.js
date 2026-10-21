@@ -1,5 +1,6 @@
 import { api } from "../lib/api.js";
-import { filterLinks, filenameFromUrl, humanSize, linkGroup } from "../lib/names.js";
+import { bySize } from "../lib/classify.js";
+import { filterLinks, filenameFromUrl, humanSize, linkGroup, linksBySize } from "../lib/names.js";
 
 const params = new URLSearchParams(location.search);
 const $ = (id) => document.getElementById(id);
@@ -67,7 +68,7 @@ function row(name, meta, kind, action) {
 // --- media tab -----------------------------------------------------------------------------
 
 async function showMedia() {
-  const items = await call({ type: "captures", tabId });
+  const items = bySize(await call({ type: "captures", tabId }));  // largest first
   $("media-count").textContent = items.length ? `(${items.length})` : "";
   $("media-empty").hidden = items.length > 0;
   $("media").replaceChildren(...items.map((item) => {
@@ -86,7 +87,7 @@ async function showMedia() {
 // --- links tab -----------------------------------------------------------------------------
 
 function visibleLinks() {
-  return filterLinks(links, $("group").value, $("search").value);
+  return linksBySize(filterLinks(links, $("group").value, $("search").value));  // largest first
 }
 
 function renderLinks() {

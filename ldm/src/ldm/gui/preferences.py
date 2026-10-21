@@ -8,9 +8,14 @@ from gi.repository import Adw, Gio, GLib, Gtk
 
 from ..format import human, parse_rate
 from .schedule_rows import DaysRow, TimeRow
+from ..backup import file_name as backup_file_name
+from ..backup import is_encrypted
+from .model import FINISH_ACTIONS
+
+BACKUP_SCHEDULES = [("off", "Never"), ("daily", "Every day"), ("weekly", "Every week")]
 from .tools import ask_login
 from .client import DaemonClient
-from .dialogs import limit_text, short_path
+from .dialogs import ask_text, limit_text, short_path
 
 QUALITIES = [("best", "Best available"), (2160, "2160p (4K)"), (1440, "1440p"), (1080, "1080p"), (720, "720p"),
              (480, "480p"), (360, "360p"), ("audio", "Audio only")]
@@ -41,6 +46,8 @@ SYSTEM_SWITCHES = {
     "prevent_sleep": ("Keep the computer awake", "While files are downloading"),
     "autostart": ("Start the download service at login", "Scheduled downloads run even if LDM isn't open"),
     "notify_when_closed": ("Notifications when LDM is closed", "For finished and failed downloads"),
+    "tray_icon": ("Show progress in the tray", "While downloading, on desktops with a tray (GNOME needs the "
+                                                "AppIndicator extension)"),
     "clipboard_watch": ("Offer to download copied links", "When LDM gets focus, and in the background "
                                                           "on desktops that allow it"),
 }
@@ -155,14 +162,29 @@ class PreferencesDialog(Adw.PreferencesDialog):
             row.add_suffix(clear)
             finished.add(row)
             self.folder_rows[key] = row
+        self.finish = Adw.ComboRow(title="When all downloads finish", sensitive=False,
+                                   subtitle="Suspend and power off wait 60 seconds and can be cancelled",
+                                   model=Gtk.StringList.new([l for l, _ in FINISH_ACTIONS]))
+        finished.add(self.finish)
         cleanup = Adw.SpinRow.new_with_range(0, 3650, 1)
         cleanup.set_title("Remove list entries after (days)")
         cleanup.set_subtitle("0 means never")
         cleanup.set_sensitive(False)
         finished.add(cleanup)
         self.setting_rows["cleanup_days"] = cleanup
+        usage = Adw.PreferencesGroup(title="Data usage", description="Counted since the download service started.")
+        self.data_limit = Adw.EntryRow(title="Limit per session (e.g. 2G, 0 = no limit)", show_apply_button=True)
+        self.data_limit.connect("apply", self._apply_data_limit)
+        self.data_used = Adw.ActionRow(title="Used this session", subtitle="…")
+        reset = Gtk.Button(label="Reset", valign=Gtk.Align.CENTER, tooltip_text="Start a new session")
+        reset.connect("clicked", lambda *_: self.client.reset_data_usage(
+            lambda r, e: self._report(r, e) if e else self.data_used.set_subtitle(human(0))))
+        self.data_used.add_suffix(reset)
+        usage.add(self.data_limit)
+        usage.add(self.data_used)
         general.add(downloads)
         general.add(adding)
+        general.add(usage)
         general.add(network)
         general.add(finished)
         general.add(video)
@@ -292,11 +314,46 @@ class PreferencesDialog(Adw.PreferencesDialog):
         for group in (behaviour, network_group, seeding_group):
             torrents.add(group)
 
+        self.backup_page = backup_page = Adw.PreferencesPage(title="Backup", icon_name="document-save-symbolic")
+        now = Adw.PreferencesGroup(title="Backup and restore",
+                                   description="Settings, host rules, logins and the download list in one file. "
+                                               "Saved passwords are only included in backups with a password.")
+        backup_row = Adw.ActionRow(title="Back up now")
+        backup_button = Gtk.Button(label="Back Up…", valign=Gtk.Align.CENTER)
+        backup_button.connect("clicked", lambda *_: self._back_up_now())
+        backup_row.add_suffix(backup_button)
+        restore_row = Adw.ActionRow(title="Restore a backup", subtitle="Downloads already in the list are kept")
+        restore_button = Gtk.Button(label="Restore…", valign=Gtk.Align.CENTER)
+        restore_button.connect("clicked", lambda *_: self._restore())
+        restore_row.add_suffix(restore_button)
+        now.add(backup_row)
+        now.add(restore_row)
+        auto = Adw.PreferencesGroup(title="Automatic backups")
+        self.backup_schedule = Adw.ComboRow(title="Back up", sensitive=False,
+                                            model=Gtk.StringList.new([l for _, l in BACKUP_SCHEDULES]))
+        self.backup_folder = Adw.ActionRow(title="Folder", subtitle="…")
+        choose = Gtk.Button(icon_name="folder-open-symbolic", tooltip_text="Choose Folder", valign=Gtk.Align.CENTER)
+        choose.add_css_class("flat")
+        choose.connect("clicked", lambda *_: self._choose_backup_folder())
+        self.backup_folder.add_suffix(choose)
+        keep = Adw.SpinRow.new_with_range(1, 100, 1)
+        keep.set_title("Backups to keep")
+        keep.set_sensitive(False)
+        self.setting_rows["backup_keep"] = keep
+        self.backup_password = Adw.PasswordEntryRow(title="Password for automatic backups (empty = none)",
+                                                    show_apply_button=True)
+        self.backup_password.connect("apply", lambda row: self._save({"backup_password": row.get_text()}))
+        for row in (self.backup_schedule, self.backup_folder, keep, self.backup_password):
+            auto.add(row)
+        backup_page.add(now)
+        backup_page.add(auto)
+
         self.add(general)
         self.add(network_page)
         self.add(schedule)
         self.add(torrents)
         self.add(hosts)
+        self.add(backup_page)
         client.get_settings(self._loaded)
         self._reload_rules()
         self._reload_logins()
@@ -337,6 +394,20 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.days.connect("changed", lambda r: self._save({"schedule_days": r.get_days()}))
         self.schedule_limit.set_text(limit_text(settings["schedule_speed_limit"]))
         self._load_network(settings)
+        self.data_limit.set_text(limit_text(settings["data_limit"]))
+        schedules = [v for v, _ in BACKUP_SCHEDULES]
+        self.backup_schedule.set_selected(schedules.index(settings["backup_schedule"]))
+        self.backup_schedule.set_sensitive(True)
+        self.backup_schedule.connect("notify::selected", lambda r, _p: self._save(
+            {"backup_schedule": schedules[r.get_selected()]}))
+        self.backup_folder.set_subtitle(short_path(settings.get("backup_folder", "")))
+        if settings.get("backup_password_set"):
+            self.backup_password.set_title("Password for automatic backups (saved — type to change)")
+        actions = [v for _, v in FINISH_ACTIONS]
+        self.finish.set_selected(actions.index(settings["finish_action"]))
+        self.finish.set_sensitive(True)
+        self.finish.connect("notify::selected", lambda r, _p: self._save({"finish_action": actions[r.get_selected()]}))
+        self.data_used.set_subtitle(human(settings.get("data_used", 0)))
         for key, row in self.folder_rows.items():
             row.set_subtitle(short_path(settings[key]) if settings[key] else "Leave them where they are")
         self.quality.connect("notify::selected",
@@ -464,6 +535,87 @@ class PreferencesDialog(Adw.PreferencesDialog):
         if agent != "custom":
             self._save({"user_agent": agent})
         self._sync_network()
+
+    def _apply_data_limit(self, row: Adw.EntryRow) -> None:
+        try:
+            self._save({"data_limit": parse_rate(row.get_text() or "0")})
+            row.remove_css_class("error")
+        except ValueError:
+            row.add_css_class("error")
+
+    # --- backup ----------------------------------------------------------------------------
+
+    def _back_up_now(self) -> None:
+        dialog = Adw.AlertDialog(heading="Back Up", body="A password encrypts the backup and also saves your "
+                                                         "site and proxy passwords in it. Leave it empty for a "
+                                                         "plain backup.")
+        password = Adw.PasswordEntryRow(title="Password (optional)")
+        rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        rows.add_css_class("boxed-list")
+        rows.append(password)
+        dialog.set_extra_child(rows)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("save", "Choose File…")
+        dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_close_response("cancel")
+        dialog.connect("response", lambda d, r: r == "save" and self._save_backup_to(password.get_text()))
+        dialog.present(self)
+
+    def _save_backup_to(self, password: str) -> None:
+        chooser = Gtk.FileDialog(title="Save Backup", initial_name=backup_file_name(bool(password)))
+
+        def done(d, result) -> None:
+            try:
+                path = d.save_finish(result).get_path()
+            except GLib.Error:
+                return
+            self.client.create_backup(path, password, lambda saved, error: self._report(None, error) if error else
+                                      self.add_toast(Adw.Toast(title=GLib.markup_escape_text(
+                                          f"Backed up to {short_path(saved)}"))))
+
+        chooser.save(self.get_root(), None, done)
+
+    def _restore(self) -> None:
+        chooser = Gtk.FileDialog(title="Restore Backup")
+
+        def done(d, result) -> None:
+            try:
+                file = d.open_finish(result)
+                encrypted = is_encrypted(file.load_contents(None)[1])
+            except GLib.Error:
+                return
+            if encrypted:
+                ask_text(self, "Backup Password", "This backup is protected by a password.", "Restore", "", "",
+                         lambda password: self._restore_from(file.get_path(), password), password=True)
+            else:
+                self._restore_from(file.get_path(), "")
+
+        chooser.open(self.get_root(), None, done)
+
+    def _restore_from(self, path: str, password: str) -> None:
+        def restored(counts, error) -> None:
+            if error:
+                self._report(None, error)
+                return
+            self.add_toast(Adw.Toast(title=f"Restored {counts['settings']} settings, {counts['host_rules']} host "
+                                           f"rules, {counts['logins']} logins and {counts['downloads']} downloads"))
+            self._reload_rules()
+            self._reload_logins()
+
+        self.client.restore_backup(path, password, restored)
+
+    def _choose_backup_folder(self) -> None:
+        chooser = Gtk.FileDialog(title="Backup Folder")
+
+        def done(d, result) -> None:
+            try:
+                path = d.select_folder_finish(result).get_path()
+            except GLib.Error:
+                return
+            self._save({"backup_dir": path})
+            self.backup_folder.set_subtitle(short_path(path))
+
+        chooser.select_folder(self.get_root(), None, done)
 
     def _choose_move_folder(self, key: str) -> None:
         dialog = Gtk.FileDialog(title="Move Finished Downloads To")

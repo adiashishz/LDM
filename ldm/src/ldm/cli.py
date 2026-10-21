@@ -243,6 +243,26 @@ async def client(args) -> int:
                 kind = {"kind": Variant("s", "torrent")} if link.startswith("magnet:") else {}
                 await iface.call_add(link, {**options, **kind})
             print(f"{len(links)} downloads added")
+        elif args.command == "backup":
+            password = read_password(args.password_stdin, "password to encrypt the backup: ") if args.encrypt else ""
+            target = str(Path(args.target).expanduser().resolve()) if args.target else ""
+            print(await iface.call_create_backup(target, password))
+        elif args.command == "restore":
+            from .backup import is_encrypted
+            source = Path(args.file).expanduser().resolve()
+            password = (read_password(args.password_stdin, "backup password: ")
+                        if is_encrypted(source.read_bytes()) else "")
+            counts = values(await iface.call_restore_backup(str(source), password))
+            print(", ".join(f"{n} {k.replace('_', ' ')}" for k, n in counts.items()) + " restored")
+        elif args.command in ("pause-all", "resume-all"):
+            count = await (iface.call_pause_all() if args.command == "pause-all" else iface.call_resume_all())
+            print(f"{count} downloads {'paused' if args.command == 'pause-all' else 'resumed'}")
+        elif args.command == "data-usage":
+            if args.reset:
+                await iface.call_reset_data_usage()
+            s = values(await iface.call_get_settings())
+            limit = f" of {human(s['data_limit'])}" if s["data_limit"] else " (no limit)"
+            print(f"used this session: {human(s['data_used'])}{limit}")
         elif args.command == "checksum":
             print(await iface.call_checksum(args.id, args.algo))
         elif args.command == "rename":
@@ -309,7 +329,7 @@ def schedule_options(p) -> None:
 def parse_setting(key: str, text: str | None):
     if text is None:
         raise SystemExit(f"ldm settings {key}: missing value")
-    if key in ("speed_limit", "schedule_speed_limit"):
+    if key in ("speed_limit", "schedule_speed_limit", "data_limit"):
         return parse_rate(text)
     if key in ("schedule_start", "schedule_stop", "schedule_days", "clipboard_exclude"):
         return text  # "02:00" is not JSON
@@ -416,6 +436,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("file")
     p.add_argument("--paused", action="store_true", help="add without starting")
     p.add_argument("-o", "--dir", type=Path, help="folder")
+    p = sub.add_parser("backup", help="back up settings, rules, logins and the download list")
+    p.add_argument("target", nargs="?", help="file or folder (default: the backup folder)")
+    p.add_argument("--encrypt", action="store_true", help="protect with a password (then passwords are included)")
+    p.add_argument("--password-stdin", action="store_true", help="read the password from stdin")
+    p = sub.add_parser("restore", help="restore a backup (downloads already in the list are kept)")
+    p.add_argument("file")
+    p.add_argument("--password-stdin", action="store_true", help="read the password from stdin")
+    sub.add_parser("pause-all", help="pause every download that runs or waits")
+    sub.add_parser("resume-all", help="resume paused downloads and retry failed ones")
+    p = sub.add_parser("data-usage", help="data downloaded since the service started (data_limit setting)")
+    p.add_argument("--reset", action="store_true", help="start a new session: held downloads continue")
     p = sub.add_parser("checksum", help="checksum of a finished file")
     p.add_argument("id", type=int)
     p.add_argument("--algo", choices=("md5", "sha1", "sha256"), default="sha256")

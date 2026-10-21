@@ -98,19 +98,20 @@ def environment_proxy(url: str) -> str | None:
     return proxy.replace("socks://", "socks5://", 1) if proxy else None
 
 
-_bus_checked = False
+_session_bus = None  # GLib's shared connection, held so it isn't recreated with the default
 
 
 def _keep_running_without_bus(Gio) -> None:
-    """The proxy lookup can open GLib's shared session-bus connection, which by default ends the
-    process with SIGTERM when the bus goes away. The service watches its own bus connection and
-    shuts down cleanly (saving progress), so GLib must not decide that."""
-    global _bus_checked
-    if _bus_checked:
-        return
-    _bus_checked = True
+    """The proxy lookup uses GLib's shared session-bus connection, which by default ends the process
+    with SIGTERM when the bus goes away. The service watches its own bus connection and shuts down
+    cleanly (saving progress), so GLib must not decide that. GLib only keeps the shared connection
+    while someone holds it (else the lookup makes a fresh one with the default), so it is held here,
+    and replaced after the bus restarted."""
+    global _session_bus
     try:
-        Gio.bus_get_sync(Gio.BusType.SESSION, None).set_exit_on_close(False)
+        if _session_bus is None or _session_bus.is_closed():
+            _session_bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        _session_bus.set_exit_on_close(False)
     except Exception:  # no session bus: nothing to guard against
         pass
 

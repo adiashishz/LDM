@@ -7,8 +7,10 @@ from urllib.parse import unquote, urlsplit
 
 from gi.repository import Gio, GObject, Gtk
 
+from ..filetypes import group_of
 from ..format import human, status_text
 
+FINISH_ACTIONS = [("Do Nothing", "nothing"), ("Quit LDM", "quit"), ("Suspend", "suspend"), ("Power Off", "poweroff")]
 VIEWS = {
     "all": None,
     "downloading": {"running", "processing", "queued", "paused"},
@@ -38,14 +40,17 @@ class DownloadItem(GObject.Object):
     schedule_stop = GObject.Property(type=str, default="")
     schedule_days = GObject.Property(type=str, default="")
     waiting = GObject.Property(type=str, default="")               # why a queued download isn't starting
+    added_at = GObject.Property(type=float, default=0.0)           # unix time
+    finished_at = GObject.Property(type=float, default=0.0)        # 0 = not finished
     # Derived, for binding to widgets:
     title = GObject.Property(type=str, default="")
     fraction = GObject.Property(type=float, default=0.0)
     status = GObject.Property(type=str, default="")
+    group = GObject.Property(type=str, default="other")            # file type for the list filter
 
     FIELDS = ("id", "url", "name", "dir", "state", "error", "size", "done", "speed", "position", "speed_limit",
               "kind", "peers", "upload_speed", "ratio", "scheduled",
-              "schedule_start", "schedule_stop", "schedule_days")
+              "schedule_start", "schedule_stop", "schedule_days", "added_at", "finished_at")
 
     def update(self, values: dict[str, Any]) -> None:
         self.freeze_notify()
@@ -60,6 +65,7 @@ class DownloadItem(GObject.Object):
             if self.state == "done" and self.size >= 0:
                 self.done = self.size
             self.title = self.name or unquote(urlsplit(self.url).path.rsplit("/", 1)[-1]) or self.url
+            self.group = group_of(self.kind, self.name, self.url)
             self.fraction = self.done / self.size if self.size > 0 else 0.0
             self.status = status_text(self.state, self.done, self.size if self.size >= 0 else None,
                                       self.speed, self.error, self.waiting)
@@ -86,14 +92,33 @@ def _order(a: DownloadItem, b: DownloadItem, *_) -> int:
     return (ka > kb) - (ka < kb)
 
 
+SORTS = {  # key -> (label, compare); every list is in queue order unless sorted otherwise
+    "queue": ("Queue order", _order),
+    "name": ("Name", lambda a, b, *_: _cmp(a.title.casefold(), b.title.casefold()) or _order(a, b)),
+    "size": ("Size", lambda a, b, *_: _cmp(b.size, a.size) or _order(a, b)),
+    "added": ("Date added", lambda a, b, *_: _cmp(b.added_at, a.added_at) or _order(a, b)),
+    "progress": ("Progress", lambda a, b, *_: _cmp(b.fraction, a.fraction) or _order(a, b)),
+}
+
+
+def _cmp(a, b) -> int:
+    return (a > b) - (a < b)
+
+
 class DownloadList(GObject.Object):
-    """`store` is a Gio.ListStore of DownloadItem sorted by queue position."""
+    """`store` is a Gio.ListStore of DownloadItem sorted by queue position; views filter it by state and by
+    the shared query (search text, file type, added since) and sort it by `sort_key`."""
 
     def __init__(self):
         super().__init__()
         self.store = Gio.ListStore(item_type=DownloadItem)
         self._items: dict[int, DownloadItem] = {}
         self._filters: list[Gtk.CustomFilter] = []
+        self._sorters: list[Gtk.CustomSorter] = []
+        self.text = ""
+        self.group = ""        # "" = all types
+        self.since = 0.0       # unix time; 0 = any date
+        self.sort_key = "queue"
 
     def __len__(self) -> int:
         return len(self._items)
@@ -144,12 +169,36 @@ class DownloadList(GObject.Object):
             if item is not None:
                 item.update({"done": done, "size": size, "speed": speed})
 
-    def view(self, name: str) -> Gtk.FilterListModel:
-        """A filtered view of the store for one of VIEWS."""
+    def view(self, name: str) -> Gtk.SortListModel:
+        """A filtered, sorted view of the store for one of VIEWS."""
         states = VIEWS[name]
-        custom = Gtk.CustomFilter.new(lambda item: states is None or item.state in states)
+        custom = Gtk.CustomFilter.new(lambda item: (states is None or item.state in states) and self.matches(item))
         self._filters.append(custom)
-        return Gtk.FilterListModel.new(self.store, custom)
+        sorter = Gtk.CustomSorter.new(lambda a, b, *_: SORTS[self.sort_key][1](a, b))
+        self._sorters.append(sorter)
+        return Gtk.SortListModel.new(Gtk.FilterListModel.new(self.store, custom), sorter)
+
+    def matches(self, item: DownloadItem) -> bool:
+        if self.group and item.group != self.group:
+            return False
+        if self.since and item.added_at < self.since:
+            return False
+        text = self.text.casefold()
+        return not text or text in item.title.casefold() or text in item.url.casefold()
+
+    def set_query(self, text: str | None = None, group: str | None = None, since: float | None = None) -> None:
+        if text is not None:
+            self.text = text.strip()
+        if group is not None:
+            self.group = group
+        if since is not None:
+            self.since = since
+        self._filters_changed()
+
+    def set_sort(self, key: str) -> None:
+        self.sort_key = key
+        for sorter in self._sorters:
+            sorter.changed(Gtk.SorterChange.DIFFERENT)
 
     def _resort(self, item: DownloadItem) -> None:
         found, index = self.store.find(item)

@@ -11,6 +11,7 @@ import contextlib
 import json
 import logging
 import shutil
+import os
 import time
 from collections import Counter, deque
 from datetime import datetime
@@ -21,7 +22,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from . import files, media, torrent, transfer
+from . import backup, files, media, torrent, transfer
 from .engine import DownloadError, Downloader, new_client, probe
 from .media import MediaDownloader
 from . import net
@@ -42,6 +43,7 @@ WINDOW_KEYS = ("schedule_start", "schedule_stop", "schedule_days")  # a download
 RUN_OPTIONS = {"scheduled", "unmetered_only", *WINDOW_KEYS}  # stored in options_json for every kind
 CONDITION_TICK = 30.0
 CLEANUP_INTERVAL = 3600.0  # seconds between "remove old entries" checks
+BACKUP_INTERVALS = {"daily": 86400, "weekly": 7 * 86400}
 LOG_LINES = 300  # diagnostics kept per download
 SCHEMES = {"http": ("http", "https"), "media": ("http", "https"), "torrent": ("http", "https", "magnet", "file")}
 
@@ -104,6 +106,9 @@ class Manager:
         self._tasks: dict[int, asyncio.Task] = {}
         self._rule_keys: dict[int, str | None] = {}  # running id -> host rule it counts against
         self._buckets: dict[int, TokenBucket] = {}
+        self._downloaders: dict[int, Any] = {}       # running id -> engine (live parts)
+        self.session_bytes = 0                         # received since the service started (data limit)
+        self._last_done: dict[int, int] = {}           # running id -> bytes done at the last progress report
         self._progress: dict[int, tuple[int, int | None, float]] = {}
         self._attempts: dict[int, int] = {}
         self._retry_timers: dict[int, asyncio.TimerHandle] = {}
@@ -116,6 +121,8 @@ class Manager:
         self.on_state: Callable[[int, str, str], None] | None = None
         self.on_progress_batch: Callable[[list[tuple[int, int, int, float]]], None] | None = None
         self.on_autostart: Callable[[bool], None] | None = None
+        self.on_all_finished: Callable[[str], None] | None = None  # finish_action, when the queue is empty
+        self.on_started: Callable[[int], None] | None = None       # a download started (cancels a countdown)
 
     # --- lifecycle -------------------------------------------------------------------------
 
@@ -160,8 +167,11 @@ class Manager:
     async def _load_secrets(self) -> None:
         """Read the passwords that are in use; the keyring is not opened when there are none."""
         keys = [("login", login["host"]) for login in self.store.list_logins()]
-        if self.store.get_settings()["proxy_user"] or self._passwords is not None:
+        settings = self.store.get_settings()
+        if settings["proxy_user"] or self._passwords is not None:
             keys.append(("proxy", "proxy"))
+        if settings["backup_schedule"] != "off" or self._passwords is not None:
+            keys.append(("backup", "backup"))
         if not keys:
             return
 
@@ -346,6 +356,20 @@ class Manager:
             self.store.set_state(download_id, "paused")
             self._emit_state(download_id)
 
+    def pause_all(self) -> int:
+        """Pause everything that runs or waits to run (seeding torrents keep seeding)."""
+        ids = [d.id for d in self.store.list() if d.state in ("queued", "running", "processing")]
+        for download_id in ids:
+            self.pause(download_id)
+        return len(ids)
+
+    def resume_all(self) -> int:
+        """Resume paused downloads and retry failed ones (expired links and changed files need a decision)."""
+        ids = [d.id for d in self.store.list() if d.state in ("paused", "error")]
+        for download_id in ids:
+            self.resume(download_id)
+        return len(ids)
+
     def resume(self, download_id: int) -> None:
         d = self._get(download_id)
         if d.state not in RESUMABLE_STATES:
@@ -469,6 +493,7 @@ class Manager:
         self.store.set_state(download_id, "done")
         self._emit_state(download_id)
         self._after_finish(download_id)
+        self._check_all_finished()
 
     async def probe_media(self, url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
         """Title, qualities and subtitles yt-dlp can get from a page or stream playlist."""
@@ -529,14 +554,21 @@ class Manager:
         runtime = media.find_js_runtime(settings["js_runtime"])  # read-only, shown in preferences
         settings["js_runtime_detected"] = f"{runtime[0]}: {runtime[1]}" if runtime else ""
         settings["proxy_password_set"] = ("proxy", "proxy") in self._secrets  # read-only
+        settings["data_used"] = self.session_bytes                          # read-only
+        settings["backup_password_set"] = ("backup", "backup") in self._secrets
+        settings["backup_folder"] = str(self._backup_folder(settings))
         settings["passwords_in"] = getattr(self._passwords, "where", "")     # keyring / file / memory
         return settings
 
     def update_settings(self, values: dict[str, Any]) -> None:
         values = dict(values)
-        password = values.pop("proxy_password", None)  # not a setting: goes to the keyring
-        if password is not None and not isinstance(password, str):
-            raise InvalidArgument("proxy_password must be a string")
+        password = values.pop("proxy_password", None)  # not settings: they go to the keyring
+        backup_password = values.pop("backup_password", None)
+        for secret in (password, backup_password):
+            if secret is not None and not isinstance(secret, str):
+                raise InvalidArgument("passwords must be strings")
+        if backup_password is not None:
+            self._set_secret("backup", "backup", backup_password)
         for key, value in values.items():
             self._check_setting(key, value)
         for key, value in values.items():
@@ -551,7 +583,7 @@ class Manager:
             self._global.set_rate(values["speed_limit"])
         if self._torrent is not None and any(k.startswith("torrent_") for k in values):
             self._torrent.apply(self.store.get_settings(), self._torrent_proxy())
-        if any(k.startswith("schedule_") or k in ("pause_on_metered", "battery_limit", "prevent_sleep")
+        if any(k.startswith("schedule_") or k in ("pause_on_metered", "battery_limit", "prevent_sleep", "data_limit")
                for k in values):
             self.conditions_changed()
         if "autostart" in values and self.on_autostart:
@@ -566,7 +598,9 @@ class Manager:
         if key == "dns_mode" and value == "doh" and not net.doh_available():
             raise InvalidArgument("DNS-over-HTTPS needs python3-dns: sudo dnf install python3-dns")
         choices = {"media_container": ("mp4", "mkv"), "torrent_encryption": ("prefer", "require", "off"),
-                   "proxy_mode": ("system", "none", "manual"), "dns_mode": ("system", "doh")}
+                   "proxy_mode": ("system", "none", "manual"), "dns_mode": ("system", "doh"),
+                   "finish_action": ("nothing", "quit", "suspend", "poweroff"),
+                   "backup_schedule": ("off", "daily", "weekly")}
         if key in choices:
             if value not in choices[key]:
                 raise InvalidArgument(f"{key} must be one of: {', '.join(choices[key])}")
@@ -596,7 +630,7 @@ class Manager:
             raise InvalidArgument("user_agent must be default, firefox, chrome, mobile or a custom string")
         elif key in ("connect_timeout", "read_timeout") and not (isinstance(value, int) and 1 <= value <= 600):
             raise InvalidArgument(f"{key} must be 1-600 seconds")
-        elif key in ("move_finished_dir", "move_finished_torrent_dir") and value and not (
+        elif key in ("move_finished_dir", "move_finished_torrent_dir", "backup_dir") and value and not (
                 isinstance(value, str) and Path(value).expanduser().is_absolute()):
             raise InvalidArgument(f"{key} must be an absolute folder path or empty")
         else:
@@ -692,6 +726,18 @@ class Manager:
     def running(self) -> set[int]:
         return set(self._tasks)
 
+    def summary(self) -> tuple[int, int, int, float]:
+        """(running downloads, bytes done, bytes total of those with a known size, speed) for the tray."""
+        running = [i for i in self._tasks if self._active(i)]
+        done = total = 0
+        speed = 0.0
+        for download_id in running:
+            got, size, rate = self._progress.get(download_id, (0, None, 0.0))
+            speed += rate
+            if size:
+                done, total = done + got, total + size
+        return len(running), done, total, speed
+
     # --- internals -------------------------------------------------------------------------
 
     def _active(self, download_id: int) -> bool:
@@ -728,6 +774,8 @@ class Manager:
         limit = settings["battery_limit"]
         if limit and self.conditions.on_battery and self.conditions.battery < limit:
             return f"battery below {limit}%"
+        if settings["data_limit"] and self.session_bytes >= settings["data_limit"]:
+            return "data limit reached"
         return None
 
     def _schedule(self) -> None:
@@ -783,12 +831,28 @@ class Manager:
             **extra, **self._options,
         )
         self.store.set_state(d.id, "running")
+        self._emit(self.on_started, d.id)
         task = asyncio.create_task(downloader.run())
         self._tasks[d.id] = task
+        self._downloaders[d.id] = downloader
+        # data usage counts from here (bytes downloaded in earlier sessions don't count)
+        self._last_done[d.id] = (sum(p.done for p in self.store.load_parts(d.id)) if d.kind == "http"
+                                 else d.done_bytes)
         self._rule_keys[d.id] = key
         self._buckets[d.id] = bucket
         task.add_done_callback(partial(self._finished, d.id))
         self._emit_state(d.id)
+
+    def _check_all_finished(self) -> None:
+        """1DM's "app behavior after all downloads are finished/paused/stopped/errored"."""
+        if self._closing or self._tasks:
+            return
+        action = self.store.get_settings()["finish_action"]
+        if action == "nothing":
+            return
+        if any(d.state in ("queued", "running", "processing") for d in self.store.list()):
+            return  # still something to do (also: waiting for the schedule or a condition)
+        self._emit(self.on_all_finished, action)
 
     def _save_progress(self, download_id: int) -> None:
         """yt-dlp and torrent downloads only report progress live: keep the last numbers for a paused row."""
@@ -806,7 +870,19 @@ class Manager:
             fields["size"] = int(size)
         self.store.update(download_id, **fields)
 
+    def parts(self, download_id: int) -> list[dict[str, Any]]:
+        """The byte ranges of a multi-part download and how far each got (1DM: "show multi-part")."""
+        d = self._get(download_id)
+        if d.kind != "http":
+            return []
+        engine = self._downloaders.get(download_id)
+        live = getattr(engine, "parts", None)
+        parts = list(live) if live else self.store.load_parts(download_id)
+        return [{"first": p.first, "last": p.last, "done": p.done, "active": bool(p.active)} for p in parts]
+
     def _forget(self, download_id: int) -> None:
+        self._downloaders.pop(download_id, None)
+        self._last_done.pop(download_id, None)
         self._rule_keys.pop(download_id, None)
         self._buckets.pop(download_id, None)
         self._progress.pop(download_id, None)
@@ -844,11 +920,13 @@ class Manager:
         if d.state == "done":
             self._after_finish(download_id)
         self._schedule()
+        self._check_all_finished()
 
     async def _condition_loop(self) -> None:
         """Schedule windows open and close with the clock: re-check twice a minute."""
         while True:
             self._cleanup()
+            self._scheduled_backup()
             await asyncio.sleep(CONDITION_TICK)
             self.conditions_changed()
 
@@ -945,6 +1023,100 @@ class Manager:
                   and d.state != "seeding"):
                 self._spawn(self.remove(d.id, delete_files=True))
 
+    # --- backup and restore ----------------------------------------------------------------
+
+    def _backup_folder(self, settings: dict[str, Any]) -> Path:
+        return Path(settings["backup_dir"]).expanduser() if settings["backup_dir"] else backup.default_folder()
+
+    def _backup_data(self, with_secrets: bool) -> dict[str, Any]:
+        settings = {k: v for k, v in self.store.get_settings().items()
+                    if k in DEFAULT_SETTINGS and k not in backup.NOT_RESTORED}
+        logins = self.store.list_logins()
+        data: dict[str, Any] = {
+            "format": backup.FORMAT, "version": backup.VERSION, "created": time.time(),
+            "settings": settings, "host_rules": [vars(rule) for rule in self.store.list_host_rules()],
+            "logins": logins, "downloads": transfer.export_downloads(self.store, unfinished_only=False)["downloads"],
+        }
+        if with_secrets:  # only into encrypted backups
+            for login in logins:
+                login["password"] = self._secrets.get(("login", login["host"]), "")
+            data["proxy_password"] = self._secrets.get(("proxy", "proxy"), "")
+        return data
+
+    async def create_backup(self, target: str = "", password: str = "") -> str:
+        """Write a backup; `target` is a file, a folder, or "" for the backup folder. Returns the file."""
+        path = Path(target).expanduser() if target else self._backup_folder(self.store.get_settings())
+        if not target or path.is_dir() or path.suffix not in (".json", ".ldmbackup"):  # a folder
+            path = path / backup.file_name(bool(password))
+        blob = backup.encode(self._backup_data(with_secrets=bool(password)), password)
+
+        def write() -> None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(blob)
+
+        try:
+            await asyncio.to_thread(write)
+        except OSError as e:
+            raise InvalidArgument(f"could not write the backup: {e}") from None
+        return str(path)
+
+    async def restore_backup(self, source: str, password: str = "") -> dict[str, int]:
+        """Settings, host rules and logins from a backup; downloads that aren't in the list are added (paused)."""
+        try:
+            blob = await asyncio.to_thread(Path(source).expanduser().read_bytes)
+            data = backup.decode(blob, password)
+        except OSError as e:
+            raise InvalidArgument(f"could not read the backup: {e}") from None
+        except backup.BackupError as e:
+            raise InvalidArgument(str(e)) from None
+        restored = {"settings": 0, "host_rules": 0, "logins": 0, "downloads": 0}
+        for key, value in (data.get("settings") or {}).items():
+            if key in DEFAULT_SETTINGS and key not in backup.NOT_RESTORED:
+                try:
+                    self.update_settings({key: value})
+                    restored["settings"] += 1
+                except InvalidArgument as e:  # e.g. a folder that doesn't exist here
+                    log.info("backup setting %s not restored: %s", key, e)
+        for rule in data.get("host_rules") or []:
+            self.store.set_host_rule(rule["host"], max_connections=rule.get("max_connections", 0),
+                                     max_downloads=rule.get("max_downloads", 0),
+                                     include_subdomains=rule.get("include_subdomains", True))
+            restored["host_rules"] += 1
+        for login in data.get("logins") or []:
+            self.store.set_login(login["host"], login["username"], login.get("include_subdomains", True))
+            if login.get("password"):
+                self._set_secret("login", login["host"], login["password"])
+            restored["logins"] += 1
+        if data.get("proxy_password"):
+            self._set_secret("proxy", "proxy", data["proxy_password"])
+        known = {_link_key(d.url) for d in self.store.list()}
+        new = [entry for entry in data.get("downloads") or [] if _link_key(entry["url"]) not in known]
+        if new:
+            restored["downloads"] = len(self.import_downloads(json.dumps(
+                {"format": transfer.FORMAT, "version": transfer.VERSION, "downloads": new})))
+        return restored
+
+    def _scheduled_backup(self) -> None:
+        settings = self.store.get_settings()
+        interval = BACKUP_INTERVALS.get(settings["backup_schedule"])
+        now = self._clock().timestamp()
+        if not interval or now - settings["backup_last"] < interval:
+            return
+        self.store.set_setting("backup_last", now)
+        folder = self._backup_folder(settings)
+
+        async def run() -> None:
+            try:
+                path = await self.create_backup(str(folder), self._secrets.get(("backup", "backup"), ""))
+                await asyncio.to_thread(backup.prune, folder, settings["backup_keep"])
+                log.info("automatic backup: %s", path)
+            except ManagerError as e:
+                log.warning("automatic backup failed: %s", e)
+
+        self._spawn(run())
+
     def _spawn(self, coroutine) -> None:
         task = asyncio.get_running_loop().create_task(coroutine)
         self._background.add(task)
@@ -968,6 +1140,19 @@ class Manager:
 
     def _on_progress(self, download_id: int, done: int, size: int | None, speed: float) -> None:
         self._progress[download_id] = (done, size, speed)
+        before = self._last_done.get(download_id)
+        self._last_done[download_id] = done
+        if before is not None and done > before:
+            limit = self.store.get_settings()["data_limit"]
+            crossed = limit and self.session_bytes < limit <= self.session_bytes + done - before
+            self.session_bytes += done - before
+            if crossed:
+                self.conditions_changed()  # hold everything until the session is reset
+
+    def reset_data_usage(self) -> None:
+        """Start a new data-usage session (1DM: reset the session)."""
+        self.session_bytes = 0
+        self.conditions_changed()
 
     async def _progress_loop(self) -> None:
         while True:

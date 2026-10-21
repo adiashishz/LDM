@@ -206,6 +206,37 @@ class ManagerInterface(ServiceInterface):
             return await self.manager.move_to(download_id, folder)
 
     @method()
+    async def CreateBackup(self, target: "s", password: "s") -> "s":
+        """Back up to a file or folder ("" = the backup folder); a password encrypts it. Returns the file."""
+        with _errors():
+            return await self.manager.create_backup(target, password)
+
+    @method()
+    async def RestoreBackup(self, source: "s", password: "s") -> "a{sv}":
+        """Restore a backup file; returns how many settings, rules, logins and downloads were restored."""
+        with _errors():
+            return to_vardict(await self.manager.restore_backup(source, password))
+
+    @method()
+    def PauseAll(self) -> "u":
+        return self.manager.pause_all()
+
+    @method()
+    def ResumeAll(self) -> "u":
+        return self.manager.resume_all()
+
+    @method()
+    def ResetDataUsage(self):
+        """Start a new data-usage session; downloads held by the data limit continue."""
+        self.manager.reset_data_usage()
+
+    @method()
+    def GetParts(self, download_id: "t") -> "aa{sv}":
+        """Byte ranges (first, last), bytes done and whether a connection works on each part."""
+        with _errors():
+            return [to_vardict(p) for p in self.manager.parts(download_id)]
+
+    @method()
     def FindDuplicates(self, url: "s") -> "aa{sv}":
         return [to_vardict(d) for d in self.manager.find_duplicates(url)]
 

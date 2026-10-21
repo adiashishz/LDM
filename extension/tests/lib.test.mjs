@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { classify, extensionOf, isSubtitleSegment, pageMedia, sniff } from "../src/lib/classify.js";
+import { bySize, classify, extensionOf, isSubtitleSegment, pageMedia, sniff } from "../src/lib/classify.js";
 import {
-  cookieHeader, filenameFromDisposition, filenameFromUrl, filterLinks, humanSize, shouldIntercept,
+  cookieHeader, filenameFromDisposition, filenameFromUrl, filterLinks, humanSize, linksBySize, shouldIntercept,
+  sizeHint,
 } from "../src/lib/names.js";
 
 test("classify by mime and extension", () => {
@@ -70,7 +71,7 @@ test("download interception rules", () => {
   assert.equal(shouldIntercept({ url: "https://x/a.iso" }, { ...settings, intercept: false }), false);
 });
 
-test("page media for sites yt-dlp doesn't know: streams first, then the biggest files", () => {
+test("page media for sites yt-dlp doesn't know: biggest files first, streams (no size) after", () => {
   const caught = [
     { url: "https://cdn/x/small.mp4", kind: "video", size: 1000, seen: 1 },
     { url: "https://cdn/x/sub.vtt", kind: "subtitle", size: 10 },
@@ -79,9 +80,9 @@ test("page media for sites yt-dlp doesn't know: streams first, then the biggest 
     { url: "https://cdn/x/track.m4a", kind: "audio", size: 500 },
   ];
   const media = pageMedia(caught);
-  assert.deepEqual(media.map((m) => m.url), ["https://cdn/x/master.m3u8", "https://cdn/x/big.mp4",
-    "https://cdn/x/small.mp4", "https://cdn/x/track.m4a"]);
-  assert.deepEqual(media[1], { url: "https://cdn/x/big.mp4", kind: "video", size: 9000, mime: "video/mp4",
+  assert.deepEqual(media.map((m) => m.url), ["https://cdn/x/big.mp4", "https://cdn/x/small.mp4",
+    "https://cdn/x/track.m4a", "https://cdn/x/master.m3u8"]);
+  assert.deepEqual(media[0], { url: "https://cdn/x/big.mp4", kind: "video", size: 9000, mime: "video/mp4",
     filename: "big.mp4", referer: "https://site/v", headers: {} });
   assert.equal(pageMedia(caught, 2).length, 2);
 });
@@ -94,4 +95,26 @@ test("subtitle pieces of a stream are not offered as files", () => {
   }
   assert.equal(isSubtitleSegment("https://h/x/english.vtt"), false);
   assert.deepEqual(sniff("https://h/x/english.vtt", 200, { "content-type": "text/vtt" }), { kind: "subtitle", size: null });
+});
+
+test("the Media tab lists the largest files first", () => {
+  const caught = [{ url: "a", size: 10 }, { url: "b", size: null }, { url: "c", size: 300 }, { url: "d" },
+    { url: "e", size: 300 }];
+  assert.deepEqual(bySize(caught).map((c) => c.url), ["c", "e", "a", "b", "d"]);
+  assert.deepEqual(caught.map((c) => c.url), ["a", "b", "c", "d", "e"]);  // the original list is untouched
+});
+
+test("sizes written in link text", () => {
+  assert.equal(sizeHint("MP4 (360p, h264, 170.54 MB)"), 170540000);
+  assert.equal(sizeHint("Download (1,5 GB)"), 1500000000);
+  assert.equal(sizeHint("ISO 1,234 MB"), 1234000000);
+  assert.equal(sizeHint("700MiB"), 700 * 1024 ** 2);
+  assert.equal(sizeHint("Episode 4"), null);
+  assert.equal(sizeHint(""), null);
+});
+
+test("the Links tab lists the largest files first", () => {
+  const links = [{ url: "a", text: "240p (69.7 MB)" }, { url: "b", text: "picture" },
+    { url: "c", text: "1080p (1.2 GB)" }, { url: "d", text: "360p (170.54 MB)" }, { url: "e" }];
+  assert.deepEqual(linksBySize(links).map((l) => l.url), ["c", "d", "a", "b", "e"]);
 });

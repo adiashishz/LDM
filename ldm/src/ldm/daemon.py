@@ -12,7 +12,9 @@ from dbus_fast.aio import MessageBus
 
 from .dbus_service import BUS_NAME, OBJECT_PATH, ManagerInterface
 from .manager import Manager
+from .finish import Finisher
 from .notify import Notifier
+from .tray import Tray
 from .store import Store, default_db_path
 from .integration import set_autostart
 from .system import SleepInhibitor, SystemMonitor
@@ -44,15 +46,26 @@ async def serve(*, bus_address: str | None = None, db_path: Path | None = None,
         reply = await bus.request_name(BUS_NAME, NameFlag.DO_NOT_QUEUE)
         if reply not in (RequestNameReply.PRIMARY_OWNER, RequestNameReply.ALREADY_OWNER):
             raise AlreadyRunning(f"{BUS_NAME} is already owned on this bus")
-        await manager.start()
-        if manage_autostart:  # e.g. installed from a package: enable the unit the first time
-            asyncio.get_running_loop().run_in_executor(None, set_autostart,
-                                                       manager.store.get_settings()["autostart"])
         if stop is None:
             stop = asyncio.Event()
             loop = asyncio.get_running_loop()
             for signum in (signal.SIGINT, signal.SIGTERM):
                 loop.add_signal_handler(signum, stop.set)
+        finisher = Finisher(bus, monitor, stop.set)  # "when all downloads finished"
+
+        def quit_from_tray() -> None:
+            manager.pause_all()
+            stop.set()
+
+        tray = Tray(bus, manager.summary, manager.pause_all, manager.resume_all, quit_from_tray,
+                    enabled=lambda: manager.store.get_settings()["tray_icon"])
+        manager.on_all_finished = finisher.run
+        manager.on_started = finisher.cancel
+        await manager.start()
+        if manage_autostart:  # e.g. installed from a package: enable the unit the first time
+            asyncio.get_running_loop().run_in_executor(None, set_autostart,
+                                                       manager.store.get_settings()["autostart"])
+        await tray.start()
         if ready:
             ready.set()
         stopped = asyncio.create_task(stop.wait())
@@ -62,6 +75,7 @@ async def serve(*, bus_address: str | None = None, db_path: Path | None = None,
         finally:
             for task in (stopped, bus_lost):
                 task.cancel()
+            tray.close()
             await manager.shutdown()
     finally:
         bus.disconnect()

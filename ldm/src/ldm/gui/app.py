@@ -42,6 +42,7 @@ class Application(Adw.Application):
             ("add", lambda *_: self.window().open_add_dialog(), ["<Control>n"], None),
             ("preferences", self._preferences, ["<Control>comma"], None),
             ("shortcuts", self._shortcuts, ["<Control>question"], None),
+            ("search", lambda *_: self.window().toggle_search(), ["<Control>f"], None),
             ("about", self._about, [], None),
             ("show", lambda *_: self.activate(), [], None),
             ("open-file", self._open_file, [], GLib.VariantType.new("t")),
@@ -151,7 +152,7 @@ class Application(Adw.Application):
 
     def _shortcuts(self, *_) -> None:
         dialog = Adw.AlertDialog(heading="Keyboard Shortcuts",
-                                 body="Ctrl+N  Add download\nCtrl+,  Preferences\nCtrl+W  Close window\n"
+                                 body="Ctrl+N  Add download\nCtrl+F  Search\nCtrl+,  Preferences\nCtrl+W  Close window\n"
                                       "Ctrl+Q  Quit (downloads continue in the background)")
         dialog.add_response("close", "Close")
         dialog.present(self.window())

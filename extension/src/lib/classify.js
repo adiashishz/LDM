@@ -16,16 +16,17 @@ export const GROUPS = {
 export const MEDIA_KINDS = new Set(["video", "audio", "hls", "dash", "subtitle"]);
 export const STREAM_KINDS = new Set(["hls", "dash"]);
 
+/** Largest first; items without a known size (stream playlists) after them, in the order caught. */
+export function bySize(items) {
+  return [...items].sort((a, b) => (b.size ?? -1) - (a.size ?? -1));
+}
+
 /**
  * Media caught on a tab, for "download video from this page" (1DM's grabber): video, audio and
- * stream playlists — streams first, then the biggest files — so LDM can offer them when yt-dlp
- * doesn't know the site.
+ * stream playlists, largest first, so LDM can offer them when yt-dlp doesn't know the site.
  */
 export function pageMedia(captures, limit = 20) {
-  const rank = (c) => (STREAM_KINDS.has(c.kind) ? 0 : c.kind === "video" ? 1 : 2);
-  return captures
-    .filter((c) => ["video", "audio", "hls", "dash"].includes(c.kind))
-    .sort((a, b) => rank(a) - rank(b) || (b.size || 0) - (a.size || 0))
+  return bySize(captures.filter((c) => ["video", "audio", "hls", "dash"].includes(c.kind)))
     .slice(0, limit)
     .map(({ url, kind, size, mime, filename, referer, headers }) => ({
       url, kind, size: size || null, mime, filename, referer, headers: headers || {},

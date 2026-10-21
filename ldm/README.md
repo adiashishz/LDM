@@ -95,6 +95,18 @@ uv venv --python /usr/bin/python3 --system-site-packages .venv && uv pip install
 
 DNS-over-HTTPS needs `python3-dns`, SOCKS proxies need `python3-socksio` (both packaged in Fedora).
 
+```sh
+# M9: list and session
+.venv/bin/ldm pause-all && .venv/bin/ldm resume-all
+.venv/bin/ldm settings data_limit 2G && .venv/bin/ldm data-usage --reset
+.venv/bin/ldm settings finish_action suspend  # nothing / quit / suspend / poweroff (60 s, can cancel)
+.venv/bin/ldm backup --encrypt                # into ~/Documents/LDM Backups (asks for a password)
+.venv/bin/ldm restore ~/Documents/LDM\ Backups/ldm-backup-….ldmbackup
+.venv/bin/ldm settings backup_schedule daily  # weekly / off; backup_keep, backup_dir
+```
+
+The tray icon needs a tray (KDE, Xfce, Cinnamon, Budgie…; on GNOME the AppIndicator extension).
+
 State: `$XDG_DATA_HOME/ldm/ldm.db` (daemon) and `standalone.db` (`ldm get`); `--db` overrides.
 Downloads go to `~/Downloads` unless `-o` / `settings download_dir` say otherwise. While a download
 runs, its data is in `<name>.<id>.part` next to the target.

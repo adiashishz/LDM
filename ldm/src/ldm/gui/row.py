@@ -37,6 +37,7 @@ ACTIONS = {
     "open": ("Open", "open_file", {"done", "seeding"}),
     "open-folder": ("Open Folder", "open_folder", {"done", "seeding"}),
     "details": ("Torrent Details…", "show_torrent_details", None),
+    "parts": ("Parts…", "show_parts", {"queued", "running", "paused", "error", "expired", "changed"}),
     "copy-link": ("Copy Link", "copy_link", None),
     "set-url": ("Set New Link…", "ask_new_url", {"paused", "error", "expired", "changed", "queued"}),
     "limit": ("Speed Limit…", "ask_speed_limit", {"queued", "running", "paused", "error"}),
@@ -93,7 +94,7 @@ class DownloadRow(Gtk.Box):
         main, removal = Gio.Menu(), Gio.Menu()
         for name, (label, _, _) in ACTIONS.items():
             entry = Gio.MenuItem.new(label, f"dl.{name}")
-            if name in ("details", "login"):  # only torrents / login errors have them
+            if name in ("details", "login", "parts"):  # only torrents / login errors / file downloads
                 entry.set_attribute_value("hidden-when", GLib.Variant("s", "action-disabled"))
             (removal if name in ("remove", "delete") else main).append_item(entry)
         menu.append_section(None, main)
@@ -137,6 +138,8 @@ class DownloadRow(Gtk.Box):
             enabled = states is None or state in states
             if name == "details":
                 enabled = self.item.kind == "torrent"
+            elif name == "parts":
+                enabled = enabled and self.item.kind == "http"
             elif name == "login":
                 enabled = state == "error" and self.item.error.startswith("login required")
             elif name in ("rename", "move-to") and self.item.kind == "torrent":

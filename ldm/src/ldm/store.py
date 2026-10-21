@@ -165,6 +165,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "remove_finished": False,          # remove finished downloads from the list (files stay)
     "cleanup_days": 0,                 # remove list entries older than this many days (0 = never)
     "cleanup_finished_only": True,     # … but only finished ones
+    "data_limit": 0,                   # bytes per session (since the service started); 0 = no limit
+    "finish_action": "nothing",        # when all downloads finished: nothing / quit / suspend / poweroff
+    "tray_icon": True,                 # progress in the tray while downloading (where the desktop has one)
+    "backup_schedule": "off",          # automatic backups: off / daily / weekly
+    "backup_dir": "",                  # "" = ~/Documents/LDM Backups
+    "backup_keep": 10,                 # automatic backups kept in that folder
+    "backup_last": 0.0,                # unix time of the last automatic backup (bookkeeping)
 }
 
 

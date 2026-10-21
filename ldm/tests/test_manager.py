@@ -298,3 +298,41 @@ def test_shutdown_keeps_a_failure_that_happens_while_stopping(tmp_path):
 
     i = run(manager, scenario)
     assert (store.get(i).state, store.get(i).error) == ("error", "boom")
+
+
+def test_live_parts(tmp_path, http_server):
+    data = payload(4_000_000)
+    cfg, url = http_server(data=data, delay=0.03)
+    manager = new_manager(tmp_path)
+
+    async def scenario():
+        i = manager.add(url, connections=4)
+        await wait_state(manager, i, "running")
+        await asyncio.sleep(0.4)
+        live = manager.parts(i)
+        manager.pause(i)
+        await wait_state(manager, i, "paused")
+        return i, live, manager.parts(i)
+
+    i, live, stored = run(manager, scenario)
+    assert len(live) == 4 and any(p["active"] for p in live) and sum(p["done"] for p in live) > 0
+    assert live[0]["first"] == 0 and live[-1]["last"] == len(data) - 1
+    assert not any(p["active"] for p in stored) and sum(p["done"] for p in stored) >= sum(p["done"] for p in live)
+
+
+def test_pause_all_and_resume_all(tmp_path, http_server):
+    data = payload(2_000_000)
+    cfg, url = http_server(data=data, delay=0.02)
+    manager = new_manager(tmp_path, max_parallel=1)
+
+    async def scenario():
+        ids = [manager.add(url, name=f"{n}.bin") for n in range(3)]
+        await wait_state(manager, ids[0], "running")
+        assert manager.pause_all() == 3
+        for i in ids:
+            await wait_state(manager, i, "paused")
+        assert manager.resume_all() == 3
+        for i in ids:
+            assert await wait_state(manager, i, "done", timeout=30) == "done"
+
+    run(manager, scenario)

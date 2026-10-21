@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from gi.repository import Adw, Gtk
+from gi.repository import Adw, GLib, Gtk
 
 from ..batch import expand
 from ..files import algorithm_for
+from ..format import human
 from .client import DaemonClient
 from .schedule_rows import ScheduleEditor
 
@@ -259,3 +260,81 @@ def ask_login(parent: Gtk.Widget, host: str, username: str, on_save: Callable[[s
         subdomain_row.get_active()))
     dialog.present(parent)
     return dialog
+
+
+class PartsDialog:
+    """1DM's multi-part view: where each connection is in the file, live."""
+
+    def __init__(self, client: DaemonClient, parent: Gtk.Widget, download_id: int, title: str):
+        self.client, self.download_id = client, download_id
+        self.parts: list[dict[str, Any]] = []
+        self.bar = Gtk.DrawingArea(content_height=28, hexpand=True)
+        self.bar.set_draw_func(self._draw)
+        self.summary = Gtk.Label(xalign=0, css_classes=["dim-label"])
+        self.rows = Adw.PreferencesGroup(title="Parts")
+        self.row_widgets: list[Adw.ActionRow] = []
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_top=6)
+        box.append(self.bar)
+        box.append(self.summary)
+        head = Adw.PreferencesGroup(title=title)
+        head.add(box)
+        self.dialog, _, _ = _dialog("Parts", head, self.rows, width=620)
+        self.dialog.connect("closed", lambda *_: self._stop())
+        self._timer = GLib.timeout_add(500, self._refresh)
+        self._refresh()
+        self.dialog.present(parent)
+
+    def _stop(self) -> None:
+        if self._timer:
+            GLib.source_remove(self._timer)
+            self._timer = 0
+
+    def _refresh(self) -> bool:
+        self.client.get_parts(self.download_id, self._show)
+        return GLib.SOURCE_CONTINUE
+
+    def _show(self, parts: list[dict[str, Any]] | None, error) -> None:
+        if error:
+            self.summary.set_label(error.message)
+            return
+        self.parts = parts or []
+        if not self.parts:
+            self.summary.set_label("No parts: the download hasn't started, or it is a video or torrent")
+        else:
+            total = self.parts[-1]["last"] + 1 if self.parts[-1]["last"] < 1 << 61 else 0
+            done = sum(p["done"] for p in self.parts)
+            active = sum(1 for p in self.parts if p["active"])
+            self.summary.set_label(f"{len(self.parts)} parts · {active} downloading · "
+                                   + (f"{human(done)} of {human(total)}" if total else human(done)))
+        while len(self.row_widgets) < len(self.parts):
+            row = Adw.ActionRow()
+            row.add_css_class("property")
+            self.rows.add(row)
+            self.row_widgets.append(row)
+        for index, row in enumerate(self.row_widgets):
+            row.set_visible(index < len(self.parts))
+            if index < len(self.parts):
+                p = self.parts[index]
+                size = p["last"] - p["first"] + 1
+                state = "downloading" if p["active"] else ("finished" if p["done"] >= size else "waiting")
+                row.set_title(f"Part {index + 1} · {state}")
+                row.set_subtitle(f"{human(p['done'])} of {human(size)} · from byte {p['first']:,}")
+        self.bar.queue_draw()
+
+    def _draw(self, area, cr, width: int, height: int) -> None:
+        accent = Adw.StyleManager.get_default().get_accent_color_rgba()
+        fg = area.get_color()
+        cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.12)
+        cr.rectangle(0, 0, width, height)
+        cr.fill()
+        if not self.parts or self.parts[-1]["last"] >= 1 << 61:
+            return
+        total = self.parts[-1]["last"] + 1
+        for p in self.parts:
+            x = p["first"] / total * width
+            cr.set_source_rgba(accent.red, accent.green, accent.blue, 1.0 if p["active"] else 0.7)
+            cr.rectangle(x, 0, p["done"] / total * width, height)
+            cr.fill()
+            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.35)  # part boundary
+            cr.rectangle(x, 0, 1, height)
+            cr.fill()

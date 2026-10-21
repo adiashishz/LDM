@@ -10,13 +10,14 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
 
 from ..batch import parse_link_list
 from ..clipboard import Offer
+from ..filetypes import LABELS as FILE_TYPE_LABELS
 from ..format import parse_rate
 from .add_dialog import AddDialog
 from .dialogs import ask_text, confirm, is_url, limit_text, read_clipboard_url, short_path
-from .model import DownloadItem
+from .model import FINISH_ACTIONS, SORTS, DownloadItem
 from .row import DownloadRow
 from .schedule_rows import ask_schedule
-from .tools import BatchDialog, ChecksumDialog, ImportLinksDialog, LogDialog, ask_login
+from .tools import BatchDialog, ChecksumDialog, ImportLinksDialog, LogDialog, PartsDialog, ask_login
 from .torrent_details import TorrentDetailsDialog
 
 if TYPE_CHECKING:
@@ -41,8 +42,17 @@ class MainWindow(Adw.ApplicationWindow):
         header = Adw.HeaderBar()
         add = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add Download", action_name="app.add")
         header.pack_start(add)
+        self.search_button = Gtk.ToggleButton(icon_name="system-search-symbolic", tooltip_text="Search (Ctrl+F)")
+        header.pack_start(self.search_button)
+        self.search_bar = self._build_search_bar()
+        self.search_button.bind_property("active", self.search_bar, "search-mode-enabled",
+                                         GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE)
         menu = Gio.Menu()
         tools = Gio.Menu()
+        running = Gio.Menu()
+        running.append("Pause All", "win.pause-all")
+        running.append("Resume All", "win.resume-all")
+        menu.append_section(None, running)
         for label, action in (("Batch Download…", "win.batch"), ("Import Links…", "win.import-links"),
                               ("Export Links…", "win.export-links"), ("Export Unfinished…", "win.export-unfinished"),
                               ("Import Unfinished…", "win.import-unfinished")):
@@ -51,9 +61,21 @@ class MainWindow(Adw.ApplicationWindow):
         app_items.append("Preferences", "app.preferences")
         app_items.append("Keyboard Shortcuts", "app.shortcuts")
         app_items.append("About LDM", "app.about")
+        finish = Gio.Menu()
+        for label, value in FINISH_ACTIONS:
+            finish.append(label, f"win.finish-action::{value}")
         menu.append_section(None, tools)
+        menu.append_submenu("When All Finished", finish)
         menu.append_section(None, app_items)
-        for name, handler in (("batch", self.batch_download), ("import-links", self.import_links),
+        self.finish_action = Gio.SimpleAction.new_stateful("finish-action", GLib.VariantType.new("s"),
+                                                           GLib.Variant("s", "nothing"))
+        self.finish_action.connect("change-state", self._on_finish_action)
+        self.add_action(self.finish_action)
+        self.client.connect("notify::connected", lambda *_: self._load_finish_action())
+        self._load_finish_action()
+        for name, handler in (("pause-all", lambda: self.client.pause_all(self._report)),
+                              ("resume-all", lambda: self.client.resume_all(self._report)),
+                              ("batch", self.batch_download), ("import-links", self.import_links),
                               ("export-links", self.export_links), ("export-unfinished", self.export_unfinished),
                               ("import-unfinished", self.import_unfinished)):
             action = Gio.SimpleAction.new(name, None)
@@ -91,6 +113,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.toasts = Adw.ToastOverlay(child=self.stack)
         view = Adw.ToolbarView(content=self.toasts)
         view.add_top_bar(header)
+        view.add_top_bar(self.search_bar)
         view.add_top_bar(self.banner)
         view.add_top_bar(self.clipboard_banner)
         self.set_content(view)
@@ -103,6 +126,65 @@ class MainWindow(Adw.ApplicationWindow):
             model.connect("items-changed", self._sync_empty)
         self._show_view()
 
+    # --- when all finished -----------------------------------------------------------------
+
+    def _load_finish_action(self) -> None:
+        if self.client.connected:
+            self.client.get_settings(lambda settings, error: settings and self.finish_action.set_state(
+                GLib.Variant("s", settings.get("finish_action", "nothing"))))
+
+    def _on_finish_action(self, action, value) -> None:
+        action.set_state(value)
+        self.client.set_settings({"finish_action": value.get_string()}, self._report)
+        if value.get_string() != "nothing":
+            label = dict((v, l) for l, v in FINISH_ACTIONS)[value.get_string()]
+            self.toast(f"When all downloads finish: {label}")
+
+    # --- search, filters, sorting ----------------------------------------------------------
+
+    TYPE_CHOICES = [("", "All types")] + [(g, l) for g, l in FILE_TYPE_LABELS.items()]
+    DATE_CHOICES = [(0, "Any date"), (1, "Today"), (7, "Last 7 days"), (30, "Last 30 days")]
+
+    def _build_search_bar(self) -> Gtk.SearchBar:
+        self.search_entry = Gtk.SearchEntry(placeholder_text="Search names and links", hexpand=True)
+        self.search_entry.connect("search-changed", lambda e: self.app.downloads.set_query(text=e.get_text()))
+        self.type_filter = Gtk.DropDown.new_from_strings([label for _, label in self.TYPE_CHOICES])
+        self.type_filter.set_tooltip_text("File type")
+        self.type_filter.connect("notify::selected", lambda d, _p: self.app.downloads.set_query(
+            group=self.TYPE_CHOICES[d.get_selected()][0]))
+        self.date_filter = Gtk.DropDown.new_from_strings([label for _, label in self.DATE_CHOICES])
+        self.date_filter.set_tooltip_text("Added")
+        self.date_filter.connect("notify::selected", self._on_date_filter)
+        self.sort_choice = Gtk.DropDown.new_from_strings([label for label, _ in SORTS.values()])
+        self.sort_choice.set_tooltip_text("Sort by")
+        self.sort_choice.connect("notify::selected", lambda d, _p: self.app.downloads.set_sort(
+            list(SORTS)[d.get_selected()]))
+        box = Gtk.Box(spacing=6)
+        for widget in (self.search_entry, self.type_filter, self.date_filter, self.sort_choice):
+            box.append(widget)
+        bar = Gtk.SearchBar(child=Adw.Clamp(maximum_size=900, child=box), show_close_button=True)
+        bar.connect_entry(self.search_entry)
+        bar.set_key_capture_widget(self)  # start typing anywhere to search
+        bar.connect("notify::search-mode-enabled", self._on_search_mode)
+        return bar
+
+    def _on_date_filter(self, dropdown, _param) -> None:
+        days = self.DATE_CHOICES[dropdown.get_selected()][0]
+        if not days:
+            since = 0.0
+        else:
+            start = GLib.DateTime.new_now_local()
+            start = GLib.DateTime.new_local(start.get_year(), start.get_month(), start.get_day_of_month(), 0, 0, 0)
+            since = start.add_days(1 - days).to_unix()
+        self.app.downloads.set_query(since=since)
+
+    def _on_search_mode(self, bar, _param) -> None:
+        if not bar.get_search_mode():  # closing the bar clears the search (filters and sort stay)
+            self.search_entry.set_text("")
+
+    def toggle_search(self) -> None:
+        self.search_bar.set_search_mode(not self.search_bar.get_search_mode())
+
     # --- view ------------------------------------------------------------------------------
 
     def _show_view(self, *_) -> None:
@@ -112,7 +194,9 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _sync_empty(self, *_) -> None:
         name = self.filters.get_active_name() or "all"
-        title, description = EMPTY[name]
+        downloads = self.app.downloads
+        filtered = downloads.text or downloads.group or downloads.since
+        title, description = ("No Matching Downloads", "Try other words or filters") if filtered else EMPTY[name]
         self.empty.set_title(title)
         self.empty.set_description(description)
         self.stack.set_visible_child_name("list" if self.views[name].get_n_items() else "empty")
@@ -391,6 +475,9 @@ class MainWindow(Adw.ApplicationWindow):
                                      lambda r, e: self._report(r, e) if e else self.app.refresh(item.id))
 
         self.client.get(item.id, with_row)
+
+    def show_parts(self, item: DownloadItem) -> None:
+        PartsDialog(self.client, self, item.id, item.title)
 
     def show_checksum(self, item: DownloadItem) -> None:
         ChecksumDialog(self.client, self, item.id, item.title)
