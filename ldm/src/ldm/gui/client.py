@@ -51,6 +51,13 @@ def to_variant(value: Any) -> GLib.Variant:
     raise TypeError(f"cannot send {type(value).__name__} over D-Bus")
 
 
+def _bytes_fields(value: Any) -> Any:
+    """PyGObject unpacks D-Bus byte arrays ("ay") into lists of ints: give byte fields back as bytes."""
+    if isinstance(value, dict) and isinstance(value.get("metadata"), list):
+        return {**value, "metadata": bytes(value["metadata"])}
+    return value
+
+
 class DaemonClient(GObject.Object):
     __gsignals__ = {
         "added": (GObject.SignalFlags.RUN_FIRST, None, (GObject.TYPE_UINT64,)),
@@ -128,7 +135,7 @@ class DaemonClient(GObject.Object):
                     callback(None, _error_from_glib(e))
                 return
             if callback:
-                callback(value[0] if len(value) == 1 else None, None)
+                callback(_bytes_fields(value[0]) if len(value) == 1 else None, None)
 
         self._proxy.call(method, parameters, Gio.DBusCallFlags.NO_AUTO_START, -1, None, done)
 

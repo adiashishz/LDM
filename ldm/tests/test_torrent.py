@@ -213,3 +213,11 @@ def test_invalid_torrent_file(tmp_path):
     manager = new_manager(tmp_path)
     with pytest.raises(Exception, match="not a valid .torrent"):
         asyncio.run(manager.probe_torrent(bad.as_uri()))
+
+
+def test_failed_add_leaves_no_row(tmp_path):
+    """Regression: a torrent whose options can't be stored must not stay queued."""
+    manager = new_manager(tmp_path)
+    with pytest.raises(Exception):
+        manager.add("https://example.org/x.torrent", metadata={"not": "bytes"})
+    assert manager.store.list() == []

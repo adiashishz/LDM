@@ -168,20 +168,31 @@ class Manager:
         download_id = self.store.add(url, dir or settings["download_dir"], name=name, headers=headers,
                                      connections=connections, state="queued" if start else "paused",
                                      kind=kind, options=options)
-        if kind == "torrent":
-            priorities = torrent_options.get("priorities") or []
-            if isinstance(priorities, str):
-                priorities = json.loads(priorities)
-            self.store.save_torrent(download_id, metadata=torrent_options.get("metadata") or None,
-                                    priorities=[int(p) for p in priorities],
-                                    sequential=bool(torrent_options.get("sequential",
-                                                                        settings["torrent_sequential"])))
+        try:
+            self._save_torrent_options(download_id, kind, torrent_options, settings)
+        except Exception:
+            self.store.delete(download_id)  # all or nothing: no half-added downloads in the queue
+            raise
         if speed_limit:
             self.store.update(download_id, speed_limit=speed_limit)
         self._emit(self.on_added, download_id)
         self._emit_state(download_id)
         self._schedule()
         return download_id
+
+    def _save_torrent_options(self, download_id: int, kind: str, torrent_options: dict[str, Any],
+                              settings: dict[str, Any]) -> None:
+        if kind == "torrent":
+            priorities = torrent_options.get("priorities") or []
+            if isinstance(priorities, str):
+                priorities = json.loads(priorities)
+            metadata = torrent_options.get("metadata") or None
+            if isinstance(metadata, list):  # PyGObject clients unpack D-Bus byte arrays into lists
+                metadata = bytes(metadata)
+            self.store.save_torrent(download_id, metadata=metadata,
+                                    priorities=[int(p) for p in priorities],
+                                    sequential=bool(torrent_options.get("sequential",
+                                                                        settings["torrent_sequential"])))
 
     def pause(self, download_id: int) -> None:
         d = self._get(download_id)

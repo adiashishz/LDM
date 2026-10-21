@@ -79,3 +79,26 @@ def test_not_connected_without_daemon(bus_address):
     _, error = call(client.list)
     client.close()
     assert error.name == "NotRunning"
+
+
+def test_torrent_probe_and_add_through_glib_client(daemon, http_server, tmp_path):
+    """Regression: the .torrent bytes must survive daemon -> GUI -> daemon (PyGObject unpacks "ay" to a list)."""
+    lt = pytest.importorskip("libtorrent")
+    src = tmp_path / "pack"
+    src.mkdir()
+    (src / "one.txt").write_bytes(b"y" * 40_000)
+    fs = lt.file_storage()
+    lt.add_files(fs, str(src))
+    ct = lt.create_torrent(fs, 16 * 1024)
+    lt.set_piece_hashes(ct, str(tmp_path))
+    data = lt.bencode(ct.generate())
+    cfg, _ = http_server(data=b"", files={"/pack.torrent": data})
+    client = DaemonClient.for_address(daemon)
+    spin_until(lambda: client.connected)
+    info, error = call(client.probe_torrent, f"{cfg.base}/pack.torrent", {})
+    assert error is None and info["metadata"] == data
+    download_id, error = call(client.add, f"{cfg.base}/pack.torrent",
+                              {"kind": "torrent", "metadata": info["metadata"], "priorities": [1],
+                               "start": False})
+    client.close()
+    assert error is None and download_id == 1
