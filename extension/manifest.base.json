@@ -1,0 +1,61 @@
+{
+  "manifest_version": 3,
+  "name": "ldm — Download with ldm",
+  "short_name": "ldm",
+  "version": "0.1.0",
+  "description": "Send downloads, videos and links from the browser to the ldm download manager.",
+  "permissions": [
+    "downloads",
+    "webRequest",
+    "nativeMessaging",
+    "contextMenus",
+    "cookies",
+    "storage",
+    "scripting",
+    "notifications",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "ldm",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": false
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "firefox": {
+    "background": {
+      "scripts": [
+        "background.js"
+      ],
+      "type": "module"
+    },
+    "browser_specific_settings": {
+      "gecko": {
+        "id": "ldm@ldm.local",
+        "strict_min_version": "128.0"
+      }
+    }
+  },
+  "chromium": {
+    "background": {
+      "service_worker": "background.js",
+      "type": "module"
+    },
+    "minimum_chrome_version": "116",
+    "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAywMY2nOomvVtbmuBnD31GNxm+W9Lk9rV5U3pcsl5um+Lkv+Z7R4mja18p9h/AV7152dy0kStrbT9knipa7oK2I2Pqxn2Eh17veP/EzekSHc8kgqJfjM5Yn14I2bk9gowK6yGCNg+YwV+e64Iwz1+HPQc/por45pCnG+QfXIh3ordvxu8WssdA1iYyme1KZbzn7qX+GpmGnTTR8PplracMU9UBMoHGEqg3pzqCyrUpOyaMjiWoU5x024f5FhsRa5Pqc+cn412AJf3EF0RwICi/PsiyPo0xiKgUxQ+CJ4eMZWzKGWn+HhNcLXmoEJMqjWXe/+wMBNQLrJmAdVV1jWrfQIDAQAB"
+  }
+}

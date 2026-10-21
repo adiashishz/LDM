@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 
@@ -24,6 +25,7 @@ class Application(Adw.Application):
         self.client: DaemonClient | None = None
         self.downloads = DownloadList()
         self._was_running: set[int] = set()
+        self._pending_requests: list[dict] = []  # browser add-requests waiting for the daemon
 
     # --- lifecycle -------------------------------------------------------------------------
 
@@ -43,6 +45,7 @@ class Application(Adw.Application):
             ("about", self._about, [], None),
             ("show", lambda *_: self.activate(), [], None),
             ("open-file", self._open_file, [], GLib.VariantType.new("t")),
+            ("add-request", self._add_request, [], GLib.VariantType.new("s")),
             ("quit", lambda *_: self.quit(), ["<Control>q"], None),
         ):
             action = Gio.SimpleAction.new(name, param)
@@ -71,6 +74,31 @@ class Application(Adw.Application):
         self.lookup_action("add").set_enabled(self.client.connected)
         if self.client.connected:
             self.client.list(lambda rows, error: rows is not None and self.downloads.load(rows))
+            while self._pending_requests:
+                self._show_request(self._pending_requests.pop(0))
+
+    def _add_request(self, _action, parameter) -> None:
+        """From the browser bridge: open the add dialog prefilled (JSON: url, filename, headers)."""
+        try:
+            request = json.loads(parameter.get_string())
+        except ValueError:
+            return
+        self.window().present()
+        if self.client.connected:
+            self._show_request(request)
+            return
+        self._pending_requests.append(request)
+        GLib.timeout_add_seconds(10, self._request_timeout, request)
+
+    def _show_request(self, request: dict) -> None:
+        self.window().open_add_dialog(request.get("url", ""), name=request.get("filename") or "",
+                                      headers=request.get("headers") or {})
+
+    def _request_timeout(self, request: dict) -> bool:
+        if request in self._pending_requests:
+            self._pending_requests.remove(request)
+            self.window().toast("Could not reach the download service for the browser's download")
+        return GLib.SOURCE_REMOVE
 
     def refresh(self, download_id: int) -> None:
         self.client.get(download_id, lambda row, error: row is not None and self.downloads.upsert(row))

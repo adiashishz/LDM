@@ -43,7 +43,8 @@ def parse_limit(text: str) -> int | None:
 
 
 class AddDialog(Adw.Dialog):
-    def __init__(self, client: DaemonClient, url: str = "", on_added: Callable[[int], None] | None = None):
+    def __init__(self, client: DaemonClient, url: str = "", on_added: Callable[[int], None] | None = None,
+                 name: str = "", headers: dict[str, str] | None = None):
         super().__init__(title="Add Download", content_width=520)
         self.client = client
         self.on_added = on_added
@@ -63,7 +64,7 @@ class AddDialog(Adw.Dialog):
         self.url = Adw.EntryRow(title="Link", text=url)
         self.url.connect("changed", self._validate)
         self.url.connect("entry-activated", self._on_add)
-        self.name = Adw.EntryRow(title="File name (optional)")
+        self.name = Adw.EntryRow(title="File name (optional)", text=name or "")
         link.add(self.url)
         link.add(self.name)
 
@@ -84,11 +85,13 @@ class AddDialog(Adw.Dialog):
         headers = Adw.PreferencesGroup()
         expander = Adw.ExpanderRow(title="Request headers",
                                    subtitle="For links that need a login or a referring page")
-        self.referer = Adw.EntryRow(title="Referer")
-        self.cookie = Adw.PasswordEntryRow(title="Cookie")
-        self.user_agent = Adw.EntryRow(title="User-Agent")
+        headers = headers or {}
+        self.referer = Adw.EntryRow(title="Referer", text=headers.get("Referer", ""))
+        self.cookie = Adw.PasswordEntryRow(title="Cookie", text=headers.get("Cookie", ""))
+        self.user_agent = Adw.EntryRow(title="User-Agent", text=headers.get("User-Agent", ""))
         for row in (self.referer, self.cookie, self.user_agent):
             expander.add_row(row)
+        expander.set_expanded(bool(headers))
         headers.add(expander)
 
         for group in (link, options, headers):

@@ -144,6 +144,10 @@ def test_errors_are_retried_automatically(tmp_path, http_server):
     async def scenario():
         i = manager.add(url)
         await wait_state(manager, i, "done")
+        for _ in range(200):  # the store says done slightly before the manager emits it
+            if states[-1] == "done":
+                break
+            await asyncio.sleep(0.01)
         return i
 
     i = run(manager, scenario)

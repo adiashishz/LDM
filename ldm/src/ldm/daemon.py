@@ -38,9 +38,13 @@ async def serve(*, bus_address: str | None = None, db_path: Path | None = None,
                 loop.add_signal_handler(signum, stop.set)
         if ready:
             ready.set()
+        stopped = asyncio.create_task(stop.wait())
+        bus_lost = asyncio.create_task(bus.wait_for_disconnect())  # session ended: don't linger
         try:
-            await stop.wait()
+            await asyncio.wait({stopped, bus_lost}, return_when=asyncio.FIRST_COMPLETED)
         finally:
+            for task in (stopped, bus_lost):
+                task.cancel()
             await manager.shutdown()
     finally:
         bus.disconnect()

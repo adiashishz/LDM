@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+  <title>ldm</title>
+</head>
+<body>
+  <header>
+    <nav>
+      <button id="tab-media" class="tab active" type="button">Media <span id="media-count"></span></button>
+      <button id="tab-links" class="tab" type="button">Links</button>
+    </nav>
+    <button id="options" class="icon" type="button" title="Settings">⚙</button>
+  </header>
+  <p id="status" class="status">Checking ldm…</p>
+
+  <section id="view-media">
+    <ul id="media" class="list"></ul>
+    <p id="media-empty" class="empty" hidden>No media found on this page yet. Start playing a video and it appears here.</p>
+  </section>
+
+  <section id="view-links" hidden>
+    <div class="filters">
+      <select id="group">
+        <option value="files">All files</option>
+        <option value="video">Video</option>
+        <option value="audio">Audio</option>
+        <option value="image">Images</option>
+        <option value="archive">Archives</option>
+        <option value="document">Documents</option>
+        <option value="program">Programs</option>
+        <option value="all">Everything (incl. pages)</option>
+      </select>
+      <input id="search" type="search" placeholder="Filter">
+    </div>
+    <label class="select-all"><input id="select-all" type="checkbox"> Select all <span id="links-count"></span></label>
+    <ul id="links" class="list"></ul>
+    <p id="links-empty" class="empty" hidden>No matching links.</p>
+    <footer><button id="send-selected" class="primary" type="button" disabled>Download selected</button></footer>
+  </section>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

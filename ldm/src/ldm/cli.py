@@ -276,6 +276,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("host-rules", help="list host rules")
     sub.add_parser("watch", help="show live progress")
     sub.add_parser("daemon", help="run the download service")
+    p = sub.add_parser("install-browser-integration",
+                       help="install the browser bridge, D-Bus activation and desktop file")
+    p.add_argument("--browser", action="append", choices=["firefox", "chrome", "brave"],
+                   help="limit to these browsers (default: the ones found)")
+    p.add_argument("--uninstall", action="store_true")
+    p.add_argument("--dry-run", action="store_true", help="only show what would be written")
+    p.add_argument("--flatpak-override", action="store_true",
+                   help="also grant Flatpak browsers D-Bus access to ldm (otherwise printed)")
 
     p = sub.add_parser("get", help="download in the foreground without the daemon")
     p.add_argument("url", nargs="?")
@@ -291,6 +299,14 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_get(args)
     if args.command == "daemon":
         return cmd_daemon(args)
+    if args.command == "install-browser-integration":
+        from . import integration
+        if args.uninstall:
+            integration.uninstall(Path.home(), args.browser)
+        else:
+            integration.install(Path.home(), args.browser, dry_run=args.dry_run,
+                                flatpak_override=args.flatpak_override)
+        return 0
     from dbus_fast import DBusError
     try:
         return asyncio.run(client(args))

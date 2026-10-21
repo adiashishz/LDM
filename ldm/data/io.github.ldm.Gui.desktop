@@ -9,4 +9,4 @@ Terminal=false
 Categories=Network;FileTransfer;GTK;
 Keywords=download;manager;resume;
 StartupNotify=true
-DBusActivatable=false
+DBusActivatable=true

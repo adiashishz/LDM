@@ -11,3 +11,7 @@ __pycache__/
 
 # In-progress downloads
 *.part
+
+# Extension build output
+extension/dist/
+node_modules/

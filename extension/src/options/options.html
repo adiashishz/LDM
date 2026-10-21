@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ldm settings</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 13px/1.5 system-ui, sans-serif; margin: 16px; max-width: 520px; }
+    fieldset { border: 1px solid #8884; border-radius: 8px; margin: 0 0 14px; padding: 10px 14px; }
+    legend { font-weight: 600; padding: 0 4px; }
+    label { display: block; margin: 6px 0; }
+    input[type=text], input[type=number] { width: 100%; padding: 4px 6px; font: inherit; }
+    .hint { color: #888; font-size: 12px; margin: 0 0 4px 22px; }
+    #saved { color: #2ec27e; margin-left: 8px; }
+  </style>
+</head>
+<body>
+  <fieldset>
+    <legend>Browser downloads</legend>
+    <label><input id="intercept" type="checkbox"> Send browser downloads to ldm</label>
+    <label>Only for files of at least (MiB)<input id="minSize" type="number" min="0" step="0.5"></label>
+    <label>Never for these extensions<input id="excludeExtensions" type="text" placeholder="pdf, torrent"></label>
+    <label>Never for these sites<input id="excludeSites" type="text" placeholder="example.org"></label>
+  </fieldset>
+  <fieldset>
+    <legend>When sending a file</legend>
+    <label><input type="radio" name="mode" value="dialog"> Open ldm's add dialog to confirm</label>
+    <label><input type="radio" name="mode" value="direct"> Add to the queue right away</label>
+    <p class="hint">Several files from the Links tab are always added right away.</p>
+  </fieldset>
+  <fieldset>
+    <legend>Media on pages</legend>
+    <label><input id="sniff" type="checkbox"> List videos, audio, streams and subtitles found on pages</label>
+  </fieldset>
+  <button id="save" type="button">Save</button><span id="saved" hidden>Saved</span>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

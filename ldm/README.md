@@ -15,6 +15,28 @@ Working name. Design: [../notes/10-linux-design.md](../notes/10-linux-design.md)
   pure D-Bus client: closing it never stops downloads. If the service is not running, a banner
   offers to start it (it is never started automatically).
 
+- **M4:** browser integration. Extension in `../extension` (Firefox, Chrome, Brave): catches browser
+  downloads (size / extension / site rules) with cookies and referer, "Download with ldm" context
+  menus, media sniffer (video, audio, HLS/DASH playlists, subtitles) with a badge, and a Links tab to
+  pick files from the page. It talks to `ldm_nmhost.py` (standard library + `gdbus`, so it also runs
+  inside Flatpak browsers), which starts the daemon/GUI on demand via D-Bus activation and either
+  opens the add dialog prefilled or queues directly.
+
+## Browser integration
+
+```sh
+.venv/bin/ldm install-browser-integration          # host manifests, D-Bus activation, desktop file
+cd ../extension && python3 build.py                 # dist/firefox, dist/chromium
+```
+
+- Firefox: `about:debugging` → This Firefox → Load Temporary Add-on → `dist/firefox/manifest.json`
+  (release Firefox needs a signed add-on for a permanent install; that is a packaging step).
+- Chrome / Brave: `chrome://extensions` / `brave://extensions` → Developer mode → Load unpacked →
+  `dist/chromium` (fixed id `nfmeebgoiidgaakcafhniggapnipjhgp`).
+- Brave from Flatpak also needs D-Bus access to ldm (the installer prints this):
+  `flatpak override --user --talk-name=io.github.ldm --talk-name=io.github.ldm.Gui com.brave.Browser`
+- Re-run `ldm install-browser-integration` after updating ldm (it copies the host script).
+
 ## Use
 
 The GUI needs the distro's PyGObject, GTK 4 and libadwaita (Fedora: `python3-gobject gtk4
