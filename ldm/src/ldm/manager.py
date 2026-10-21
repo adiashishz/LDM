@@ -1053,6 +1053,9 @@ class Manager:
     async def _relocate(self, download_id: int, *, name: str | None = None, folder: Path | None = None) -> str:
         """Rename/move a download: the finished file, or the partial data of one that isn't running."""
         d = self._get(download_id)
+        task = self._tasks.get(download_id)
+        if task is not None and d.state == "done":  # finished, still closing its connections
+            await asyncio.wait([task], timeout=10)
         if self._active(download_id) or d.state in ("running", "processing", "seeding"):
             raise Busy("pause the download first" if d.state != "seeding" else "stop seeding first")
         folder = folder or d.dir
