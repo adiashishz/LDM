@@ -939,9 +939,10 @@ class Manager:
         self._emit_state(d.id)
 
     def _check_all_finished(self) -> None:
-        """1DM's "app behavior after all downloads are finished/paused/stopped/errored"."""
-        if self._closing or self._tasks:
-            return
+        """1DM's "app behavior after all downloads are finished": called when a download ends by itself
+        (finished or failed), never because the user paused one."""
+        if self._closing or self._tasks or self._retry_timers:
+            return  # still running, or a failed one will be retried
         action = self.store.get_settings()["finish_action"]
         if action == "nothing":
             return
@@ -1015,7 +1016,8 @@ class Manager:
         if d.state == "done":
             self._after_finish(download_id)
         self._schedule()
-        self._check_all_finished()
+        if d.state in ("done", "seeding", "error", "expired", "changed"):  # ended by itself, not paused
+            self._check_all_finished()
 
     async def _condition_loop(self) -> None:
         """Schedule windows open and close with the clock: re-check twice a minute."""
@@ -1051,6 +1053,9 @@ class Manager:
     async def _relocate(self, download_id: int, *, name: str | None = None, folder: Path | None = None) -> str:
         """Rename/move a download: the finished file, or the partial data of one that isn't running."""
         d = self._get(download_id)
+        task = self._tasks.get(download_id)
+        if task is not None and d.state == "done":  # finished, still closing its connections
+            await asyncio.wait([task], timeout=10)
         if self._active(download_id) or d.state in ("running", "processing", "seeding"):
             raise Busy("pause the download first" if d.state != "seeding" else "stop seeding first")
         folder = folder or d.dir

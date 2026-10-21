@@ -98,3 +98,29 @@ def test_countdown_suspends_unless_cancelled(bus_address):
         services.disconnect()
 
     asyncio.run(scenario())
+
+
+def test_pausing_never_counts_as_all_finished(tmp_path, http_server):
+    """Regression: with "Quit LDM" chosen, pausing the only download quit LDM."""
+    data = payload(3_000_000)
+    cfg, url = http_server(data=data, delay=0.02)
+    store = Store(tmp_path / "s.db")
+    store.set_setting("download_dir", str(tmp_path))
+    store.set_setting("finish_action", "quit")
+    manager = Manager(store)
+    reported = []
+    manager.on_all_finished = reported.append
+
+    async def scenario():
+        i = manager.add(url)
+        await wait_state(manager, i, "running")
+        manager.pause(i)
+        await wait_state(manager, i, "paused")
+        await asyncio.sleep(0.1)
+        assert reported == []  # paused, not finished
+        manager.resume(i)
+        await wait_state(manager, i, "done", timeout=30)
+        await asyncio.sleep(0.05)
+
+    run(manager, scenario)
+    assert reported == ["quit"]  # finishing by itself still triggers it
