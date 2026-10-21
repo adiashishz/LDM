@@ -8,7 +8,7 @@ Everything here runs under **your** Fedora account; nothing is published until y
 1. **Pick a license.** `ldm.spec` has `License: LicenseRef-Not-Yet-Chosen` and the AppStream
    file has no `<project_license>`. Set both, and add a `LICENSE` file at the repository root.
 2. **Give the project a home** (e.g. a GitHub/Codeberg repository), then add `URL:` to the spec
-   and `<url type="homepage">` to `data/io.github.ldm.Gui.metainfo.xml`.
+   and `<url type="homepage">` to `data/io.github.adiashishz.LDM.metainfo.xml`.
 3. Build once locally — this runs the tests and rpmlint the same way COPR will:
 
    ```

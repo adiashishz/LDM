@@ -15,10 +15,10 @@ from typing import Callable
 from . import nmhost
 from .busnames import BUS_NAME
 
-HOST_NAME = "io.github.ldm"  # native messaging host name used by the extension
-FIREFOX_EXTENSION_ID = "ldm@ldm.local"
+HOST_NAME = "io.github.adiashishz.ldm"  # native messaging host name used by the extension
+FIREFOX_EXTENSION_ID = "ldm@adiashishz.github.io"
 CHROME_EXTENSION_ID = "nfmeebgoiidgaakcafhniggapnipjhgp"  # derived from "key" in extension/manifest.base.json
-GUI_ID = "io.github.ldm.Gui"
+GUI_ID = "io.github.adiashishz.LDM"
 BRAVE_FLATPAK = "com.brave.Browser"
 TORRENT_TYPES = ["x-scheme-handler/magnet", "application/x-bittorrent"]
 FLATPAK_TALK = [f"--talk-name={BUS_NAME}", f"--talk-name={GUI_ID}"]
@@ -87,7 +87,7 @@ def activation_files(data: Path, config: Path) -> dict[Path, str]:
             f"[Service]\nType=dbus\nBusName={BUS_NAME}\nExecStart={ldm} daemon\nRestart=on-failure\n\n"
             "[Install]\nWantedBy=default.target\n"),
         # GNOME (Wayland) can't watch the clipboard from the background; the window asks on focus instead.
-        config / "autostart" / "io.github.ldm.ClipboardWatch.desktop": (
+        config / "autostart" / "io.github.adiashishz.LDM.ClipboardWatch.desktop": (
             "[Desktop Entry]\nType=Application\nName=LDM clipboard watcher\n"
             f"Comment=Offer to download links you copy\nExec={ldm} clipboard-watch\nIcon={GUI_ID}\n"
             "NoDisplay=true\nNotShowIn=GNOME;\nX-GNOME-Autostart-enabled=false\n"),

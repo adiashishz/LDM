@@ -1,4 +1,4 @@
 # D-Bus activation of the LDM window (DBusActivatable desktop file, browser bridge, notifications).
 [D-BUS Service]
-Name=io.github.ldm.Gui
+Name=io.github.adiashishz.LDM
 Exec=/usr/bin/ldm-gui --gapplication-service

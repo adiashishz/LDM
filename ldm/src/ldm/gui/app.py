@@ -14,7 +14,7 @@ from .model import DownloadList
 from .preferences import PreferencesDialog
 from .window import MainWindow
 
-APP_ID = "io.github.ldm.Gui"  # must differ from the daemon's bus name io.github.ldm
+APP_ID = "io.github.adiashishz.LDM"  # must differ from the daemon's bus name io.github.adiashishz.LDM.Service
 NOTIFY_STATES = {"done": "Download finished", "error": "Download failed", "expired": "Download link expired"}
 
 

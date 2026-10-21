@@ -108,7 +108,7 @@ def test_ping_and_direct_add(daemon, http_server, tmp_path):
 FAKE_GUI = textwrap.dedent("""
     import sys
     from gi.repository import Gio, GLib
-    app = Gio.Application(application_id="io.github.ldm.Gui", flags=Gio.ApplicationFlags.IS_SERVICE)
+    app = Gio.Application(application_id="io.github.adiashishz.LDM", flags=Gio.ApplicationFlags.IS_SERVICE)
     action = Gio.SimpleAction.new("add-request", GLib.VariantType.new("s"))
     def got(_a, param):
         open(sys.argv[1], "w").write(param.get_string())
@@ -144,8 +144,8 @@ def test_daemon_is_started_by_dbus_activation(tmp_path, http_server, monkeypatch
     """No daemon running: the host's add() starts it through an activation file."""
     services = tmp_path / "data" / "dbus-1" / "services"
     services.mkdir(parents=True)
-    (services / "io.github.ldm.service").write_text(
-        f"[D-BUS Service]\nName=io.github.ldm\nExec={sys.executable} -m ldm --db {tmp_path / 'auto.db'} daemon\n")
+    (services / "io.github.adiashishz.LDM.Service.service").write_text(
+        f"[D-BUS Service]\nName=io.github.adiashishz.LDM.Service\nExec={sys.executable} -m ldm --db {tmp_path / 'auto.db'} daemon\n")
     bus = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--print-address"],
                            stdout=subprocess.PIPE, text=True,
                            env={**os.environ, "XDG_DATA_HOME": str(tmp_path / "data")})
@@ -163,7 +163,7 @@ def test_daemon_is_started_by_dbus_activation(tmp_path, http_server, monkeypatch
     finally:
         pid = subprocess.run(["gdbus", "call", "--session", "--dest", "org.freedesktop.DBus", "--object-path",
                               "/org/freedesktop/DBus", "--method",
-                              "org.freedesktop.DBus.GetConnectionUnixProcessID", "io.github.ldm"],
+                              "org.freedesktop.DBus.GetConnectionUnixProcessID", "io.github.adiashishz.LDM.Service"],
                              capture_output=True, text=True).stdout
         bus.terminate()
         bus.wait()

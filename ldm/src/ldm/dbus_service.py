@@ -1,4 +1,4 @@
-"""D-Bus interface io.github.ldm.Manager1 exposing the download manager.
+"""D-Bus interface io.github.adiashishz.LDM.Manager1 exposing the download manager.
 
 Annotations are D-Bus signature strings read by dbus-fast, so this module must not use
 `from __future__ import annotations`.

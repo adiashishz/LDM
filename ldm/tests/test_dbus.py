@@ -67,7 +67,7 @@ def test_errors_are_dbus_errors(daemon):
             bus.disconnect()
         return not_found.value.type, bad_url.value.type, bad_setting.value.type
 
-    assert asyncio.run(go()) == ("io.github.ldm.Error.NotFound",) + ("io.github.ldm.Error.InvalidArgument",) * 2
+    assert asyncio.run(go()) == ("io.github.adiashishz.LDM.Error.NotFound",) + ("io.github.adiashishz.LDM.Error.InvalidArgument",) * 2
 
 
 def test_second_daemon_refuses_to_start(daemon, tmp_path):

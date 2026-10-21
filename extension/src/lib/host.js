@@ -2,7 +2,7 @@
 
 import { api } from "./api.js";
 
-const HOST_NAME = "io.github.ldm";
+const HOST_NAME = "io.github.adiashishz.ldm";
 const TIMEOUT_MS = 40000;  // the host may have to start the daemon/GUI first
 const IDLE_MS = 30000;     // drop the port when idle so the background can sleep
 

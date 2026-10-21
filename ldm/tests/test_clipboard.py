@@ -55,9 +55,9 @@ def test_watcher_offers_new_links_and_opens_the_add_dialog(bus_address):
         services = await MessageBus(bus_address=bus_address).connect()
         notifications, gui = FakeNotifications(), FakeGui()
         services.export("/org/freedesktop/Notifications", notifications)
-        services.export("/io/github/ldm/Gui", gui)
+        services.export("/io/github/adiashishz/LDM", gui)
         await services.request_name("org.freedesktop.Notifications")
-        await services.request_name("io.github.ldm.Gui")
+        await services.request_name("io.github.adiashishz.LDM")
         copied: asyncio.Queue = asyncio.Queue()
 
         async def texts():

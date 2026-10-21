@@ -59,8 +59,8 @@ def test_countdown_suspends_unless_cancelled(bus_address):
         notifications, logind, gui = FakeNotifications(), FakeLogind(), FakeGui()
         services.export("/org/freedesktop/Notifications", notifications)
         services.export("/org/freedesktop/login1", logind)
-        services.export("/io/github/ldm/Gui", gui)
-        for name in ("org.freedesktop.Notifications", "org.freedesktop.login1", "io.github.ldm.Gui"):
+        services.export("/io/github/adiashishz/LDM", gui)
+        for name in ("org.freedesktop.Notifications", "org.freedesktop.login1", "io.github.adiashishz.LDM"):
             await services.request_name(name)
         bus = await MessageBus(bus_address=bus_address).connect()
         await bus.call(__import__("dbus_fast").Message(

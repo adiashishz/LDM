@@ -63,9 +63,9 @@ cd ldm
 install -Dm644 -t %{buildroot}%{_datadir}/ldm/extension ../extension/dist/*.zip
 
 %check
-desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.ldm.Gui.desktop
-desktop-file-validate %{buildroot}%{_sysconfdir}/xdg/autostart/io.github.ldm.ClipboardWatch.desktop
-appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/io.github.ldm.Gui.metainfo.xml
+desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.adiashishz.LDM.desktop
+desktop-file-validate %{buildroot}%{_sysconfdir}/xdg/autostart/io.github.adiashishz.LDM.ClipboardWatch.desktop
+appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/io.github.adiashishz.LDM.metainfo.xml
 %if %{with check}
 cd ldm
 # GUI tests need a display; everything else runs offline against local servers and private buses.
@@ -82,24 +82,24 @@ cd ldm
 %doc ldm/README.md
 %{_bindir}/ldm
 %{_bindir}/ldm-gui
-%{_datadir}/applications/io.github.ldm.Gui.desktop
-%{_metainfodir}/io.github.ldm.Gui.metainfo.xml
-%{_datadir}/icons/hicolor/scalable/apps/io.github.ldm.Gui.svg
-%{_datadir}/dbus-1/services/io.github.ldm.service
-%{_datadir}/dbus-1/services/io.github.ldm.Gui.service
+%{_datadir}/applications/io.github.adiashishz.LDM.desktop
+%{_metainfodir}/io.github.adiashishz.LDM.metainfo.xml
+%{_datadir}/icons/hicolor/scalable/apps/io.github.adiashishz.LDM.svg
+%{_datadir}/dbus-1/services/io.github.adiashishz.LDM.Service.service
+%{_datadir}/dbus-1/services/io.github.adiashishz.LDM.service
 %{_userunitdir}/ldm.service
-%config(noreplace) %{_sysconfdir}/xdg/autostart/io.github.ldm.ClipboardWatch.desktop
+%config(noreplace) %{_sysconfdir}/xdg/autostart/io.github.adiashishz.LDM.ClipboardWatch.desktop
 %dir %{_libexecdir}/ldm
 %{_libexecdir}/ldm/ldm_nmhost.py
 %dir %{_prefix}/lib/mozilla
 %dir %{_prefix}/lib/mozilla/native-messaging-hosts
-%{_prefix}/lib/mozilla/native-messaging-hosts/io.github.ldm.json
+%{_prefix}/lib/mozilla/native-messaging-hosts/io.github.adiashishz.ldm.json
 %dir %{_sysconfdir}/opt/chrome
 %dir %{_sysconfdir}/opt/chrome/native-messaging-hosts
-%{_sysconfdir}/opt/chrome/native-messaging-hosts/io.github.ldm.json
+%{_sysconfdir}/opt/chrome/native-messaging-hosts/io.github.adiashishz.ldm.json
 %dir %{_sysconfdir}/chromium
 %dir %{_sysconfdir}/chromium/native-messaging-hosts
-%{_sysconfdir}/chromium/native-messaging-hosts/io.github.ldm.json
+%{_sysconfdir}/chromium/native-messaging-hosts/io.github.adiashishz.ldm.json
 %{_datadir}/ldm/
 
 %changelog

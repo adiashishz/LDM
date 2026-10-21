@@ -1,10 +1,10 @@
 # LDM — Linux download manager (v1, Python)
 
-Command `ldm`, app ID `io.github.ldm.Gui`. Design: [../notes/10-linux-design.md](../notes/10-linux-design.md).
+Command `ldm`, app ID `io.github.adiashishz.LDM`. Design: [../notes/10-linux-design.md](../notes/10-linux-design.md).
 
 - **M1:** engine — multi-part HTTP(S) into one pre-allocated file, dynamic segmentation, fsync-safe
   resume state in SQLite, retries, changed-file and expired-link detection.
-- **M2 (this):** background daemon on D-Bus (`io.github.ldm`, `/io/github/ldm/Manager1`) with a
+- **M2 (this):** background daemon on D-Bus (`io.github.adiashishz.LDM.Service`, `/io/github/adiashishz/LDM/Manager1`) with a
   queue, parallel-download limit, per-host rules, global/per-download speed limits, auto-retry,
   link refresh, and restart recovery. The CLI is a client of the daemon.
 
@@ -46,7 +46,7 @@ cd ../extension && python3 build.py                 # dist/firefox, dist/chromiu
 - Chrome / Brave: `chrome://extensions` / `brave://extensions` → Developer mode → Load unpacked →
   `dist/chromium` (fixed id `nfmeebgoiidgaakcafhniggapnipjhgp`).
 - Brave from Flatpak also needs D-Bus access to ldm (the installer prints this):
-  `flatpak override --user --talk-name=io.github.ldm --talk-name=io.github.ldm.Gui com.brave.Browser`
+  `flatpak override --user --talk-name=io.github.adiashishz.LDM.Service --talk-name=io.github.adiashishz.LDM com.brave.Browser`
 - Re-run `ldm install-browser-integration` after updating ldm (it copies the host script).
 
 ## Use

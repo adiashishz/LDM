@@ -54,7 +54,7 @@ def test_notifications_only_without_gui(bus_address, tmp_path):
         services = await MessageBus(bus_address=bus_address).connect()
         notifications, gui = FakeNotifications(), FakeGui()
         services.export("/org/freedesktop/Notifications", notifications)
-        services.export("/io/github/ldm/Gui", gui)
+        services.export("/io/github/adiashishz/LDM", gui)
         await services.request_name("org.freedesktop.Notifications")
 
         manager = Manager(Store(tmp_path / "state.db"))
@@ -67,8 +67,8 @@ def test_notifications_only_without_gui(bus_address, tmp_path):
         first = manager.add("http://127.0.0.1:9/movie.mkv", name="movie.mkv", start=False)
         manager.on_state(first, "done", "")
         await until(lambda: notifications.shown)
-        assert notifications.shown[0] == ("LDM", "io.github.ldm.Gui", "Download finished", "movie.mkv — 0 B",
-                                          ["default", "Show in LDM", "open", "Open"], "io.github.ldm.Gui")
+        assert notifications.shown[0] == ("LDM", "io.github.adiashishz.LDM", "Download finished", "movie.mkv — 0 B",
+                                          ["default", "Show in LDM", "open", "Open"], "io.github.adiashishz.LDM")
         notifications.ActionInvoked(1, "open")
         await until(lambda: opened)
         assert opened == [str(tmp_path / "movie.mkv")]
@@ -76,7 +76,7 @@ def test_notifications_only_without_gui(bus_address, tmp_path):
         manager.on_state(first, "error", "HTTP 404")
         await until(lambda: len(notifications.shown) == 2)
         assert notifications.shown[1][2:4] == ("Download failed", "movie.mkv: HTTP 404")
-        await services.request_name("io.github.ldm.Gui")  # what D-Bus activation would do
+        await services.request_name("io.github.adiashishz.LDM")  # what D-Bus activation would do
         notifications.ActionInvoked(2, "default")
         await until(lambda: gui.actions)
         assert gui.actions == ["show"]
@@ -84,7 +84,7 @@ def test_notifications_only_without_gui(bus_address, tmp_path):
         manager.on_state(first, "done", "")  # the window is running now: it notifies by itself
         await asyncio.sleep(0.2)
         assert len(notifications.shown) == 2
-        await services.release_name("io.github.ldm.Gui")
+        await services.release_name("io.github.adiashishz.LDM")
         manager.store.set_setting("notify_when_closed", False)
         manager.on_state(first, "done", "")
         await asyncio.sleep(0.2)

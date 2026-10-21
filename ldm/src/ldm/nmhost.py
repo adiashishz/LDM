@@ -16,11 +16,11 @@ import sys
 
 VERSION = "0.1.0"
 # Keep in sync with ldm/busnames.py (checked by tests/test_nmhost.py).
-BUS_NAME = "io.github.ldm"
-OBJECT_PATH = "/io/github/ldm/Manager1"
-INTERFACE = "io.github.ldm.Manager1"
-GUI_NAME = "io.github.ldm.Gui"
-GUI_PATH = "/io/github/ldm/Gui"
+BUS_NAME = "io.github.adiashishz.LDM.Service"
+OBJECT_PATH = "/io/github/adiashishz/LDM/Manager1"
+INTERFACE = "io.github.adiashishz.LDM.Manager1"
+GUI_NAME = "io.github.adiashishz.LDM"
+GUI_PATH = "/io/github/adiashishz/LDM"
 MAX_MESSAGE = 1024 * 1024
 GDBUS_TIMEOUT = 30
 

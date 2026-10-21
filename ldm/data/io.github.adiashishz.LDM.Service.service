@@ -1,6 +1,6 @@
 # D-Bus activation: lets clients start the daemon on demand.
 # Installed by packaging/install-data.py (the per-user installer writes its own copy).
 [D-BUS Service]
-Name=io.github.ldm
+Name=io.github.adiashishz.LDM.Service
 Exec=/usr/bin/ldm daemon
 SystemdService=ldm.service

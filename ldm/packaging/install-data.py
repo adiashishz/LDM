@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
-ICON = ROOT / "src/ldm/resources/io.github.ldm.Gui.svg"  # in the package: the per-user installer needs it
+ICON = ROOT / "src/ldm/resources/io.github.adiashishz.LDM.svg"  # in the package: the per-user installer needs it
 sys.path.insert(0, str(ROOT / "src"))
 from ldm.integration import CHROME_EXTENSION_ID, FIREFOX_EXTENSION_ID, HOST_NAME  # noqa: E402
 
@@ -47,13 +47,13 @@ def main() -> None:
         return (DATA / name).read_text().replace("/usr/bin/", f"{bindir}/")
 
     share = prefix / "share"
-    install(DATA / "io.github.ldm.Gui.desktop", share / "applications/io.github.ldm.Gui.desktop")
-    install(DATA / "io.github.ldm.Gui.metainfo.xml", share / "metainfo/io.github.ldm.Gui.metainfo.xml")
-    install(ICON, share / "icons/hicolor/scalable/apps/io.github.ldm.Gui.svg")
-    install(None, share / "dbus-1/services/io.github.ldm.service", with_prefix("io.github.ldm.service"))
-    install(None, share / "dbus-1/services/io.github.ldm.Gui.service", with_prefix("io.github.ldm.Gui.service"))
+    install(DATA / "io.github.adiashishz.LDM.desktop", share / "applications/io.github.adiashishz.LDM.desktop")
+    install(DATA / "io.github.adiashishz.LDM.metainfo.xml", share / "metainfo/io.github.adiashishz.LDM.metainfo.xml")
+    install(ICON, share / "icons/hicolor/scalable/apps/io.github.adiashishz.LDM.svg")
+    install(None, share / "dbus-1/services/io.github.adiashishz.LDM.Service.service", with_prefix("io.github.adiashishz.LDM.Service.service"))
+    install(None, share / "dbus-1/services/io.github.adiashishz.LDM.service", with_prefix("io.github.adiashishz.LDM.service"))
     install(None, prefix / "lib/systemd/user/ldm.service", with_prefix("ldm.service"))
-    install(DATA / "io.github.ldm.ClipboardWatch.desktop", etc / "xdg/autostart/io.github.ldm.ClipboardWatch.desktop")
+    install(DATA / "io.github.adiashishz.LDM.ClipboardWatch.desktop", etc / "xdg/autostart/io.github.adiashishz.LDM.ClipboardWatch.desktop")
     if args.no_browsers:
         return
 

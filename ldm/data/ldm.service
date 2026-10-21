@@ -4,7 +4,7 @@ Description=LDM download manager
 
 [Service]
 Type=dbus
-BusName=io.github.ldm
+BusName=io.github.adiashishz.LDM.Service
 ExecStart=/usr/bin/ldm daemon
 Restart=on-failure
 

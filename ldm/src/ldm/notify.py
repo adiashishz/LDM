@@ -1,6 +1,6 @@
 """Desktop notifications from the daemon while the LDM window isn't running (1DM's download notifications).
 
-The GUI notifies on its own when it runs; the daemon only speaks up when `io.github.ldm.Gui` has no
+The GUI notifies on its own when it runs; the daemon only speaks up when `io.github.adiashishz.LDM` has no
 owner on the bus. "Open" opens the file directly, clicking the notification shows LDM.
 """
 
@@ -20,8 +20,8 @@ from .manager import Manager
 
 log = logging.getLogger(__name__)
 
-GUI_ID = "io.github.ldm.Gui"
-GUI_PATH = "/io/github/ldm/Gui"
+GUI_ID = "io.github.adiashishz.LDM"
+GUI_PATH = "/io/github/adiashishz/LDM"
 NOTIFICATIONS = ("org.freedesktop.Notifications", "/org/freedesktop/Notifications", "org.freedesktop.Notifications")
 NOTIFY_STATES = {"done", "seeding", "error", "expired"}
 

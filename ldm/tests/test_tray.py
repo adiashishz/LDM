@@ -42,8 +42,8 @@ def test_tray_registers_shows_progress_and_runs_menu_items(bus_address):
 
         watcher, gui = FakeWatcher(), FakeGui()
         host.export("/StatusNotifierWatcher", watcher)
-        host.export("/io/github/ldm/Gui", gui)
-        await host.request_name("io.github.ldm.Gui")
+        host.export("/io/github/adiashishz/LDM", gui)
+        await host.request_name("io.github.adiashishz.LDM")
         await host.request_name("org.kde.StatusNotifierWatcher")  # the host appears later: LDM registers
         await until(lambda: watcher.items)
         assert watcher.items == [bus.unique_name]
@@ -58,7 +58,7 @@ def test_tray_registers_shows_progress_and_runs_menu_items(bus_address):
             return (await call(ITEM_PATH, "org.freedesktop.DBus.Properties", "Get", "ss",
                                ["org.kde.StatusNotifierItem", name]))[0].value
 
-        assert await prop("Status") == "Passive" and await prop("IconName") == "io.github.ldm.Gui"
+        assert await prop("Status") == "Passive" and await prop("IconName") == "io.github.adiashishz.LDM"
         progress[0] = (2, 300, 1000, 1024.0)
         tray.update()
         assert await prop("Status") == "Active"
