@@ -29,6 +29,8 @@ BuildRequires:  rb_libtorrent-python3
 Requires:       python3dist(pygobject)
 Requires:       gtk4
 Requires:       libadwaita
+# GTK's typelibs import cairo-1.0.typelib, which only this package ships (found on a clean install).
+Requires:       gobject-introspection
 Requires:       (ffmpeg-free or ffmpeg)
 # The browser bridge talks to the service with gdbus.
 Requires:       /usr/bin/gdbus
