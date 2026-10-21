@@ -15,6 +15,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def private_folders(tmp_path_factory, monkeypatch):
+    """Never the user's real folders: downloads without an explicit folder (and backups) go here.
+    Daemons the tests start, in-process or as subprocesses, inherit these."""
+    folders = tmp_path_factory.mktemp("user-folders")
+    monkeypatch.setenv("XDG_DOWNLOAD_DIR", str(folders / "Downloads"))
+    monkeypatch.setenv("XDG_DOCUMENTS_DIR", str(folders / "Documents"))
+    return folders
+
+
 @dataclass
 class ServerConfig:
     data: bytes
