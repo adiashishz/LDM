@@ -64,7 +64,7 @@ class StatusItem(ServiceInterface):
 
     @dbus_property(access=PropertyAccess.READ)
     def IconName(self) -> "s":
-        return GUI_ID
+        return f"{GUI_ID}-symbolic"  # monochrome: fits light and dark panels
 
     @dbus_property(access=PropertyAccess.READ)
     def IconPixmap(self) -> "a(iiay)":

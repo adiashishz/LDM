@@ -72,6 +72,7 @@ def executable(name: str) -> Path:
 
 
 ICON = Path(__file__).parent / "resources" / f"{GUI_ID}.svg"
+SYMBOLIC_ICON = Path(__file__).parent / "resources" / f"{GUI_ID}-symbolic.svg"  # tray
 
 
 def activation_files(data: Path, config: Path) -> dict[Path, str]:
@@ -79,6 +80,7 @@ def activation_files(data: Path, config: Path) -> dict[Path, str]:
     services = data / "dbus-1" / "services"
     return {
         data / "icons" / "hicolor" / "scalable" / "apps" / f"{GUI_ID}.svg": ICON.read_text(),
+        data / "icons" / "hicolor" / "symbolic" / "apps" / f"{GUI_ID}-symbolic.svg": SYMBOLIC_ICON.read_text(),
         # Activation goes through systemd, so a daemon started by a client and one started at login are the same.
         services / f"{BUS_NAME}.service": (f"[D-BUS Service]\nName={BUS_NAME}\nExec={ldm} daemon\n"
                                            f"SystemdService={SYSTEMD_UNIT}\n"),
