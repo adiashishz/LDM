@@ -16,7 +16,8 @@ from .manager import Busy, InvalidArgument, Manager, NotFound, SizeMismatch
 
 ADD_OPTIONS = {"dir", "name", "connections", "headers", "speed_limit", "start",
                "kind", "format", "format_label", "subtitles", "title", "page_url",
-               "priorities", "sequential", "metadata", "peers"}
+               "priorities", "sequential", "metadata", "peers", "scheduled", "unmetered_only",
+               "schedule_start", "schedule_stop", "schedule_days"}
 
 
 def to_variant(value: Any) -> Variant:
@@ -128,6 +129,12 @@ class ManagerInterface(ServiceInterface):
     def TorrentDetails(self, download_id: "t") -> "a{sv}":
         with _errors():
             return to_vardict(self.manager.torrent_details(download_id))
+
+    @method()
+    def SetSchedule(self, download_id: "t", scheduled: "b", window: "a{ss}"):
+        """`window`: schedule_start / schedule_stop / schedule_days for its own times; {} = the defaults."""
+        with _errors():
+            self.manager.set_schedule(download_id, scheduled, window)
 
     @method()
     def SetSpeedLimit(self, download_id: "t", bytes_per_second: "t"):

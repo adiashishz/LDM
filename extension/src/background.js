@@ -33,7 +33,7 @@ async function itemFor({ url, filename = "", referer = "", size = null, pageUrl 
 async function sendOne(target) {
   const settings = await getSettings();
   const reply = await request({ cmd: "add", mode: settings.mode, ...(await itemFor(target)) });
-  if (settings.mode === "direct") notify("Sent to ldm", target.filename || filenameFromUrl(target.url) || target.url);
+  if (settings.mode === "direct") notify("Sent to LDM", target.filename || filenameFromUrl(target.url) || target.url);
   return reply;
 }
 
@@ -41,7 +41,7 @@ async function sendMany(targets) {
   const items = await Promise.all(targets.map(itemFor));
   const reply = await request({ cmd: "add_many", items });
   const failed = reply.results.filter((r) => r.error);
-  notify("Sent to ldm", `${reply.results.length - failed.length} of ${reply.results.length} added`
+  notify("Sent to LDM", `${reply.results.length - failed.length} of ${reply.results.length} added`
     + (failed.length ? ` — ${failed[0].error}` : ""));
   return reply;
 }
@@ -52,7 +52,7 @@ function notify(title, message) {
 }
 
 function reportError(error) {
-  notify("ldm", error instanceof HostError ? error.message : `Could not send to ldm: ${error}`);
+  notify("LDM", error instanceof HostError ? error.message : `Could not send to LDM: ${error}`);
 }
 
 // --- download interception -----------------------------------------------------------------
@@ -84,12 +84,12 @@ api.downloads.onCreated.addListener(async (item) => {
 
 async function createMenus() {
   await api.contextMenus.removeAll(); // both browsers return a promise in MV3
-  api.contextMenus.create({ id: "ldm-link", title: "Download link with ldm", contexts: ["link"] });
-  api.contextMenus.create({ id: "ldm-media", title: "Download with ldm", contexts: ["image", "video", "audio"] });
-  api.contextMenus.create({ id: "ldm-page", title: "Download links on this page with ldm…", contexts: ["page"] });
-  api.contextMenus.create({ id: "ldm-video-page", title: "Download video from this page with ldm",
+  api.contextMenus.create({ id: "ldm-link", title: "Download link with LDM", contexts: ["link"] });
+  api.contextMenus.create({ id: "ldm-media", title: "Download with LDM", contexts: ["image", "video", "audio"] });
+  api.contextMenus.create({ id: "ldm-page", title: "Download links on this page with LDM…", contexts: ["page"] });
+  api.contextMenus.create({ id: "ldm-video-page", title: "Download video from this page with LDM",
     contexts: ["page", "video", "audio"] });
-  api.contextMenus.create({ id: "ldm-video-link", title: "Download video from link with ldm", contexts: ["link"] });
+  api.contextMenus.create({ id: "ldm-video-link", title: "Download video from link with LDM", contexts: ["link"] });
 }
 
 api.runtime.onInstalled.addListener(createMenus);

@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "ldm — Download with ldm",
-  "short_name": "ldm",
+  "name": "LDM — Download with LDM",
+  "short_name": "LDM",
   "version": "0.1.0",
-  "description": "Send downloads, videos and links from the browser to the ldm download manager.",
+  "description": "Send downloads, videos and links from the browser to the LDM download manager.",
   "permissions": [
     "downloads",
     "webRequest",
@@ -20,7 +20,7 @@
   ],
   "action": {
     "default_popup": "popup/popup.html",
-    "default_title": "ldm",
+    "default_title": "LDM",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png"
@@ -46,7 +46,8 @@
     "browser_specific_settings": {
       "gecko": {
         "id": "ldm@ldm.local",
-        "strict_min_version": "128.0"
+        "strict_min_version": "128.0",
+        "data_collection_permissions": { "required": ["none"] }
       }
     }
   },

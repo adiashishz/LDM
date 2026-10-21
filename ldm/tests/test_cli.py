@@ -29,3 +29,19 @@ def test_parse_rate(text, expected):
 def test_file_priorities():
     assert file_priorities("0,2") == [1, 0, 1]
     assert file_priorities("3") == [0, 0, 0, 1]
+
+
+def test_schedule_commands_against_daemon(daemon, monkeypatch, capsys):
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", daemon)  # the test daemon's private bus
+    assert main(["settings", "schedule_start", "01:30"]) == 0
+    assert main(["settings", "schedule_speed_limit", "2M"]) == 0
+    assert main(["add", "http://127.0.0.1:9/night.iso", "--scheduled", "--unmetered-only", "--paused"]) == 0
+    assert main(["add", "http://127.0.0.1:9/weekend.iso", "--start", "10:00", "--days", "sat,sun", "--paused"]) == 0
+    assert main(["schedule", "1", "on", "--stop", "05:00"]) == 0
+    assert main(["schedule", "2", "off"]) == 0
+    assert main(["settings", "schedule_start", "25:00"]) == 1
+    assert main(["schedule", "1", "on", "--days", "funday"]) == 1
+    capsys.readouterr()
+    assert main(["settings"]) == 0
+    out = capsys.readouterr().out
+    assert "schedule_start = 01:30" in out and "schedule_speed_limit = 2097152" in out

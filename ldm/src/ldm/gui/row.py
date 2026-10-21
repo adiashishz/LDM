@@ -40,6 +40,7 @@ ACTIONS = {
     "copy-link": ("Copy Link", "copy_link", None),
     "set-url": ("Set New Link…", "ask_new_url", {"paused", "error", "expired", "changed", "queued"}),
     "limit": ("Speed Limit…", "ask_speed_limit", {"queued", "running", "paused", "error"}),
+    "schedule": ("Schedule…", "ask_schedule", {"queued", "running", "paused", "error"}),
     "move-top": ("Move to Top", "move_to_top", {"queued", "paused"}),
     "remove": ("Remove from List", "remove", None),
     "delete": ("Remove and Delete File", "remove_and_delete", None),

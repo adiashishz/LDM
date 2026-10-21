@@ -12,6 +12,7 @@ import json
 import logging
 import shutil
 from collections import Counter
+from datetime import datetime
 from functools import partial
 from typing import Any, Callable
 from urllib.parse import urlsplit
@@ -23,6 +24,8 @@ from .engine import DownloadError, Downloader, new_client, probe
 from .media import MediaDownloader
 from .torrent import TorrentDownloader, TorrentSession
 from .ratelimit import TokenBucket
+from .schedule import describe_start, in_window, next_start, parse_days, parse_time
+from .system import Conditions
 from .store import DEFAULT_SETTINGS, DownloadRow, HostRule, Store
 
 RESUMABLE_STATES = {"paused", "error", "expired", "changed"}
@@ -30,6 +33,9 @@ MAX_CONNECTIONS = 32
 MEDIA_EXTENSIONS = (".m3u8", ".mpd")  # stream playlists always go through yt-dlp
 MEDIA_OPTIONS = {"format", "format_label", "subtitles", "title", "page_url"}
 TORRENT_OPTIONS = {"priorities", "sequential", "metadata", "peers"}
+WINDOW_KEYS = ("schedule_start", "schedule_stop", "schedule_days")  # a download's own times override the defaults
+RUN_OPTIONS = {"scheduled", "unmetered_only", *WINDOW_KEYS}  # stored in options_json for every kind
+CONDITION_TICK = 30.0
 SCHEMES = {"http": ("http", "https"), "media": ("http", "https"), "torrent": ("http", "https", "magnet", "file")}
 
 log = logging.getLogger(__name__)
@@ -59,8 +65,16 @@ class Manager:
     def __init__(self, store: Store, *, downloader_factory: Callable[..., Downloader] = Downloader,
                  media_factory: Callable[..., MediaDownloader] = MediaDownloader,
                  downloader_options: dict[str, Any] | None = None, progress_interval: float = 0.5,
-                 torrent_listen_host: str = "0.0.0.0"):
+                 torrent_listen_host: str = "0.0.0.0", conditions: Conditions | None = None,
+                 inhibitor=None, clock: Callable[[], datetime] = datetime.now):
         self.store = store
+        self.conditions = conditions or Conditions()  # metered / battery (system.SystemMonitor)
+        self.inhibitor = inhibitor                     # system.SleepInhibitor or None
+        self._clock = clock
+        self._waiting: dict[int, str] = {}             # queued id -> why it isn't starting
+        self._throttled_hosts: dict[str, int] = {}     # host -> connections it tolerated (HTTP 429/503)
+        self._holding: set[int] = set()                # being stopped by a condition, not paused
+        self._tick_task: asyncio.Task | None = None
         self._factories = {"http": downloader_factory, "media": media_factory,
                            "torrent": partial(TorrentDownloader, session=self._torrent_session)}
         self._torrent: TorrentSession | None = None
@@ -81,6 +95,7 @@ class Manager:
         self.on_removed: Callable[[int], None] | None = None
         self.on_state: Callable[[int, str, str], None] | None = None
         self.on_progress_batch: Callable[[list[tuple[int, int, int, float]]], None] | None = None
+        self.on_autostart: Callable[[bool], None] | None = None
 
     # --- lifecycle -------------------------------------------------------------------------
 
@@ -88,6 +103,7 @@ class Manager:
         self.store.requeue_interrupted()
         self._global.set_rate(self.store.get_settings()["speed_limit"])
         self._progress_task = asyncio.create_task(self._progress_loop())
+        self._tick_task = asyncio.create_task(self._condition_loop())
         for d in self.store.list():
             if d.state == "seeding":
                 self._resume_seeding(d)
@@ -118,6 +134,10 @@ class Manager:
         self._retry_timers.clear()
         if self._progress_task:
             self._progress_task.cancel()
+        if self._tick_task:
+            self._tick_task.cancel()
+        if self.inhibitor:
+            self.inhibitor.close()
         running = list(self._tasks)
         tasks = list(self._tasks.values())
         for task in tasks:
@@ -141,7 +161,7 @@ class Manager:
             speed_limit: int = 0, start: bool = True, kind: str | None = None, **media_options) -> int:
         """`kind`: "http" (ldm's engine) or "media" (yt-dlp); default: media for .m3u8/.mpd links.
         Media options: format (yt-dlp selector), format_label, subtitles ("en,hi"), title, page_url."""
-        unknown = set(media_options) - MEDIA_OPTIONS - TORRENT_OPTIONS
+        unknown = set(media_options) - MEDIA_OPTIONS - TORRENT_OPTIONS - RUN_OPTIONS
         if unknown:
             raise InvalidArgument(f"unknown options: {', '.join(sorted(unknown))}")
         if not kind:
@@ -159,7 +179,11 @@ class Manager:
         connections = connections or settings["default_connections"]
         if not 1 <= connections <= MAX_CONNECTIONS:
             raise InvalidArgument(f"connections must be 1-{MAX_CONNECTIONS}")
-        options = {k: v for k, v in media_options.items() if v not in (None, "")}
+        options = {k: v for k, v in media_options.items()
+                   if v not in (None, "") and k not in WINDOW_KEYS}  # "" days = every day: handled below
+        options.update(self._own_window(media_options, settings))
+        if "scheduled" not in options and settings["schedule_new_links"]:
+            options["scheduled"] = True
         if kind == "media":
             options["custom_name"] = bool(name)
             name = name or options.get("title")
@@ -197,6 +221,8 @@ class Manager:
     def pause(self, download_id: int) -> None:
         d = self._get(download_id)
         self._cancel_retry(download_id)
+        self._holding.discard(download_id)  # the user's pause wins over a condition hold
+        self._waiting.pop(download_id, None)
         if d.state == "seeding":  # pausing a seeding torrent stops seeding
             self._stop_seeding(download_id)
             return
@@ -221,6 +247,8 @@ class Manager:
     async def remove(self, download_id: int, delete_files: bool = False) -> None:
         d = self._get(download_id)
         self._cancel_retry(download_id)
+        self._holding.discard(download_id)
+        self._waiting.pop(download_id, None)
         if self._torrent is not None:
             self._torrent.remove(download_id)
         task = self._tasks.pop(download_id, None)
@@ -331,6 +359,48 @@ class Manager:
             raise InvalidArgument(f"unsupported URL: {url}")
         return await asyncio.to_thread(media.probe_media, url, headers, self.store.get_settings())
 
+    def set_schedule(self, download_id: int, scheduled: bool, window: dict[str, str] | None = None) -> None:
+        """Put a download on the schedule or take it off. `window` (schedule_start/stop/days) gives it its
+        own times; without it the download follows the default times from the settings."""
+        d = self._get(download_id)
+        unknown = set(window or {}) - set(WINDOW_KEYS)
+        if unknown:
+            raise InvalidArgument(f"unknown schedule keys: {', '.join(sorted(unknown))}")
+        options = {k: v for k, v in d.options.items() if k not in WINDOW_KEYS}
+        options.update(self._own_window(window or {}, self.store.get_settings()), scheduled=bool(scheduled))
+        self.store.update(download_id, options_json=json.dumps(options))
+        self.conditions_changed()
+
+    def _own_window(self, values: dict[str, Any], settings: dict[str, Any]) -> dict[str, str]:
+        """Validated own times; {} when none are given or they equal the defaults (it then follows them)."""
+        if not any(values.get(k) is not None for k in WINDOW_KEYS):
+            return {}
+        window = {k: values[k] if values.get(k) is not None else settings[k] for k in WINDOW_KEYS}
+        for key, value in window.items():
+            self._check_setting(key, value)
+        if (parse_days(window["schedule_days"]) == parse_days(settings["schedule_days"])
+                and all(parse_time(window[k]) == parse_time(settings[k]) for k in WINDOW_KEYS[:2])):
+            return {}
+        return window
+
+    @staticmethod
+    def _window(d: DownloadRow, settings: dict[str, Any]) -> tuple[str, str, str]:
+        return tuple(d.options.get(k, settings[k]) for k in WINDOW_KEYS)
+
+    def conditions_changed(self) -> None:
+        """Network/battery/schedule changed: hold or release downloads accordingly."""
+        if self._closing:
+            return
+        for download_id in list(self._tasks):
+            if not self._active(download_id):
+                continue
+            reason = self._hold_reason(self.store.get(download_id))
+            if reason:
+                self._holding.add(download_id)
+                self._waiting[download_id] = reason
+                self._tasks[download_id].cancel()
+        self._schedule()
+
     def set_speed_limit(self, download_id: int, rate: int) -> None:
         self._get(download_id)
         self.store.update(download_id, speed_limit=rate)
@@ -352,6 +422,11 @@ class Manager:
             self._global.set_rate(values["speed_limit"])
         if self._torrent is not None and any(k.startswith("torrent_") for k in values):
             self._torrent.apply(self.store.get_settings())
+        if any(k.startswith("schedule_") or k in ("pause_on_metered", "battery_limit", "prevent_sleep")
+               for k in values):
+            self.conditions_changed()
+        if "autostart" in values and self.on_autostart:
+            self.on_autostart(values["autostart"])
         self._schedule()
 
     @staticmethod
@@ -370,6 +445,13 @@ class Manager:
         elif key == "download_dir":
             if not isinstance(value, str) or not value:
                 raise InvalidArgument("download_dir must be a path")
+        elif key in ("schedule_start", "schedule_stop", "schedule_days"):
+            try:
+                (parse_days if key == "schedule_days" else parse_time)(value)
+            except (ValueError, AttributeError) as e:
+                raise InvalidArgument(f"{key}: {e}") from None
+        elif key == "battery_limit" and not (isinstance(value, int) and 0 <= value <= 100):
+            raise InvalidArgument("battery_limit must be 0-100")
         else:
             default = DEFAULT_SETTINGS[key]
             if isinstance(default, bool):
@@ -412,15 +494,21 @@ class Manager:
         if download_id in self._progress:
             done, _, speed = self._progress[download_id]
         else:
-            done = d.size if d.state == "done" else sum(p.done for p in self.store.load_parts(download_id))
+            done = (d.size if d.state == "done" else d.done_bytes if d.kind != "http"
+                    else sum(p.done for p in self.store.load_parts(download_id)))
             speed = 0.0
         extra = {}
         if d.kind == "torrent" and self._torrent is not None:
             live = self._torrent.details(download_id)
             if live:
                 extra = {k: live[k] for k in ("peers", "seeds", "upload_speed", "ratio")}
+        if d.state == "queued" and download_id in self._waiting:
+            extra["waiting"] = self._waiting[download_id]
+        extra.update(zip(WINDOW_KEYS, self._window(d, self.store.get_settings())))
+        extra["schedule_custom"] = any(k in d.options for k in WINDOW_KEYS)
         return {
             **extra,
+            "scheduled": bool(d.options.get("scheduled")), "unmetered_only": bool(d.options.get("unmetered_only")),
             "id": d.id, "url": d.url, "kind": d.kind, "quality": d.options.get("format_label"),
             "name": d.name, "dir": str(d.dir), "state": d.state,
             "error": d.error, "size": d.size, "done": done or 0, "speed": speed,
@@ -457,26 +545,65 @@ class Manager:
         rule = self.store.host_rule_for(d.host)
         return (rule.host if rule else None), rule
 
+    def _hold_reason(self, d: DownloadRow) -> str | None:
+        """Why `d` may not run right now (schedule window, metered network, battery), or None."""
+        settings = self.store.get_settings()
+        if d.options.get("scheduled"):
+            now = self._clock()
+            args = self._window(d, settings)
+            if not in_window(now, *args):
+                when = next_start(now, *args)
+                return f"scheduled — starts {describe_start(when, now)}" if when else "scheduled"
+        if (settings["pause_on_metered"] or d.options.get("unmetered_only")) and self.conditions.metered:
+            return "metered connection"
+        limit = settings["battery_limit"]
+        if limit and self.conditions.on_battery and self.conditions.battery < limit:
+            return f"battery below {limit}%"
+        return None
+
     def _schedule(self) -> None:
         if self._closing:
             return
         max_parallel = self.store.get_settings()["max_parallel"]
         per_rule = Counter(key for key in self._rule_keys.values() if key)
         for d in self.store.queued():
+            reason = self._hold_reason(d)
+            if reason:
+                if self._waiting.get(d.id) != reason:
+                    self._waiting[d.id] = reason
+                    self._emit_state(d.id)  # front ends re-read the row and show the reason
+                continue
+            if self._waiting.pop(d.id, None) is not None:
+                self._emit_state(d.id)
             if len(self._tasks) >= max_parallel:
-                return
+                break
             key, rule = self._rule_key(d)
             if rule and rule.max_downloads and per_rule[key] >= rule.max_downloads:
                 continue
             per_rule[key] += 1
             self._start(d, key, rule)
+        self._update_inhibitor()
+
+    def _update_inhibitor(self) -> None:
+        if self.inhibitor is not None:
+            self.inhibitor.set_active(bool(self._tasks) and self.store.get_settings()["prevent_sleep"])
 
     def _start(self, d: DownloadRow, key: str | None, rule: HostRule | None) -> None:
-        bucket = TokenBucket(d.speed_limit)
-        extra = {"on_state": lambda state, i=d.id: self._emit_state(i)} if d.kind == "media" else {}
+        rate = d.speed_limit
+        settings = self.store.get_settings()
+        if d.options.get("scheduled") and settings["schedule_speed_limit"]:
+            rate = min(r for r in (rate, settings["schedule_speed_limit"]) if r)
+        bucket = TokenBucket(rate)
+        extra = {"on_state": lambda state, i=d.id: self._emit_state(i)} if d.kind in ("media", "torrent") else {}
+        connections = (rule.max_connections or None) if rule else None
+        if d.kind == "http":
+            host = (urlsplit(d.final_url or d.url).hostname or "").lower()
+            extra["on_throttled"] = lambda n, h=host: self._throttled_hosts.__setitem__(h, n)
+            if host in self._throttled_hosts:  # this session it said "too many": start with what worked
+                connections = min(c for c in (connections, self._throttled_hosts[host]) if c)
         downloader = self._factories[d.kind](
             self.store, d.id, limiters=[self._global, bucket],
-            connections=(rule.max_connections or None) if rule else None,
+            connections=connections,
             on_progress=partial(self._on_progress, d.id), progress_interval=self._progress_interval,
             **extra, **self._options,
         )
@@ -487,6 +614,22 @@ class Manager:
         self._buckets[d.id] = bucket
         task.add_done_callback(partial(self._finished, d.id))
         self._emit_state(d.id)
+
+    def _save_progress(self, download_id: int) -> None:
+        """yt-dlp and torrent downloads only report progress live: keep the last numbers for a paused row."""
+        if download_id not in self._progress:
+            return
+        try:
+            d = self.store.get(download_id)
+        except KeyError:
+            return
+        if d.kind == "http" or d.state == "done":
+            return
+        done, size, _ = self._progress[download_id]
+        fields = {"done_bytes": int(done)}
+        if d.size is None and size:
+            fields["size"] = int(size)
+        self.store.update(download_id, **fields)
 
     def _forget(self, download_id: int) -> None:
         self._rule_keys.pop(download_id, None)
@@ -499,6 +642,7 @@ class Manager:
         if self._tasks.get(download_id) is not task:
             return  # removed while running
         del self._tasks[download_id]
+        self._save_progress(download_id)
         self._forget(download_id)
         if self._closing:
             return
@@ -506,7 +650,11 @@ class Manager:
             d = self.store.get(download_id)
         except KeyError:
             return
-        if d.state in ("running", "processing"):  # cancelled before the engine started
+        if download_id in self._holding:  # stopped by a condition: back to the queue, not paused
+            self._holding.discard(download_id)
+            if d.state in ("paused", "running", "processing"):
+                self.store.set_state(download_id, "queued")
+        elif d.state in ("running", "processing"):  # cancelled before the engine started
             self.store.set_state(download_id, "paused")
         elif d.state == "error":
             settings = self.store.get_settings()
@@ -519,6 +667,12 @@ class Manager:
             self._attempts.pop(download_id, None)
         self._emit_state(download_id)
         self._schedule()
+
+    async def _condition_loop(self) -> None:
+        """Schedule windows open and close with the clock: re-check twice a minute."""
+        while True:
+            await asyncio.sleep(CONDITION_TICK)
+            self.conditions_changed()
 
     def _auto_retry(self, download_id: int) -> None:
         self._retry_timers.pop(download_id, None)

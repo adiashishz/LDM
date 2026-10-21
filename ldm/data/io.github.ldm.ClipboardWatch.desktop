@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=LDM clipboard watcher
+Comment=Offer to download links you copy
+Exec=ldm clipboard-watch
+Icon=io.github.ldm.Gui
+NoDisplay=true
+NotShowIn=GNOME;
+X-GNOME-Autostart-enabled=false

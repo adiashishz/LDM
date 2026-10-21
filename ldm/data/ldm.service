@@ -1,7 +1,6 @@
-# systemd user unit. Install to ~/.config/systemd/user/ (adjust ExecStart), then:
-#   systemctl --user daemon-reload && systemctl --user enable --now ldm.service
+# systemd user unit (installed by packaging/install-data.py, or per user by `ldm install-browser-integration`).
 [Unit]
-Description=ldm download manager
+Description=LDM download manager
 
 [Service]
 Type=dbus

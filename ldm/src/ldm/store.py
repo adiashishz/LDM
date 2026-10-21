@@ -76,6 +76,14 @@ CREATE TABLE torrents (
     seeding_seconds INTEGER NOT NULL DEFAULT 0
 );
 """,
+    # Schedules are per download now (defaults + own times); there is no global on/off switch.
+    """
+DELETE FROM settings WHERE key = 'schedule_enabled';
+""",
+    # Progress of downloads without byte-range parts (yt-dlp, torrents), saved when they stop.
+    """
+ALTER TABLE downloads ADD COLUMN done_bytes INTEGER NOT NULL DEFAULT 0;
+""",
 ]
 
 
@@ -117,6 +125,19 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "torrent_trackers": "",            # extra trackers for every torrent, one per line
     "torrent_ip_filter": "",           # path to a P2P/DAT block list, "" = none
     "torrent_sequential": False,       # default for "download in order"
+    # Default window for downloads on the schedule; each download can have its own times instead.
+    "schedule_start": "02:00",
+    "schedule_stop": "06:00",          # earlier than start = overnight; equal = whole day
+    "schedule_days": "",               # "mon,tue,…"; "" = every day
+    "schedule_speed_limit": 0,         # bytes/s for scheduled downloads, 0 = unlimited
+    "schedule_new_links": False,       # new downloads go on the schedule
+    "pause_on_metered": False,         # hold every download on metered connections
+    "battery_limit": 0,                # hold downloads on battery below this %, 0 = off
+    "prevent_sleep": True,             # keep the computer awake while downloading
+    "autostart": True,                 # start the download service at login
+    "notify_when_closed": True,        # desktop notifications from the service when LDM is closed
+    "clipboard_watch": True,           # offer to download links you copy
+    "clipboard_exclude": "",           # extensions never offered, e.g. "html,php"
 }
 
 
@@ -141,6 +162,7 @@ class DownloadRow:
     position: int
     speed_limit: int
     options: dict[str, Any]
+    done_bytes: int = 0  # media/torrent progress when stopped (HTTP downloads keep it in `parts`)
 
     @property
     def host(self) -> str:
@@ -319,7 +341,7 @@ def _to_row(r: sqlite3.Row) -> DownloadRow:
         connections=r["connections"], headers=json.loads(r["headers_json"]), etag=r["etag"],
         last_modified=r["last_modified"], added_at=r["added_at"], finished_at=r["finished_at"],
         error=r["error"], position=r["position"], speed_limit=r["speed_limit"],
-        options=json.loads(r["options_json"]),
+        options=json.loads(r["options_json"]), done_bytes=r["done_bytes"],
     )
 
 

@@ -33,13 +33,19 @@ class DownloadItem(GObject.Object):
     peers = GObject.Property(type=int, default=0)                  # torrents only
     upload_speed = GObject.Property(type=float, default=0.0)
     ratio = GObject.Property(type=float, default=0.0)
+    scheduled = GObject.Property(type=bool, default=False)
+    schedule_start = GObject.Property(type=str, default="")         # effective window (own or default)
+    schedule_stop = GObject.Property(type=str, default="")
+    schedule_days = GObject.Property(type=str, default="")
+    waiting = GObject.Property(type=str, default="")               # why a queued download isn't starting
     # Derived, for binding to widgets:
     title = GObject.Property(type=str, default="")
     fraction = GObject.Property(type=float, default=0.0)
     status = GObject.Property(type=str, default="")
 
     FIELDS = ("id", "url", "name", "dir", "state", "error", "size", "done", "speed", "position", "speed_limit",
-              "kind", "peers", "upload_speed", "ratio")
+              "kind", "peers", "upload_speed", "ratio", "scheduled",
+              "schedule_start", "schedule_stop", "schedule_days")
 
     def update(self, values: dict[str, Any]) -> None:
         self.freeze_notify()
@@ -49,12 +55,14 @@ class DownloadItem(GObject.Object):
                     self.set_property(key, values[key])
             if values.get("state") is not None and values["state"] != "running":
                 self.speed = 0.0
+            if "id" in values:  # a full row from Get/List: no "waiting" key means not waiting
+                self.waiting = values.get("waiting") or ""
             if self.state == "done" and self.size >= 0:
                 self.done = self.size
             self.title = self.name or unquote(urlsplit(self.url).path.rsplit("/", 1)[-1]) or self.url
             self.fraction = self.done / self.size if self.size > 0 else 0.0
             self.status = status_text(self.state, self.done, self.size if self.size >= 0 else None,
-                                      self.speed, self.error)
+                                      self.speed, self.error, self.waiting)
             if self.kind == "torrent":
                 self.status += torrent_extra(self.state, self.peers, self.upload_speed, self.ratio)
         finally:
@@ -92,6 +100,9 @@ class DownloadList(GObject.Object):
 
     def get(self, download_id: int) -> DownloadItem | None:
         return self._items.get(download_id)
+
+    def urls(self) -> list[str]:
+        return [item.url for item in self._items.values()]
 
     def load(self, rows: list[dict[str, Any]]) -> None:
         self.store.remove_all()

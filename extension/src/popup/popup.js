@@ -26,7 +26,7 @@ function setStatus(text, isError = false) {
 async function checkStatus() {
   try {
     const state = await call({ type: "ping" });
-    setStatus(state.daemon ? "ldm is running" : "ldm will start when you download something");
+    setStatus(state.daemon ? "LDM is running" : "LDM will start when you download something");
   } catch (error) {
     setStatus(error.message, true);
   }
@@ -36,7 +36,7 @@ async function send(items, button) {
   if (button) button.disabled = true;
   try {
     await call({ type: "send", items });
-    setStatus(items.length === 1 ? "Sent to ldm" : `Sent ${items.length} files to ldm`);
+    setStatus(items.length === 1 ? "Sent to LDM" : `Sent ${items.length} files to LDM`);
   } catch (error) {
     setStatus(error.message, true);
   } finally {
@@ -74,7 +74,7 @@ async function showMedia() {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = "Download";
-    button.title = item.stream ? "Stream playlist: ldm downloads all pieces and joins them" : "";
+    button.title = item.stream ? "Stream playlist: LDM downloads all pieces and joins them" : "";
     button.addEventListener("click", () => send([{ url: item.url, filename: item.stream ? "" : item.filename,
       referer: item.referer, size: item.size, pageUrl, kind: item.stream ? "media" : "" }], button));
     const meta = [humanSize(item.size), item.mime, new URL(item.url).hostname].filter(Boolean).join(" · ");

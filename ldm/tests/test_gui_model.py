@@ -57,3 +57,12 @@ def test_moving_resorts():
     downloads.load([row(1), row(2), row(3)])
     downloads.upsert(row(3, position=0))
     assert ids(downloads.store) == [3, 1, 2]
+
+
+def test_waiting_reason_comes_and_goes():
+    downloads = DownloadList()
+    item = downloads.upsert(row(1, waiting="metered connection", scheduled=True))
+    assert item.status == "Waiting: metered connection" and item.scheduled
+    downloads.upsert(row(1))
+    assert item.status == "Queued" and item.waiting == ""
+    assert downloads.urls() == ["http://h/files/f1.bin"]

@@ -1,13 +1,13 @@
 [Desktop Entry]
 Type=Application
-Name=Downloads (ldm)
+Name=LDM
 GenericName=Download Manager
-Comment=Multi-part download manager
+Comment=Download files, videos and torrents
 Exec=ldm-gui %U
-Icon=folder-download
+Icon=io.github.ldm.Gui
 Terminal=false
 Categories=Network;FileTransfer;GTK;
-Keywords=download;manager;resume;
+Keywords=download;manager;resume;torrent;video;youtube;
 StartupNotify=true
 DBusActivatable=true
 MimeType=x-scheme-handler/magnet;application/x-bittorrent;

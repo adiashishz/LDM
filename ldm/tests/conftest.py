@@ -35,6 +35,9 @@ class ServerConfig:
     bytes_sent: int = 0
     active_ranges: int = 0          # bounded range requests being served right now
     max_active_ranges: int = 0
+    range_limit: int = 0            # more simultaneous range requests than this get HTTP 429 ...
+    retry_after: str | None = None  # ... with this Retry-After header
+    throttled: int = 0              # 429 responses sent
     requests: list[dict[str, str]] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -86,6 +89,21 @@ class _Handler(BaseHTTPRequestHandler):
             partial = True
 
         length = max(0, end - start + 1)
+        bounded = bool(match and match.group(2))  # part request, not the open-ended probe
+        with cfg.lock:
+            refuse = bool(bounded and cfg.range_limit and cfg.active_ranges >= cfg.range_limit)
+            if refuse:
+                cfg.throttled += 1
+            elif bounded:
+                cfg.active_ranges += 1
+                cfg.max_active_ranges = max(cfg.max_active_ranges, cfg.active_ranges)
+        if refuse:
+            self.send_response(429)
+            if cfg.retry_after is not None:
+                self.send_header("Retry-After", cfg.retry_after)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         self.send_response(206 if partial else 200)
         if cfg.ranges:
             self.send_header("Accept-Ranges", "bytes")
@@ -106,14 +124,10 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         cut = None
-        bounded = bool(match and match.group(2))  # part request, not the open-ended probe
         with cfg.lock:
             if cfg.drops > 0 and length > cfg.drop_after:
                 cfg.drops -= 1
                 cut = cfg.drop_after
-            if bounded:
-                cfg.active_ranges += 1
-                cfg.max_active_ranges = max(cfg.max_active_ranges, cfg.active_ranges)
         try:
             self._send_body(cfg, data, start, length, cut)
         finally:
@@ -192,7 +206,9 @@ def daemon(bus_address, tmp_path):
     async def run():
         started = asyncio.Event()
         task = asyncio.create_task(serve(bus_address=bus_address, db_path=tmp_path / "daemon.db",
-                                         stop=stop, ready=started, manager_options=options))
+                                         stop=stop, ready=started, manager_options=options,
+                                         system_bus_address=bus_address,  # never the real system bus
+                                         manage_autostart=False))          # nor the user's systemd
         await started.wait()
         ready.set()
         await task

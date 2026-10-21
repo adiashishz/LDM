@@ -157,6 +157,9 @@ async def client(args) -> int:
                        "format": Variant("s", media_selector(args.quality)) if args.quality else None,
                        "format_label": Variant("s", args.quality) if args.quality else None,
                        "sequential": Variant("b", True) if args.sequential else None,
+                       "scheduled": Variant("b", True) if args.scheduled or schedule_window(args) else None,
+                       **{k: Variant("s", v) for k, v in schedule_window(args).items()},
+                       "unmetered_only": Variant("b", True) if args.unmetered_only else None,
                        "priorities": Variant("ax", file_priorities(args.files)) if args.files else None}
             download_id = await iface.call_add(args.url, {k: v for k, v in options.items() if v is not None})
             print(f"download {download_id} added")
@@ -170,7 +173,8 @@ async def client(args) -> int:
                 size = human(d["size"]) if "size" in d else "?"
                 done = f"{d['done'] * 100 / d['size']:5.1f}%" if d.get("size") else "    -"
                 line = f"{d['id']:>4}  {d['state']:<8} {done} {size:>10}  {d.get('name') or d['url']}"
-                print(line + (f"  ({d['error']})" if d.get("error") else ""))
+                note = d.get("error") or d.get("waiting")
+                print(line + (f"  ({note})" if note else ""))
         elif args.command == "pause":
             await iface.call_pause(args.id)
         elif args.command == "resume":
@@ -183,13 +187,16 @@ async def client(args) -> int:
             await iface.call_set_url(args.id, args.url)
         elif args.command == "limit":
             await iface.call_set_speed_limit(args.id, args.rate)
+        elif args.command == "schedule":
+            await iface.call_set_schedule(args.id, args.state == "on", schedule_window(args))
         elif args.command == "settings":
             if args.key is None:
                 for key, value in sorted(values(await iface.call_get_settings()).items()):
                     print(f"{key} = {value}")
             else:
                 value = parse_setting(args.key, args.value)
-                variant = Variant("s", value) if isinstance(value, str) else Variant("x", value)
+                variant = (Variant("s", value) if isinstance(value, str) else
+                           Variant("b", value) if isinstance(value, bool) else Variant("x", value))
                 await iface.call_set_settings({args.key: variant})
         elif args.command == "host-rule":
             if args.remove:
@@ -226,11 +233,25 @@ def media_selector(quality: str) -> str:
     return default_selector(quality)
 
 
+def schedule_window(args) -> dict[str, str]:
+    """--start/--stop/--days → a download's own schedule times (missing ones come from the defaults)."""
+    given = {"schedule_start": args.start, "schedule_stop": args.stop, "schedule_days": args.days}
+    return {k: v for k, v in given.items() if v is not None}
+
+
+def schedule_options(p) -> None:
+    p.add_argument("--start", metavar="HH:MM", help="own schedule: start time (default: settings)")
+    p.add_argument("--stop", metavar="HH:MM", help="own schedule: stop time; earlier than start = overnight")
+    p.add_argument("--days", metavar="DAYS", help='own schedule: e.g. "sat,sun"; "" = every day')
+
+
 def parse_setting(key: str, text: str | None):
     if text is None:
         raise SystemExit(f"ldm settings {key}: missing value")
-    if key == "speed_limit":
+    if key in ("speed_limit", "schedule_speed_limit"):
         return parse_rate(text)
+    if key in ("schedule_start", "schedule_stop", "schedule_days", "clipboard_exclude"):
+        return text  # "02:00" is not JSON
     if key == "download_dir":
         return str(Path(text).expanduser().resolve())
     try:
@@ -276,6 +297,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--quality", help="media quality: best, audio, or a maximum height such as 720")
     p.add_argument("--files", help="torrent: only these file indexes, e.g. 0,2 (see `ldm torrent-files`)")
     p.add_argument("--sequential", action="store_true", help="torrent: download pieces in order")
+    p.add_argument("--scheduled", action="store_true", help="only download inside the schedule window")
+    schedule_options(p)
+    p.add_argument("--unmetered-only", action="store_true", help="wait while the connection is metered")
     p.add_argument("--wait", action="store_true", help="show progress until it finishes")
 
     sub.add_parser("list", help="list downloads")
@@ -293,6 +317,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("limit", help="per-download speed limit (0 = unlimited)")
     p.add_argument("id", type=int)
     p.add_argument("rate", type=parse_rate)
+    p = sub.add_parser("schedule", help="put a download on the schedule (on) or take it off (off); "
+                                        "without --start/--stop/--days it follows the default times")
+    p.add_argument("id", type=int)
+    p.add_argument("state", choices=("on", "off"))
+    schedule_options(p)
     p = sub.add_parser("settings", help="show settings, or set one: ldm settings KEY VALUE")
     p.add_argument("key", nargs="?")
     p.add_argument("value", nargs="?")
@@ -307,6 +336,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("source")
     sub.add_parser("watch", help="show live progress")
     sub.add_parser("daemon", help="run the download service")
+    sub.add_parser("clipboard-watch", help="offer copied links in a notification (where the desktop allows it)")
     p = sub.add_parser("install-browser-integration",
                        help="install the browser bridge, D-Bus activation and desktop file")
     p.add_argument("--browser", action="append", choices=["firefox", "chrome", "brave"],
@@ -330,6 +360,15 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_get(args)
     if args.command == "daemon":
         return cmd_daemon(args)
+    if args.command == "clipboard-watch":
+        import logging
+
+        from .clipboard import run_watcher
+        logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+        try:
+            return asyncio.run(run_watcher())
+        except KeyboardInterrupt:
+            return 130
     if args.command == "install-browser-integration":
         from . import integration
         if args.uninstall:

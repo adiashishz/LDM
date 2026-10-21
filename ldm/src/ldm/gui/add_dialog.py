@@ -10,6 +10,7 @@ from gi.repository import Adw, Gio, GLib, Gtk
 
 from ..format import human
 from .client import DaemonClient
+from .schedule_rows import ScheduleEditor
 from .dialogs import is_url, parse_limit, read_clipboard_url, short_path
 
 # "Save in" choices: (label, XDG directory or None for the download folder setting)
@@ -130,8 +131,13 @@ class AddDialog(Adw.Dialog):
         self.parts_row.add_suffix(self.parts)
         self.limit = Adw.EntryRow(title="Speed limit (e.g. 2M, empty = unlimited)")
         self.limit.connect("changed", self._validate)
+        self.schedule = ScheduleEditor()  # 1DM's scheduler, per download: default or own times
+        self.unmetered_only = Adw.SwitchRow(title="Only on unmetered connections",
+                                            subtitle="Waits while on mobile data or a metered network")
         options.add(self.parts_row)
         options.add(self.limit)
+        options.add(self.schedule)
+        options.add(self.unmetered_only)
 
         # --- request headers (prefilled by the browser)
         header_group = Adw.PreferencesGroup()
@@ -172,6 +178,8 @@ class AddDialog(Adw.Dialog):
         self.download_dir = settings["download_dir"]
         if self.torrent is None:
             self.sequential.set_active(bool(settings.get("torrent_sequential")))
+        self.schedule.set_defaults(settings)
+        self.schedule.set_enable_expansion(bool(settings.get("schedule_new_links")))
         if self.parts.get_sensitive():
             self.parts.set_value(settings["default_connections"])
         self._show_folder()
@@ -467,7 +475,11 @@ class AddDialog(Adw.Dialog):
             "speed_limit": parse_limit(self.limit.get_text()) or None,
             "headers": self.headers() or None,
             "start": start,
+            "scheduled": self.schedule.get_enable_expansion(),
+            "unmetered_only": self.unmetered_only.get_active() or None,
         }
+        if self.schedule.get_enable_expansion():
+            options.update(self.schedule.window())  # equal to the defaults = follow the defaults
         if self.torrent is not None:
             options.update(kind="torrent", sequential=self.sequential.get_active(), name=None)
             if self.torrent:

@@ -39,6 +39,9 @@ def close_dialog(window) -> None:
 
 def steps(app: Application):
     window = app.get_active_window()
+    if os.environ.get("RENDER_WINDOW"):  # e.g. 760x1200 to see whole dialogs
+        width, height = map(int, os.environ["RENDER_WINDOW"].split("x"))
+        window.set_default_size(width, height)
     for _ in range(100):  # wait until the backend has mapped and sized the window
         if window.get_mapped() and window.get_width() > 0:
             break
@@ -49,10 +52,26 @@ def steps(app: Application):
                            headers={"Referer": "https://example.com/page"})
     yield 2.0  # the dialog checks the link first
     save(window, "2-add-dialog")
+    dialog = window.get_visible_dialog()
+    dialog.schedule.set_enable_expansion(True)
+    dialog.schedule.start.set_time("22:30")
+    dialog.schedule.days.set_days("sat,sun")
+    yield 0.5
+    save(window, "2b-add-schedule")
     close_dialog(window)
-    PreferencesDialog(app.client).present(window)
+    store = app.downloads.store
+    if store.get_n_items():
+        window.ask_schedule(store.get_item(0))
+        yield 1.0
+        save(window, "2c-schedule-dialog")
+        close_dialog(window)
+    preferences = PreferencesDialog(app.client)
+    preferences.present(window)
     yield 1.0
     save(window, "3-preferences")
+    preferences.set_visible_page(preferences.schedule_page)
+    yield 0.5
+    save(window, "3b-schedule")
     close_dialog(window)
     window.filters.set_active_name("problems")
     yield 0.5

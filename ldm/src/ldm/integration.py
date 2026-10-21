@@ -1,4 +1,4 @@
-"""`ldm install-browser-integration`: native messaging host + D-Bus activation + desktop file."""
+"""`ldm install-browser-integration`: native messaging host, D-Bus activation, systemd user unit, desktop file."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ GUI_ID = "io.github.ldm.Gui"
 BRAVE_FLATPAK = "com.brave.Browser"
 TORRENT_TYPES = ["x-scheme-handler/magnet", "application/x-bittorrent"]
 FLATPAK_TALK = [f"--talk-name={BUS_NAME}", f"--talk-name={GUI_ID}"]
+SYSTEMD_UNIT = "ldm.service"
 
 
 @dataclass
@@ -70,15 +71,30 @@ def executable(name: str) -> Path:
     return found
 
 
-def activation_files(data: Path) -> dict[Path, str]:
+ICON = Path(__file__).parent / "resources" / f"{GUI_ID}.svg"
+
+
+def activation_files(data: Path, config: Path) -> dict[Path, str]:
     ldm, gui = executable("ldm"), executable("ldm-gui")
     services = data / "dbus-1" / "services"
     return {
-        services / f"{BUS_NAME}.service": f"[D-BUS Service]\nName={BUS_NAME}\nExec={ldm} daemon\n",
+        data / "icons" / "hicolor" / "scalable" / "apps" / f"{GUI_ID}.svg": ICON.read_text(),
+        # Activation goes through systemd, so a daemon started by a client and one started at login are the same.
+        services / f"{BUS_NAME}.service": (f"[D-BUS Service]\nName={BUS_NAME}\nExec={ldm} daemon\n"
+                                           f"SystemdService={SYSTEMD_UNIT}\n"),
+        config / "systemd" / "user" / SYSTEMD_UNIT: (
+            "[Unit]\nDescription=LDM download manager\n\n"
+            f"[Service]\nType=dbus\nBusName={BUS_NAME}\nExecStart={ldm} daemon\nRestart=on-failure\n\n"
+            "[Install]\nWantedBy=default.target\n"),
+        # GNOME (Wayland) can't watch the clipboard from the background; the window asks on focus instead.
+        config / "autostart" / "io.github.ldm.ClipboardWatch.desktop": (
+            "[Desktop Entry]\nType=Application\nName=LDM clipboard watcher\n"
+            f"Comment=Offer to download links you copy\nExec={ldm} clipboard-watch\nIcon={GUI_ID}\n"
+            "NoDisplay=true\nNotShowIn=GNOME;\nX-GNOME-Autostart-enabled=false\n"),
         services / f"{GUI_ID}.service": f"[D-BUS Service]\nName={GUI_ID}\nExec={gui} --gapplication-service\n",
         data / "applications" / f"{GUI_ID}.desktop": (
-            "[Desktop Entry]\nType=Application\nName=Downloads (ldm)\nGenericName=Download Manager\n"
-            f"Comment=Multi-part download manager\nExec={gui} %U\nIcon=folder-download\nTerminal=false\n"
+            "[Desktop Entry]\nType=Application\nName=LDM\nGenericName=Download Manager\n"
+            f"Comment=Download files, videos and torrents\nExec={gui} %U\nIcon={GUI_ID}\nTerminal=false\n"
             "Categories=Network;FileTransfer;GTK;\nStartupNotify=true\nDBusActivatable=true\n"
             f"MimeType={';'.join(TORRENT_TYPES)};\n"),
     }
@@ -89,7 +105,8 @@ def plan(home: Path, selected: list[str] | None = None) -> tuple[dict[Path, str 
     known = browsers(home)
     chosen = [known[name] for name in selected] if selected else [b for b in known.values() if b.installed()]
     data = Path(os.environ.get("XDG_DATA_HOME") or home / ".local/share")
-    files: dict[Path, str | bytes] = dict(activation_files(data))
+    config = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+    files: dict[Path, str | bytes] = dict(activation_files(data, config))
     host_source = Path(nmhost.__file__).read_bytes()
     for browser in chosen:
         files[browser.host_dir / "ldm_nmhost.py"] = host_source
@@ -113,6 +130,9 @@ def install(home: Path, selected: list[str] | None = None, dry_run: bool = False
     if not dry_run:
         _reload_bus_config()
         _set_default_handler(home, log)
+        _systemctl("daemon-reload")
+        if _autostart_wanted() and set_autostart(True):
+            log(f"the download service now starts at login ({SYSTEMD_UNIT})")
     for browser in chosen:
         if browser.flatpak:
             command = ["flatpak", "override", "--user", *FLATPAK_TALK, browser.flatpak]
@@ -128,11 +148,13 @@ def install(home: Path, selected: list[str] | None = None, dry_run: bool = False
 
 def uninstall(home: Path, selected: list[str] | None = None, log: Callable[[str], None] = print) -> None:
     files, chosen = plan(home, selected or list(browsers(home)))
+    set_autostart(False)
     for path in files:
         if path.exists():
             path.unlink()
             log(f"removed {path}")
     _reload_bus_config()
+    _systemctl("daemon-reload")
     _remove_default_handler(home, log)
     for browser in chosen:
         if browser.flatpak:
@@ -169,6 +191,28 @@ def _remove_default_handler(home: Path, log: Callable[[str], None]) -> None:
     if kept != lines:
         config.write_text("\n".join(kept) + "\n")
         log(f"removed ldm as default for: {', '.join(TORRENT_TYPES)}")
+
+
+def set_autostart(enabled: bool) -> bool:
+    """Start the daemon at login (systemd user unit), or stop doing so. Returns whether it worked."""
+    return _systemctl("enable" if enabled else "disable", SYSTEMD_UNIT)
+
+
+def _autostart_wanted() -> bool:
+    """The "autostart" setting, without creating a database just to read it."""
+    from .store import Store, default_db_path
+
+    path = default_db_path()
+    return Store(path).get_settings()["autostart"] if path.exists() else True
+
+
+def _systemctl(*args: str) -> bool:
+    if not shutil.which("systemctl"):
+        return False
+    try:
+        return subprocess.run(["systemctl", "--user", *args], capture_output=True, timeout=30).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def _reload_bus_config() -> None:

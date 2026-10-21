@@ -6,11 +6,13 @@ from typing import TYPE_CHECKING
 
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
 
+from ..clipboard import Offer
 from ..format import parse_rate
 from .add_dialog import AddDialog
 from .dialogs import ask_text, confirm, is_url, limit_text, read_clipboard_url
 from .model import DownloadItem
 from .row import DownloadRow
+from .schedule_rows import ask_schedule
 from .torrent_details import TorrentDetailsDialog
 
 if TYPE_CHECKING:
@@ -27,7 +29,7 @@ EMPTY = {
 
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app: Application):
-        super().__init__(application=app, title="Downloads", default_width=760, default_height=560)
+        super().__init__(application=app, title="LDM", default_width=760, default_height=560)
         self.app = app
         self.client = app.client
         self.views = {name: app.downloads.view(name) for name, _ in VIEW_LABELS}
@@ -38,7 +40,7 @@ class MainWindow(Adw.ApplicationWindow):
         menu = Gio.Menu()
         menu.append("Preferences", "app.preferences")
         menu.append("Keyboard Shortcuts", "app.shortcuts")
-        menu.append("About Downloads", "app.about")
+        menu.append("About LDM", "app.about")
         header.pack_end(Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, primary=True,
                                        tooltip_text="Main Menu"))
         self.filters = Adw.ToggleGroup()
@@ -52,6 +54,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.banner.connect("button-clicked", self._start_daemon)
         self.client.bind_property("connected", self.banner, "revealed",
                                   GObject.BindingFlags.SYNC_CREATE | GObject.BindingFlags.INVERT_BOOLEAN)
+        # 1DM's clipboard monitor: offer a copied link when the window gets focus.
+        self.offer, self.offered = Offer(), ""
+        self.clipboard_banner = Adw.Banner(button_label="Download")
+        self.clipboard_banner.connect("button-clicked", self._download_offered)
+        self.connect("notify::is-active", self._on_focus)
 
         self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, valign=Gtk.Align.START,
                                 margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
@@ -67,6 +74,7 @@ class MainWindow(Adw.ApplicationWindow):
         view = Adw.ToolbarView(content=self.toasts)
         view.add_top_bar(header)
         view.add_top_bar(self.banner)
+        view.add_top_bar(self.clipboard_banner)
         self.set_content(view)
 
         drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.COPY)
@@ -112,6 +120,35 @@ class MainWindow(Adw.ApplicationWindow):
         if not self.client.connected:
             self.toast("The download service did not start — see ~/.local/state/ldm/daemon.log")
         return GLib.SOURCE_REMOVE
+
+    # --- clipboard -------------------------------------------------------------------------
+
+    def _on_focus(self, *_) -> None:
+        if self.is_active() and self.client.connected:
+            self.client.get_settings(self._check_clipboard)
+
+    def _check_clipboard(self, settings, error) -> None:
+        if error is None and settings.get("clipboard_watch", True):
+            self.get_clipboard().read_text_async(None, self._clipboard_text, settings.get("clipboard_exclude", ""))
+
+    def _clipboard_text(self, clipboard, result, exclude: str) -> None:
+        try:
+            text = clipboard.read_text_finish(result)
+        except GLib.Error:  # empty clipboard or not text
+            return
+        known = self.app.downloads.urls()
+        if self.offered in known:  # added meanwhile (e.g. pasted into the add dialog)
+            self.clipboard_banner.set_revealed(False)
+        link = self.offer.check(text, known, exclude)
+        if link:
+            self.offered = link
+            shown = link if len(link) <= 70 else link[:67] + "…"
+            self.clipboard_banner.set_title(f"Download copied link? {GLib.markup_escape_text(shown)}")
+            self.clipboard_banner.set_revealed(True)
+
+    def _download_offered(self, banner) -> None:
+        banner.set_revealed(False)
+        self.open_add_dialog(self.offered, kind="torrent" if self.offered.startswith("magnet:") else "")
 
     # --- adding ----------------------------------------------------------------------------
 
@@ -188,6 +225,20 @@ class MainWindow(Adw.ApplicationWindow):
             return
         item.speed_limit = rate
         self.client.set_speed_limit(item.id, rate, self._report)
+
+    def ask_schedule(self, item: DownloadItem) -> None:
+        def with_row(row, error):
+            if error:
+                self._report(None, error)
+                return
+            self.client.get_settings(lambda settings, error: self._report(None, error) if error else
+                                     ask_schedule(self, item.title, row, settings, save))
+
+        def save(scheduled: bool, window: dict[str, str]) -> None:
+            self.client.set_schedule(item.id, scheduled, window,
+                                     lambda r, e: self._report(r, e) if e else self.app.refresh(item.id))
+
+        self.client.get(item.id, with_row)
 
     def show_torrent_details(self, item: DownloadItem) -> None:
         TorrentDetailsDialog(self.client, item).present(self)

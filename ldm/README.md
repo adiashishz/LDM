@@ -1,6 +1,6 @@
-# ldm — Linux download manager (v1, Python)
+# LDM — Linux download manager (v1, Python)
 
-Working name. Design: [../notes/10-linux-design.md](../notes/10-linux-design.md).
+Command `ldm`, app ID `io.github.ldm.Gui`. Design: [../notes/10-linux-design.md](../notes/10-linux-design.md).
 
 - **M1:** engine — multi-part HTTP(S) into one pre-allocated file, dynamic segmentation, fsync-safe
   resume state in SQLite, retries, changed-file and expired-link detection.
@@ -67,6 +67,16 @@ uv venv --python /usr/bin/python3 --system-site-packages .venv && uv pip install
 .venv/bin/ldm host-rule example.com --max-connections 4 --max-downloads 1
 .venv/bin/ldm watch                          # live progress
 .venv/bin/ldm get https://example.com/x.zip  # foreground, no daemon (Ctrl-C pauses)
+
+# M7: scheduler (default times + per-download times) and run conditions
+.venv/bin/ldm settings schedule_start 23:00 && .venv/bin/ldm settings schedule_stop 06:00  # default; overnight ok
+.venv/bin/ldm settings schedule_days sat,sun   # default days; empty = every day
+.venv/bin/ldm add https://example.com/big.iso --scheduled --unmetered-only   # follows the default times
+.venv/bin/ldm add https://example.com/other.iso --start 01:00 --stop 05:00   # its own times
+.venv/bin/ldm schedule 1 on --days fri        # give download 1 its own days
+.venv/bin/ldm schedule 1 off                  # take it off the schedule (starts now)
+.venv/bin/ldm settings battery_limit 20       # hold downloads on battery below 20 %
+.venv/bin/ldm clipboard-watch                 # offer copied links (KDE/wlroots Wayland, X11)
 ```
 
 State: `$XDG_DATA_HOME/ldm/ldm.db` (daemon) and `standalone.db` (`ldm get`); `--db` overrides.
@@ -75,9 +85,10 @@ runs, its data is in `<name>.<id>.part` next to the target.
 
 ## Run as a service
 
-`data/ldm.service` (systemd user unit) and `data/io.github.ldm.service` (D-Bus activation): copy
-to `~/.config/systemd/user/` and `~/.local/share/dbus-1/services/`, set `ExecStart`/`Exec` to your
-`ldm` path, then `systemctl --user daemon-reload && systemctl --user enable --now ldm`.
+`ldm install-browser-integration` writes the systemd user unit (`~/.config/systemd/user/ldm.service`),
+D-Bus activation through it, the desktop file and icon, and enables the unit when the `autostart`
+setting is on (Preferences → System → "Start the download service at login"). Packages install the
+same files system-wide: see `packaging/` (RPM spec, `build-rpm.sh`, `COPR.md`, Flatpak manifest).
 
 ## Tests
 

@@ -27,8 +27,10 @@ class FakeClient:
     def probe_media(self, url, headers, callback):
         self.media_probes.append((url, headers, callback))
 
+    settings_override: dict = {}
+
     def get_settings(self, callback):
-        callback(dict(SETTINGS), None)
+        callback({**SETTINGS, **self.settings_override}, None)
 
     def probe(self, url, headers, callback):
         self.probes.append((url, headers, callback))
@@ -72,11 +74,13 @@ def test_add_to_list_and_start():
     client = FakeClient()
     dialog = AddDialog(client, "https://site/a.zip", name="a.zip")
     dialog.limit.set_text("2M")
+    dialog.unmetered_only.set_active(True)
     dialog._submit(start=False)
     url, options = client.added[0]
     assert url == "https://site/a.zip"
     assert options == {"name": "a.zip", "dir": "/tmp/ldm-test-downloads", "connections": 8,
-                       "speed_limit": 2 * 1024 * 1024, "headers": None, "start": False}
+                       "speed_limit": 2 * 1024 * 1024, "headers": None, "start": False,
+                       "scheduled": False, "unmetered_only": True}
 
 
 def test_plain_add_dialog_without_arguments():
@@ -163,3 +167,32 @@ def test_nothing_selected_disables_start():
     client.torrent_probes[-1][2](TORRENT, None)
     dialog.select_all.set_active(False)
     assert not dialog.start_button.get_sensitive()
+
+
+def test_schedule_this_download_with_own_times():
+    client = FakeClient()
+    dialog = AddDialog(client, "https://site/big.iso", name="big.iso")
+    editor = dialog.schedule
+    assert not editor.get_enable_expansion()
+    assert editor.get_subtitle() == "Default times: 02:00–06:00, every day"
+    editor.set_enable_expansion(True)
+    editor.start.set_time("22:30")
+    editor.days.set_days("sat,sun")
+    assert editor.get_subtitle() == "Own times: 22:30–06:00 (overnight), Sat Sun"
+    assert editor.reset_row.get_visible()
+    dialog._submit(start=True)
+    _, options = client.added[0]
+    assert options["scheduled"] is True
+    assert (options["schedule_start"], options["schedule_stop"], options["schedule_days"]) == \
+        ("22:30", "06:00", "sat,sun")
+
+
+def test_schedule_follows_new_link_setting_and_defaults():
+    client = FakeClient()
+    client.settings_override = {"schedule_new_links": True, "schedule_start": "01:00", "schedule_stop": "05:00"}
+    dialog = AddDialog(client, "https://site/a.zip", name="a.zip")
+    assert dialog.schedule.get_enable_expansion()
+    assert dialog.schedule.window_values() == ("01:00", "05:00", "")
+    dialog._submit(start=True)
+    _, options = client.added[0]
+    assert options["scheduled"] is True and options["schedule_start"] == "01:00"  # = defaults: daemon follows them

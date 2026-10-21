@@ -14,7 +14,9 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from email.message import Message
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Awaitable, Callable, Sequence
 from urllib.parse import unquote, urlsplit
@@ -47,6 +49,23 @@ class RemoteChanged(DownloadError):
 
 class _Retryable(Exception):
     pass
+
+
+class _Throttled(_Retryable):
+    """HTTP 429/503: the server wants fewer or slower requests, not a failed download."""
+
+    def __init__(self, message: str, retry_after: float | None):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+class _TooManyConnections(Exception):
+    """Raised in a worker that should stop because the server throttles this many connections."""
+
+
+MAX_RETRY_AFTER = 300.0   # never wait longer than this for one Retry-After
+THROTTLE_MAX_DELAY = 30.0  # backoff cap when the server gives no Retry-After
+MAX_THROTTLES = 12         # consecutive throttled attempts without progress before giving up
 
 
 @dataclass
@@ -97,10 +116,27 @@ def new_client(headers: dict[str, str] | None = None, max_connections: int = 2) 
     )
 
 
+def _retry_after(r: httpx.Response) -> float | None:
+    """Retry-After in seconds (delta-seconds or an HTTP date), capped; None if absent or unreadable."""
+    value = r.headers.get("retry-after", "").strip()
+    if not value:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            seconds = (parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds()
+        except (TypeError, ValueError):
+            return None
+    return min(max(seconds, 0.0), MAX_RETRY_AFTER)
+
+
 def _check_status(r: httpx.Response) -> None:
     if r.status_code in (401, 403, 404, 410):
         raise LinkExpired(f"HTTP {r.status_code}")
-    if r.status_code == 429 or r.status_code >= 500:
+    if r.status_code in (429, 503):
+        raise _Throttled(f"HTTP {r.status_code}", _retry_after(r))
+    if r.status_code >= 500:
         raise _Retryable(f"HTTP {r.status_code}")
 
 
@@ -131,8 +167,9 @@ class Downloader:
                  chunk_size: int = 1 << 16, persist_interval: float = 2.0, max_retries: int = 5,
                  retry_base_delay: float = 0.5, on_progress: ProgressCallback | None = None,
                  limiters: Sequence[TokenBucket] = (), connections: int | None = None,
-                 progress_interval: float = 0.5):
-        """`limiters` throttle every received chunk; `connections` caps the download's own setting."""
+                 progress_interval: float = 0.5, on_throttled: Callable[[int], None] | None = None):
+        """`limiters` throttle every received chunk; `connections` caps the download's own setting;
+        `on_throttled(n)` reports that the server only tolerates n connections."""
         self.store = store
         self.id = download_id
         self.limiters = limiters
@@ -144,8 +181,11 @@ class Downloader:
         self.retry_base_delay = retry_base_delay
         self.on_progress = on_progress
         self.progress_interval = progress_interval
+        self.on_throttled = on_throttled
         self.parts: list[Part] = []
         self._refresh_lock = asyncio.Lock()
+        self._workers = 0     # connections currently running
+        self._worker_cap = 0  # how many the server tolerates (lowered on HTTP 429/503)
 
     def _connections(self, d: DownloadRow) -> int:
         return min(d.connections, self.max_connections or d.connections)
@@ -217,6 +257,7 @@ class Downloader:
 
     async def _transfer(self) -> None:
         workers = self._connections(self.d) if self.d.resumable else 1
+        self._worker_cap = workers
         background = [asyncio.create_task(self._persist_loop())]
         if self.on_progress:
             background.append(asyncio.create_task(self._progress_loop()))
@@ -233,12 +274,18 @@ class Downloader:
             self._flush()
 
     async def _worker(self) -> None:
-        while (part := self._next_part()) is not None:
-            part.active = True
-            try:
-                await self._fetch(part)
-            finally:
-                part.active = False
+        self._workers += 1
+        try:
+            while (part := self._next_part()) is not None:
+                part.active = True
+                try:
+                    await self._fetch(part)
+                except _TooManyConnections:
+                    return  # the part goes back to the pool for the remaining connections
+                finally:
+                    part.active = False
+        finally:
+            self._workers -= 1
 
     def _next_part(self) -> Part | None:
         for part in self.parts:
@@ -249,7 +296,7 @@ class Downloader:
         return None
 
     async def _fetch(self, part: Part) -> None:
-        attempt = 0
+        attempt = throttles = 0
         refreshed = False
         while not part.complete:
             before = part.done
@@ -263,6 +310,18 @@ class Downloader:
                     raise
                 refreshed = True
                 await self._refresh_final_url(url)
+            except _Throttled as e:
+                # Rate limited: use fewer connections and wait, rather than failing the download.
+                throttles = 1 if part.done > before else throttles + 1
+                if throttles > MAX_THROTTLES:
+                    raise DownloadError(f"the server keeps refusing requests ({e})") from e
+                if self._workers > 1:  # this connection drops out; the others take over its part
+                    self._worker_cap = self._workers - 1
+                    if self.on_throttled:
+                        self.on_throttled(self._worker_cap)
+                    raise _TooManyConnections from e
+                await asyncio.sleep(e.retry_after if e.retry_after is not None
+                                    else min(THROTTLE_MAX_DELAY, self.retry_base_delay * 2 ** throttles))
             except (httpx.TransportError, _Retryable) as e:
                 attempt = 1 if part.done > before else attempt + 1
                 if attempt > self.max_retries:
@@ -326,7 +385,10 @@ class Downloader:
             except (httpx.TransportError, _Retryable) as e:
                 if attempt == self.max_retries:
                     raise DownloadError(str(e)) from e
-                await asyncio.sleep(self.retry_base_delay * 2 ** attempt)
+                delay = self.retry_base_delay * 2 ** attempt
+                if isinstance(e, _Throttled) and e.retry_after is not None:
+                    delay = max(delay, e.retry_after)
+                await asyncio.sleep(delay)
 
     def _snapshot(self) -> list[tuple[int, int, int]]:
         return [(p.first, p.last, p.done) for p in self.parts]

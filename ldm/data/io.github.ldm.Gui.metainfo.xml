@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.ldm.Gui</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <name>LDM</name>
+  <summary>Download files, videos and torrents</summary>
+  <description>
+    <p>
+      LDM is a download manager for Linux, modelled on 1DM for Android. Downloads keep running in a
+      background service, so closing the window never stops them.
+    </p>
+    <ul>
+      <li>Splits files into parts and downloads them over several connections</li>
+      <li>Pauses, resumes and retries; expired links can be replaced without losing progress</li>
+      <li>Downloads videos and streams, including YouTube, HLS and DASH (via yt-dlp)</li>
+      <li>Downloads torrents and magnet links, with file selection and seeding limits</li>
+      <li>Runs scheduled downloads in a time window and can wait for an unmetered connection</li>
+      <li>Has a browser extension for Firefox, Chrome and Brave</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.ldm.Gui.desktop</launchable>
+  <provides>
+    <binary>ldm</binary>
+    <binary>ldm-gui</binary>
+    <dbus type="user">io.github.ldm</dbus>
+  </provides>
+  <categories>
+    <category>Network</category>
+    <category>FileTransfer</category>
+  </categories>
+  <keywords>
+    <keyword>download</keyword>
+    <keyword>torrent</keyword>
+    <keyword>video</keyword>
+  </keywords>
+  <developer id="io.github.ldm">
+    <name>LDM contributors</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-21">
+      <description>
+        <p>First release: multi-part downloads, video and torrent support, scheduler, browser extension.</p>
+      </description>
+    </release>
+  </releases>
+</component>

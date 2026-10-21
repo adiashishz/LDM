@@ -26,13 +26,13 @@ function connect() {
     pending.delete(message.id);
     clearTimeout(waiter.timer);
     if (message.ok) waiter.resolve(message);
-    else waiter.reject(new HostError(message.error || "ldm reported an error"));
+    else waiter.reject(new HostError(message.error || "LDM reported an error"));
     scheduleIdle();
   });
   port.onDisconnect.addListener((p) => {
     const reason = (p && p.error && p.error.message) || api.runtime.lastError?.message || "bridge disconnected";
     const notInstalled = /not found|no such native application|access to the specified native messaging host is forbidden/i.test(reason);
-    const error = new HostError(notInstalled ? "ldm browser bridge is not installed — run: ldm install-browser-integration" : reason,
+    const error = new HostError(notInstalled ? "LDM browser bridge is not installed — run: ldm install-browser-integration" : reason,
       notInstalled);
     for (const waiter of pending.values()) {
       clearTimeout(waiter.timer);
@@ -60,7 +60,7 @@ export function request(command) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(id);
-      reject(new HostError("ldm did not answer in time"));
+      reject(new HostError("LDM did not answer in time"));
     }, TIMEOUT_MS);
     pending.set(id, { resolve, reject, timer });
     try {

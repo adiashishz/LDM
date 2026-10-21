@@ -53,9 +53,13 @@ def progress_line(done: int, size: int | None, speed: float) -> str:
     return f"{human(done)}  {human(speed)}/s"
 
 
-def status_text(state: str, done: int, size: int | None, speed: float = 0.0, error: str | None = None) -> str:
-    """Status line for a download row."""
+def status_text(state: str, done: int, size: int | None, speed: float = 0.0, error: str | None = None,
+                waiting: str | None = None) -> str:
+    """Status line for a download row; `waiting` is why a queued download isn't starting."""
     amount = f"{human(done)} of {human(size)}" if size else human(done)
+    if state == "queued" and waiting:
+        label = waiting[0].upper() + waiting[1:] if waiting.startswith("scheduled") else f"Waiting: {waiting}"
+        return f"{label} — {amount}" if done else label
     if state == "running":
         parts = [f"{done * 100 // size}%" if size else None, amount, f"{human(speed)}/s",
                  eta_text(size - done, speed) if size else ""]

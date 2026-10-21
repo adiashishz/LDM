@@ -72,7 +72,8 @@ def test_errors_are_dbus_errors(daemon):
 
 def test_second_daemon_refuses_to_start(daemon, tmp_path):
     with pytest.raises(AlreadyRunning):
-        asyncio.run(serve(bus_address=daemon, db_path=tmp_path / "other.db", stop=asyncio.Event()))
+        asyncio.run(serve(bus_address=daemon, db_path=tmp_path / "other.db", stop=asyncio.Event(),
+                          system_bus_address=daemon, manage_autostart=False))
 
 
 def test_cli_talks_to_daemon(daemon, http_server, tmp_path, capsys):

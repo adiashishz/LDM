@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>ldm settings</title>
+  <title>LDM settings</title>
   <style>
     :root { color-scheme: light dark; }
     body { font: 13px/1.5 system-ui, sans-serif; margin: 16px; max-width: 520px; }
@@ -17,14 +17,14 @@
 <body>
   <fieldset>
     <legend>Browser downloads</legend>
-    <label><input id="intercept" type="checkbox"> Send browser downloads to ldm</label>
+    <label><input id="intercept" type="checkbox"> Send browser downloads to LDM</label>
     <label>Only for files of at least (MiB)<input id="minSize" type="number" min="0" step="0.5"></label>
     <label>Never for these extensions<input id="excludeExtensions" type="text" placeholder="pdf, torrent"></label>
     <label>Never for these sites<input id="excludeSites" type="text" placeholder="example.org"></label>
   </fieldset>
   <fieldset>
     <legend>When sending a file</legend>
-    <label><input type="radio" name="mode" value="dialog"> Open ldm's add dialog to confirm</label>
+    <label><input type="radio" name="mode" value="dialog"> Open LDM's add dialog to confirm</label>
     <label><input type="radio" name="mode" value="direct"> Add to the queue right away</label>
     <p class="hint">Several files from the Links tab are always added right away.</p>
   </fieldset>

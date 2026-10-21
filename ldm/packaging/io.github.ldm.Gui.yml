@@ -1,0 +1,57 @@
+# Flatpak manifest for LDM — written, not built or tested yet.
+#
+# Before building:
+#   1. Generate the Python dependencies (httpx, dbus-fast, yt-dlp and their dependencies):
+#        flatpak-pip-generator --runtime=org.gnome.Sdk//50 httpx dbus-fast "yt-dlp[default]" yt-dlp-ejs \
+#          --output python3-deps
+#   2. flatpak-builder --user --install --force-clean build-dir ldm/packaging/io.github.ldm.Gui.yml
+#
+# Known gaps compared with the RPM:
+#   - Torrents: libtorrent (rb_libtorrent with Python bindings, needs Boost) is not packaged here yet;
+#     LDM runs without it and torrent downloads report that libtorrent is missing.
+#   - Start at login: systemd user units are invisible to Flatpak; this needs the Background portal
+#     (org.freedesktop.portal.Background.RequestBackground) instead of `systemctl --user enable`.
+#   - Browser bridge: browsers can't launch a host inside this sandbox directly; the per-user
+#     installer would need to point manifests at `flatpak run --command=ldm-nmhost io.github.ldm.Gui`.
+#   - D-Bus activation of the service: Flatpak only exports service files named after the app ID, so
+#     io.github.ldm can't be activated; the window's "Start" button launches it instead.
+#   - YouTube needs a JavaScript runtime: add the org.freedesktop.Sdk.Extension.node22 runtime files.
+app-id: io.github.ldm.Gui
+runtime: org.gnome.Platform
+runtime-version: "50"
+sdk: org.gnome.Sdk
+command: ldm-gui
+add-extensions:
+  org.freedesktop.Platform.ffmpeg-full:
+    directory: lib/ffmpeg
+    version: "25.08"
+    add-ld-path: .
+cleanup-commands:
+  - mkdir -p /app/lib/ffmpeg
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --filesystem=xdg-download
+  - --own-name=io.github.ldm
+  - --talk-name=org.freedesktop.Notifications
+  - --system-talk-name=org.freedesktop.NetworkManager
+  - --system-talk-name=org.freedesktop.UPower
+  - --system-talk-name=org.freedesktop.login1
+modules:
+  - python3-deps.json
+  - name: ldm
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-deps --no-build-isolation --prefix=/app ./ldm
+      - python3 ldm/packaging/install-data.py / --prefix /app --sysconfdir /app/etc --no-browsers
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - apk
+          - tools
+          - notes
+          - ldm/.venv

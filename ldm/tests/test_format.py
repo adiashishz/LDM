@@ -25,3 +25,10 @@ def test_status_text():
     assert status_text("done", 10 * MIB, 10 * MIB) == "Finished — 10.0 MiB"
     assert status_text("error", 0, None, error="HTTP 500") == "Failed: HTTP 500"
     assert status_text("expired", 0, 10) == "Link expired — set a new link"
+
+
+def test_waiting_status():
+    assert status_text("queued", 0, None, waiting="scheduled — starts 02:00") == "Scheduled — starts 02:00"
+    assert status_text("queued", MIB, 4 * MIB, waiting="metered connection") == \
+        "Waiting: metered connection — 1.0 MiB of 4.0 MiB"
+    assert status_text("paused", 0, None, waiting="metered connection") == "Paused"

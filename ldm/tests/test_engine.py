@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from ldm.engine import Downloader, LinkExpired, RemoteChanged
+from ldm.engine import DownloadError, Downloader, LinkExpired, RemoteChanged
 from ldm.ratelimit import TokenBucket
 from ldm.store import Store
 
@@ -169,3 +169,37 @@ def test_expired_redirect_target_is_resolved_again(tmp_path, http_server):
     cfg.redirects["/start"] = "/files/test.bin?token=2"
     assert download(store, did).read_bytes() == data
     assert store.get(did).final_url.endswith("token=2")
+
+
+def test_rate_limited_server_gets_fewer_connections(tmp_path, http_server):
+    """HTTP 429 on some parts (like Hetzner's speed-test mirrors): back off and drop connections."""
+    data = payload(2_000_000)
+    cfg, url = http_server(data=data, delay=0.002)
+    cfg.range_limit, cfg.retry_after = 2, "0"
+    store = Store(tmp_path / "state.db")
+    download_id = store.add(url, tmp_path, connections=8)
+    caps = []
+    downloader = Downloader(store, download_id, min_part=64 * 1024, retry_base_delay=0.01, on_throttled=caps.append)
+    path = asyncio.run(downloader.run())
+    assert path.read_bytes() == data
+    assert cfg.throttled > 0 and caps and caps[-1] <= 7
+    assert store.get(download_id).state == "done"
+
+
+def test_endless_rate_limiting_fails_after_a_while(tmp_path, http_server):
+    data = payload(300_000)
+    cfg, url = http_server(data=data, status=429)
+    store = Store(tmp_path / "state.db")
+    download_id = store.add(url, tmp_path, connections=1)
+    downloader = Downloader(store, download_id, retry_base_delay=0.001)
+    with pytest.raises(DownloadError):
+        asyncio.run(downloader.run())
+
+
+def test_retry_after_header():
+    import httpx
+    from ldm.engine import _retry_after
+    assert _retry_after(httpx.Response(429, headers={"Retry-After": "7"})) == 7.0
+    assert _retry_after(httpx.Response(429, headers={"Retry-After": "99999"})) == 300.0
+    assert _retry_after(httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"})) == 0.0
+    assert _retry_after(httpx.Response(429)) is None

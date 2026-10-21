@@ -170,6 +170,10 @@ class DaemonClient(GObject.Object):
     def probe(self, url: str, headers: dict[str, str], callback: Callback) -> None:
         self._call("Probe", "sa{ss}", (url, headers), callback)
 
+    def set_schedule(self, download_id: int, scheduled: bool, window: dict[str, str],
+                     callback: Callback | None = None) -> None:
+        self._call("SetSchedule", "tba{ss}", (download_id, scheduled, window), callback)
+
     def set_speed_limit(self, download_id: int, rate: int, callback: Callback | None = None) -> None:
         self._call("SetSpeedLimit", "tt", (download_id, rate), callback)
 

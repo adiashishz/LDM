@@ -19,6 +19,9 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "home/.config"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setattr(integration, "_reload_bus_config", lambda: None)  # don't touch the real bus
+    calls = []
+    monkeypatch.setattr(integration, "_systemctl", lambda *args: calls.append(args) or True)  # nor systemd
+    monkeypatch.setattr(integration, "SYSTEMCTL_CALLS", calls, raising=False)
     (tmp_path / "home/.var/app/com.brave.Browser").mkdir(parents=True)
     return tmp_path / "home"
 
@@ -50,14 +53,20 @@ def test_install_and_uninstall(home):
         assert os.access(host, os.X_OK)
 
     services = home / ".local/share/dbus-1/services"
-    assert "daemon" in (services / "io.github.ldm.service").read_text()
+    assert "SystemdService=ldm.service" in (services / "io.github.ldm.service").read_text()
+    unit = (home / ".config/systemd/user/ldm.service").read_text()
+    assert "Type=dbus" in unit and "BusName=io.github.ldm" in unit and " daemon" in unit
+    assert integration.SYSTEMCTL_CALLS == [("daemon-reload",), ("enable", "ldm.service")]
     assert "--gapplication-service" in (services / "io.github.ldm.Gui.service").read_text()
+    assert (home / ".local/share/icons/hicolor/scalable/apps/io.github.ldm.Gui.svg").read_text().startswith("<svg")
     assert "DBusActivatable=true" in (home / ".local/share/applications/io.github.ldm.Gui.desktop").read_text()
     assert any("flatpak override --user --talk-name=io.github.ldm --talk-name=io.github.ldm.Gui com.brave.Browser"
                in line for line in lines)
 
     integration.uninstall(home, log=lines.append)
     assert not (home / ".mozilla/native-messaging-hosts/io.github.ldm.json").exists()
+    assert not (home / ".config/systemd/user/ldm.service").exists()
+    assert integration.SYSTEMCTL_CALLS[2:] == [("disable", "ldm.service"), ("daemon-reload",)]
     assert not (services / "io.github.ldm.service").exists()
     assert not (brave_dir / "data/ldm/ldm_nmhost.py").exists()
 

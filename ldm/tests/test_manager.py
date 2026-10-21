@@ -237,3 +237,39 @@ def test_probe_reports_size_resume_and_name(tmp_path, http_server):
     assert {k: info[k] for k in ("size", "resumable", "filename")} == {"size": 12_345, "resumable": True,
                                                                          "filename": "clip.mkv"}
     assert cfg.requests[-1]["Referer"] == "https://site/"
+
+
+class FakeMedia:
+    """Stands in for MediaDownloader: reports progress like yt-dlp, then waits to be paused."""
+
+    def __init__(self, store, download_id, *, on_progress=None, **_):
+        self.store, self.id, self.on_progress = store, download_id, on_progress
+
+    async def run(self):
+        self.store.set_state(self.id, "running")
+        self.on_progress(300_000, 1_000_000, 50_000.0)
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            self.store.set_state(self.id, "paused")
+            raise
+
+
+def test_paused_video_keeps_its_progress(tmp_path):
+    """Regression: a paused yt-dlp download showed 0 % and no size (its progress lived only in memory)."""
+    store = Store(tmp_path / "state.db")
+    store.set_setting("download_dir", str(tmp_path / "dl"))
+    manager = Manager(store, media_factory=FakeMedia, progress_interval=0.05)
+
+    async def scenario():
+        i = manager.add("https://video.example/watch?v=1", kind="media", name="trailer.mp4")
+        await wait_state(manager, i, "running")
+        await asyncio.sleep(0.05)
+        manager.pause(i)
+        await wait_state(manager, i, "paused")
+        await asyncio.sleep(0.05)
+        return i
+
+    i = run(manager, scenario)
+    info = Manager(Store(tmp_path / "state.db")).describe(i)  # also after a service restart
+    assert (info["state"], info["done"], info["size"]) == ("paused", 300_000, 1_000_000)

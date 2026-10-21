@@ -156,9 +156,9 @@ class Application(Adw.Application):
         dialog.present(self.window())
 
     def _about(self, *_) -> None:
-        Adw.AboutDialog(application_name="Downloads", application_icon="folder-download-symbolic",
-                        version=__version__, comments="Multi-part download manager for Linux (ldm)",
-                        developers=["ldm contributors"]).present(self.window())
+        Adw.AboutDialog(application_name="LDM", application_icon=APP_ID,
+                        version=__version__, comments="Download manager for Linux: files, videos and torrents",
+                        developers=["LDM contributors"]).present(self.window())
 
 
 def main() -> int:

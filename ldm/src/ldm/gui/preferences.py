@@ -1,4 +1,4 @@
-"""Preferences: daemon settings and per-host rules."""
+"""Preferences: daemon settings, schedule and per-host rules."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from typing import Any
 from gi.repository import Adw, Gio, GLib, Gtk
 
 from ..format import human, parse_rate
+from .schedule_rows import DaysRow, TimeRow
 from .client import DaemonClient
 from .dialogs import limit_text, short_path
 
@@ -32,6 +33,18 @@ TORRENT_SPINS = {  # key -> (title, subtitle, min, max, step, digits)
     "torrent_max_connections": ("Connections in total", "", 1, 2000, 1, 0),
     "torrent_seed_ratio": ("Stop seeding at ratio", "0 means no limit", 0, 100, 0.1, 1),
     "torrent_seed_minutes": ("Stop seeding after (minutes)", "0 means no limit", 0, 100000, 10, 0),
+}
+
+SYSTEM_SWITCHES = {
+    "pause_on_metered": ("Pause on metered connections", "Mobile data, hotspots and Wi-Fi marked as metered"),
+    "prevent_sleep": ("Keep the computer awake", "While files are downloading"),
+    "autostart": ("Start the download service at login", "Scheduled downloads run even if LDM isn't open"),
+    "notify_when_closed": ("Notifications when LDM is closed", "For finished and failed downloads"),
+    "clipboard_watch": ("Offer to download copied links", "When LDM gets focus, and in the background "
+                                                          "on desktops that allow it"),
+}
+SCHEDULE_SWITCHES = {
+    "schedule_new_links": ("Put new downloads on the schedule", "You can still change it when adding"),
 }
 
 # setting key -> (title, subtitle, minimum, maximum)
@@ -83,9 +96,49 @@ class PreferencesDialog(Adw.PreferencesDialog):
         for row in (self.quality, self.container, self.subtitles, self.runtime, self.runtime_found):
             row.set_sensitive(False)
             video.add(row)
+        system = Adw.PreferencesGroup(title="System")
+        self.setting_rows: dict[str, Gtk.Widget] = {}  # simple switches and spins, bound in _bind_rows
+        for key, (title, subtitle) in SYSTEM_SWITCHES.items():
+            row = Adw.SwitchRow(title=title, subtitle=subtitle, sensitive=False)
+            system.add(row)
+            self.setting_rows[key] = row
+        battery = Adw.SpinRow.new_with_range(0, 100, 5)
+        battery.set_title("Pause on battery below (%)")
+        battery.set_subtitle("0 means never")
+        battery.set_sensitive(False)
+        system.add(battery)
+        self.setting_rows["battery_limit"] = battery
+        self.clipboard_exclude = Adw.EntryRow(title="Never offer links ending in (e.g. html,php)",
+                                              show_apply_button=True)
+        self.clipboard_exclude.connect("apply", lambda row: self._save(
+            {"clipboard_exclude": row.get_text().replace(" ", "")}))
+        system.add(self.clipboard_exclude)
         general.add(downloads)
         general.add(network)
         general.add(video)
+        general.add(system)
+
+        self.schedule_page = schedule = Adw.PreferencesPage(title="Schedule", icon_name="alarm-symbolic")
+        window = Adw.PreferencesGroup(
+            title="Default schedule",
+            description="Like 1DM's scheduler: downloads you put on the schedule (in the add dialog or "
+                        "from a download's menu → Schedule…) start and stop at these times, unless you "
+                        "give that download its own times.")
+        self.times = {"schedule_start": TimeRow("Start at"),
+                      "schedule_stop": TimeRow("Stop at", "Earlier than the start time runs overnight")}
+        self.days = DaysRow()
+        for row in (*self.times.values(), self.days):
+            row.set_sensitive(False)
+            window.add(row)
+        for key, (title, subtitle) in SCHEDULE_SWITCHES.items():
+            row = Adw.SwitchRow(title=title, subtitle=subtitle, sensitive=False)
+            window.add(row)
+            self.setting_rows[key] = row
+        self.schedule_limit = Adw.EntryRow(title="Speed limit while scheduled (e.g. 2M, 0 = unlimited)",
+                                           show_apply_button=True)
+        self.schedule_limit.connect("apply", self._apply_schedule_limit)
+        window.add(self.schedule_limit)
+        schedule.add(window)
 
         hosts = Adw.PreferencesPage(title="Host Rules", icon_name="network-server-symbolic")
         self.rules = Adw.PreferencesGroup(
@@ -136,6 +189,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
             torrents.add(group)
 
         self.add(general)
+        self.add(schedule)
         self.add(torrents)
         self.add(hosts)
         client.get_settings(self._loaded)
@@ -166,13 +220,35 @@ class PreferencesDialog(Adw.PreferencesDialog):
         for row in (self.quality, self.container, self.subtitles, self.runtime, self.runtime_found):
             row.set_sensitive(True)
         self._load_torrent_settings(settings)
+        self._bind_rows(self.setting_rows, settings)
+        self.clipboard_exclude.set_text(settings["clipboard_exclude"])
+        for key, row in self.times.items():
+            row.set_time(settings[key])
+            row.set_sensitive(True)
+            row.connect("changed", lambda r, k=key: self._save({k: r.get_time()}))
+        self.days.set_days(settings["schedule_days"])
+        self.days.set_sensitive(True)
+        self.days.connect("changed", lambda r: self._save({"schedule_days": r.get_days()}))
+        self.schedule_limit.set_text(limit_text(settings["schedule_speed_limit"]))
         self.quality.connect("notify::selected",
                              lambda r, _p: self._save({"media_quality": QUALITIES[r.get_selected()][0]}))
         self.container.connect("notify::selected",
                                lambda r, _p: self._save({"media_container": CONTAINERS[r.get_selected()][0]}))
 
     def _load_torrent_settings(self, settings: dict[str, Any]) -> None:
-        for key, row in self.torrent_rows.items():
+        self._bind_rows(self.torrent_rows, settings)
+        self.encryption.set_selected(next((i for i, (v, _) in enumerate(ENCRYPTION)
+                                           if v == settings["torrent_encryption"]), 0))
+        self.encryption.set_sensitive(True)
+        self.encryption.connect("notify::selected", lambda r, _p: self._save(
+            {"torrent_encryption": ENCRYPTION[r.get_selected()][0]}))
+        self.upload.set_text(limit_text(settings["torrent_upload_limit"]))
+        self.trackers.set_text(" ".join(settings["torrent_trackers"].split()))
+        self.ip_filter.set_text(settings["torrent_ip_filter"])
+
+    def _bind_rows(self, rows: dict[str, Gtk.Widget], settings: dict[str, Any]) -> None:
+        """Show the values of switch and spin rows, then save every change."""
+        for key, row in rows.items():
             if isinstance(row, Adw.SwitchRow):
                 row.set_active(settings[key])
                 row.connect("notify::active", lambda r, _p, k=key: self._save({k: r.get_active()}))
@@ -182,14 +258,13 @@ class PreferencesDialog(Adw.PreferencesDialog):
                 row.connect("notify::value", lambda r, _p, k=key, f=is_float:
                             self._save({k: float(r.get_value()) if f else int(r.get_value())}))
             row.set_sensitive(True)
-        self.encryption.set_selected(next((i for i, (v, _) in enumerate(ENCRYPTION)
-                                           if v == settings["torrent_encryption"]), 0))
-        self.encryption.set_sensitive(True)
-        self.encryption.connect("notify::selected", lambda r, _p: self._save(
-            {"torrent_encryption": ENCRYPTION[r.get_selected()][0]}))
-        self.upload.set_text(limit_text(settings["torrent_upload_limit"]))
-        self.trackers.set_text(" ".join(settings["torrent_trackers"].split()))
-        self.ip_filter.set_text(settings["torrent_ip_filter"])
+
+    def _apply_schedule_limit(self, row: Adw.EntryRow) -> None:
+        try:
+            self._save({"schedule_speed_limit": parse_rate(row.get_text() or "0")})
+            row.remove_css_class("error")
+        except ValueError:
+            row.add_css_class("error")
 
     def _apply_upload(self, row: Adw.EntryRow) -> None:
         try:
