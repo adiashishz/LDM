@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Downloads (ldm)
+GenericName=Download Manager
+Comment=Multi-part download manager
+Exec=ldm-gui %U
+Icon=folder-download
+Terminal=false
+Categories=Network;FileTransfer;GTK;
+Keywords=download;manager;resume;
+StartupNotify=true
+DBusActivatable=false

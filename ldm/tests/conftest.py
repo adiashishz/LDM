@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
+import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
@@ -148,3 +150,40 @@ def http_server():
     for server in servers:
         server.shutdown()
         server.server_close()
+
+
+# --- private D-Bus session bus + daemon -------------------------------------------------
+
+@pytest.fixture
+def bus_address(monkeypatch):
+    proc = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--print-address"],
+                            stdout=subprocess.PIPE, text=True)
+    address = proc.stdout.readline().strip()
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", address)
+    yield address
+    proc.terminate()
+    proc.wait()
+
+
+@pytest.fixture
+def daemon(bus_address, tmp_path):
+    """Run `serve()` in its own thread and event loop."""
+    loop = asyncio.new_event_loop()
+    stop, ready = asyncio.Event(), threading.Event()
+    options = {"progress_interval": 0.05, "downloader_options": {"min_part": 64 * 1024}}
+    from ldm.daemon import serve
+
+    async def run():
+        started = asyncio.Event()
+        task = asyncio.create_task(serve(bus_address=bus_address, db_path=tmp_path / "daemon.db",
+                                         stop=stop, ready=started, manager_options=options))
+        await started.wait()
+        ready.set()
+        await task
+
+    thread = threading.Thread(target=loop.run_until_complete, args=(run(),), daemon=True)
+    thread.start()
+    assert ready.wait(10), "daemon did not start"
+    yield bus_address
+    loop.call_soon_threadsafe(stop.set)
+    thread.join(10)

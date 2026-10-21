@@ -7,9 +7,13 @@ dependencies = ["httpx>=0.27", "dbus-fast>=2.20"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+gui = ["PyGObject>=3.50"]  # usually the distro package (python3-gobject)
 
 [project.scripts]
 ldm = "ldm.cli:main"
+
+[project.gui-scripts]
+ldm-gui = "ldm.gui.app:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -17,3 +21,8 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    # raised inside PyGObject itself, not ldm
+    "ignore::DeprecationWarning:gi.*",
+    "ignore::gi.PyGIDeprecationWarning",
+]

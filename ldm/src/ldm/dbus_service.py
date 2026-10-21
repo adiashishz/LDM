@@ -10,13 +10,9 @@ from typing import Any
 from dbus_fast import DBusError, Variant
 from dbus_fast.service import ServiceInterface, method, signal
 
-from .manager import Busy, InvalidArgument, Manager, NotFound, SizeMismatch
+from .busnames import BUS_NAME, ERROR_PREFIX, INTERFACE, OBJECT_PATH  # noqa: F401 (re-exported)
 from .engine import DownloadError
-
-BUS_NAME = "io.github.ldm"
-OBJECT_PATH = "/io/github/ldm/Manager1"
-INTERFACE = "io.github.ldm.Manager1"
-ERROR_PREFIX = "io.github.ldm.Error."
+from .manager import Busy, InvalidArgument, Manager, NotFound, SizeMismatch
 
 ADD_OPTIONS = {"dir", "name", "connections", "headers", "speed_limit", "start"}
 

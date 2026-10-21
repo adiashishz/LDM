@@ -8,10 +8,21 @@ Working name. Design: [../notes/10-linux-design.md](../notes/10-linux-design.md)
   queue, parallel-download limit, per-host rules, global/per-download speed limits, auto-retry,
   link refresh, and restart recovery. The CLI is a client of the daemon.
 
+- **M3:** desktop app `ldm-gui` (GTK4/libadwaita): download list with All / Downloading / Finished /
+  Problems views, add dialog (clipboard prefill, drag-and-drop of links, folder, connections, speed
+  limit, request headers), pause/resume/retry, set new link, per-download speed limit, open file or
+  folder, remove (optionally deleting the file), preferences and host rules, notifications. It is a
+  pure D-Bus client: closing it never stops downloads. If the service is not running, a banner
+  offers to start it (it is never started automatically).
+
 ## Use
 
+The GUI needs the distro's PyGObject, GTK 4 and libadwaita (Fedora: `python3-gobject gtk4
+libadwaita`), so the venv is built on the system Python with its site packages:
+
 ```sh
-uv venv .venv && uv pip install -e '.[dev]'
+uv venv --python /usr/bin/python3 --system-site-packages .venv && uv pip install -e '.[dev]'
+.venv/bin/ldm-gui                            # desktop app
 .venv/bin/ldm daemon &                       # or install the service files below
 .venv/bin/ldm add https://example.com/file.iso --wait
 .venv/bin/ldm list
@@ -39,3 +50,7 @@ to `~/.config/systemd/user/` and `~/.local/share/dbus-1/services/`, set `ExecSta
 ```sh
 .venv/bin/python -m pytest -q    # local HTTP test server and a private D-Bus bus; no network
 ```
+
+`tools/render_window.py` renders the GUI to PNGs for visual checks without opening a window on your
+desktop (run it under a headless compositor, e.g. `mutter --headless --wayland --no-x11
+--virtual-monitor 900x700 --wayland-display ldm-render-0` with `WAYLAND_DISPLAY=ldm-render-0`).

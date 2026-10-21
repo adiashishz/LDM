@@ -3,8 +3,6 @@
 import asyncio
 import random
 import shutil
-import subprocess
-import threading
 
 import pytest
 from dbus_fast import DBusError, Variant
@@ -15,40 +13,6 @@ from ldm.daemon import AlreadyRunning, serve
 from ldm.dbus_service import BUS_NAME, INTERFACE, OBJECT_PATH
 
 pytestmark = pytest.mark.skipif(shutil.which("dbus-daemon") is None, reason="dbus-daemon not installed")
-
-
-@pytest.fixture
-def bus_address(monkeypatch):
-    proc = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--print-address"],
-                            stdout=subprocess.PIPE, text=True)
-    address = proc.stdout.readline().strip()
-    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", address)
-    yield address
-    proc.terminate()
-    proc.wait()
-
-
-@pytest.fixture
-def daemon(bus_address, tmp_path):
-    """Run `serve()` in its own thread and event loop."""
-    loop = asyncio.new_event_loop()
-    stop, ready = asyncio.Event(), threading.Event()
-    options = {"progress_interval": 0.05, "downloader_options": {"min_part": 64 * 1024}}
-
-    async def run():
-        started = asyncio.Event()
-        task = asyncio.create_task(serve(bus_address=bus_address, db_path=tmp_path / "daemon.db",
-                                         stop=stop, ready=started, manager_options=options))
-        await started.wait()
-        ready.set()
-        await task
-
-    thread = threading.Thread(target=loop.run_until_complete, args=(run(),), daemon=True)
-    thread.start()
-    assert ready.wait(10), "daemon did not start"
-    yield bus_address
-    loop.call_soon_threadsafe(stop.set)
-    thread.join(10)
 
 
 async def client(address):

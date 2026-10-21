@@ -9,11 +9,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import re
 import sys
 from pathlib import Path
 
 from .engine import DownloadError, Downloader, LinkExpired, RemoteChanged
+from .format import human, parse_rate, progress_line
 from .store import Store, default_db_path, default_download_dir
 
 FINAL_STATES = {"done", "error", "expired", "changed", "paused"}
@@ -21,30 +21,6 @@ FINAL_STATES = {"done", "error", "expired", "changed", "paused"}
 
 class DaemonNotRunning(Exception):
     pass
-
-
-def human(n: float) -> str:
-    for unit in ("B", "KiB", "MiB", "GiB"):
-        if n < 1024:
-            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
-        n /= 1024
-    return f"{n:.1f} TiB"
-
-
-def parse_rate(text: str) -> int:
-    """'500K', '2M', '1G' (binary units) or plain bytes per second; 0 = unlimited."""
-    match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([KMG]?)(?:i?B)?(?:/s)?", text.strip(), re.IGNORECASE)
-    if not match:
-        raise argparse.ArgumentTypeError(f"invalid rate: {text}")
-    factor = 1024 ** " KMG".index(match.group(2).upper() or " ")
-    return int(float(match.group(1)) * factor)
-
-
-def progress_line(done: int, size: int | None, speed: float) -> str:
-    if size and size > 0:
-        eta = f"{(size - done) / speed:.0f}s" if speed > 0 else "--"
-        return f"{done * 100 / size:5.1f}%  {human(done)} / {human(size)}  {human(speed)}/s  ETA {eta}"
-    return f"{human(done)}  {human(speed)}/s"
 
 
 def print_progress(done: int, size: int | None, speed: float) -> None:
