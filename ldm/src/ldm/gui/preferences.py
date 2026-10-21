@@ -8,6 +8,7 @@ from gi.repository import Adw, Gio, GLib, Gtk
 
 from ..format import human, parse_rate
 from .schedule_rows import DaysRow, TimeRow
+from .tools import ask_login
 from .client import DaemonClient
 from .dialogs import limit_text, short_path
 
@@ -43,6 +44,26 @@ SYSTEM_SWITCHES = {
     "clipboard_watch": ("Offer to download copied links", "When LDM gets focus, and in the background "
                                                           "on desktops that allow it"),
 }
+NETWORK_SWITCHES = {
+    "always_retry": ("Always retry", "Keep retrying failed downloads instead of stopping after the retries above"),
+    "restart_non_resumable": ("Start over when resuming isn't possible", "For servers that can't continue a "
+                                                                          "download; off: ask first"),
+}
+ADDING_SWITCHES = {
+    "skip_add_dialog": ("Add without asking", "Links from the browser, the clipboard and drag-and-drop start at "
+                                               "once with the defaults"),
+    "open_html_in_browser": ("Offer to open web pages in the browser", "When a link is a page, not a file"),
+}
+FINISHED_SWITCHES = {
+    "remove_finished": ("Remove finished downloads from the list", "The files stay where they are"),
+    "cleanup_finished_only": ("Clean up only finished downloads", "Otherwise unfinished ones are removed too, "
+                                                                   "with their partial data"),
+}
+PROXY_MODES = [("system", "System settings"), ("none", "No proxy"), ("manual", "Manual")]
+DNS_SERVERS = [("cloudflare", "Cloudflare (1.1.1.1)"), ("google", "Google (8.8.8.8)"), ("quad9", "Quad9 (9.9.9.9)"),
+               ("custom", "Custom URL")]
+USER_AGENTS = [("default", "LDM"), ("firefox", "Firefox"), ("chrome", "Chrome"), ("mobile", "Mobile (Android)"),
+               ("custom", "Custom")]
 SCHEDULE_SWITCHES = {
     "schedule_new_links": ("Put new downloads on the schedule", "You can still change it when adding"),
 }
@@ -113,10 +134,84 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.clipboard_exclude.connect("apply", lambda row: self._save(
             {"clipboard_exclude": row.get_text().replace(" ", "")}))
         system.add(self.clipboard_exclude)
+        adding = Adw.PreferencesGroup(title="Adding")
+        finished = Adw.PreferencesGroup(title="Finished downloads")
+        for group, switches in ((adding, ADDING_SWITCHES), (finished, FINISHED_SWITCHES)):
+            for key, (title, subtitle) in switches.items():
+                row = Adw.SwitchRow(title=title, subtitle=subtitle, sensitive=False)
+                group.add(row)
+                self.setting_rows[key] = row
+        self.folder_rows = {}
+        for key, title in (("move_finished_dir", "Move finished files to"),
+                           ("move_finished_torrent_dir", "Move finished torrents to")):
+            row = Adw.ActionRow(title=title, subtitle="Leave them where they are")
+            choose = Gtk.Button(icon_name="folder-open-symbolic", tooltip_text="Choose Folder", valign=Gtk.Align.CENTER)
+            choose.add_css_class("flat")
+            choose.connect("clicked", lambda _b, k=key: self._choose_move_folder(k))
+            clear = Gtk.Button(icon_name="edit-clear-symbolic", tooltip_text="Don't Move", valign=Gtk.Align.CENTER)
+            clear.add_css_class("flat")
+            clear.connect("clicked", lambda _b, k=key: self._set_move_folder(k, ""))
+            row.add_suffix(choose)
+            row.add_suffix(clear)
+            finished.add(row)
+            self.folder_rows[key] = row
+        cleanup = Adw.SpinRow.new_with_range(0, 3650, 1)
+        cleanup.set_title("Remove list entries after (days)")
+        cleanup.set_subtitle("0 means never")
+        cleanup.set_sensitive(False)
+        finished.add(cleanup)
+        self.setting_rows["cleanup_days"] = cleanup
         general.add(downloads)
+        general.add(adding)
         general.add(network)
+        general.add(finished)
         general.add(video)
         general.add(system)
+
+        self.network_page = network_page = Adw.PreferencesPage(title="Network", icon_name="network-wired-symbolic")
+        proxy = Adw.PreferencesGroup(title="Proxy", description="Used for files, videos and torrents "
+                                                                 "(torrents only with a manual proxy).")
+        self.proxy_mode = Adw.ComboRow(title="Proxy", model=Gtk.StringList.new([l for _, l in PROXY_MODES]),
+                                       sensitive=False)
+        self.proxy_url = Adw.EntryRow(title="Proxy address (http://host:port or socks5://host:port)",
+                                      show_apply_button=True)
+        self.proxy_url.connect("apply", lambda row: self._save({"proxy_url": row.get_text().strip()}))
+        self.proxy_user = Adw.EntryRow(title="Proxy user name (optional)", show_apply_button=True)
+        self.proxy_user.connect("apply", lambda row: self._save({"proxy_user": row.get_text().strip()}))
+        self.proxy_password = Adw.PasswordEntryRow(title="Proxy password", show_apply_button=True)
+        self.proxy_password.connect("apply", lambda row: self._save({"proxy_password": row.get_text()}))
+        for row in (self.proxy_mode, self.proxy_url, self.proxy_user, self.proxy_password):
+            proxy.add(row)
+        dns = Adw.PreferencesGroup(title="DNS", description="DNS-over-HTTPS looks up site names privately and "
+                                                             "gets past DNS blocking. Used for LDM's own file "
+                                                             "downloads (not videos or torrents), and not with a proxy.")
+        self.doh = Adw.SwitchRow(title="Use DNS-over-HTTPS", sensitive=False)
+        self.doh_server = Adw.ComboRow(title="Server", model=Gtk.StringList.new([l for _, l in DNS_SERVERS]))
+        self.doh_url = Adw.EntryRow(title="DNS-over-HTTPS URL (https://…/dns-query)", show_apply_button=True)
+        self.doh_url.connect("apply", lambda row: self._save({"doh_url": row.get_text().strip()}))
+        for row in (self.doh, self.doh_server, self.doh_url):
+            dns.add(row)
+        connection = Adw.PreferencesGroup(title="Connection")
+        for key, title in (("connect_timeout", "Connection timeout (seconds)"),
+                           ("read_timeout", "Read timeout (seconds)")):
+            row = Adw.SpinRow.new_with_range(1, 600, 1)
+            row.set_title(title)
+            row.set_sensitive(False)
+            connection.add(row)
+            self.setting_rows[key] = row
+        self.user_agent = Adw.ComboRow(title="Identify as (user agent)",
+                                       model=Gtk.StringList.new([l for _, l in USER_AGENTS]), sensitive=False)
+        self.user_agent_custom = Adw.EntryRow(title="Custom user agent", show_apply_button=True)
+        self.user_agent_custom.connect("apply", lambda row: row.get_text().strip()
+                                       and self._save({"user_agent": row.get_text().strip()}))
+        connection.add(self.user_agent)
+        connection.add(self.user_agent_custom)
+        for key, (title, subtitle) in NETWORK_SWITCHES.items():
+            row = Adw.SwitchRow(title=title, subtitle=subtitle, sensitive=False)
+            connection.add(row)
+            self.setting_rows[key] = row
+        for group in (proxy, dns, connection):
+            network_page.add(group)
 
         self.schedule_page = schedule = Adw.PreferencesPage(title="Schedule", icon_name="alarm-symbolic")
         window = Adw.PreferencesGroup(
@@ -140,7 +235,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         window.add(self.schedule_limit)
         schedule.add(window)
 
-        hosts = Adw.PreferencesPage(title="Host Rules", icon_name="network-server-symbolic")
+        self.sites_page = hosts = Adw.PreferencesPage(title="Sites", icon_name="network-server-symbolic")
         self.rules = Adw.PreferencesGroup(
             title="Host Rules",
             description="Limit connections or parallel downloads for a site. Rules apply to subdomains "
@@ -151,6 +246,15 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.rules.set_header_suffix(add_rule)
         hosts.add(self.rules)
         self.rule_rows: list[Gtk.Widget] = []
+        self.logins = Adw.PreferencesGroup(
+            title="Logins", description="User names and passwords for sites that ask for them (HTTP login). "
+                                        "Passwords are kept in your keyring.")
+        add_login = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add Login", valign=Gtk.Align.CENTER)
+        add_login.add_css_class("flat")
+        add_login.connect("clicked", lambda *_: self._edit_login(None))
+        self.logins.set_header_suffix(add_login)
+        hosts.add(self.logins)
+        self.login_rows: list[Gtk.Widget] = []
 
         torrents = Adw.PreferencesPage(title="Torrents", icon_name="network-workgroup-symbolic")
         network_group = Adw.PreferencesGroup(title="Network")
@@ -189,11 +293,13 @@ class PreferencesDialog(Adw.PreferencesDialog):
             torrents.add(group)
 
         self.add(general)
+        self.add(network_page)
         self.add(schedule)
         self.add(torrents)
         self.add(hosts)
         client.get_settings(self._loaded)
         self._reload_rules()
+        self._reload_logins()
 
     # --- settings --------------------------------------------------------------------------
 
@@ -230,6 +336,9 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.days.set_sensitive(True)
         self.days.connect("changed", lambda r: self._save({"schedule_days": r.get_days()}))
         self.schedule_limit.set_text(limit_text(settings["schedule_speed_limit"]))
+        self._load_network(settings)
+        for key, row in self.folder_rows.items():
+            row.set_subtitle(short_path(settings[key]) if settings[key] else "Leave them where they are")
         self.quality.connect("notify::selected",
                              lambda r, _p: self._save({"media_quality": QUALITIES[r.get_selected()][0]}))
         self.container.connect("notify::selected",
@@ -307,6 +416,98 @@ class PreferencesDialog(Adw.PreferencesDialog):
         dialog.select_folder(self.get_root(), None, done)
 
     # --- host rules ------------------------------------------------------------------------
+
+    # --- network ---------------------------------------------------------------------------
+
+    def _load_network(self, settings: dict[str, Any]) -> None:
+        modes = [m for m, _ in PROXY_MODES]
+        self.proxy_mode.set_selected(modes.index(settings["proxy_mode"]))
+        self.proxy_url.set_text(settings["proxy_url"])
+        self.proxy_user.set_text(settings["proxy_user"])
+        if settings.get("proxy_password_set"):
+            self.proxy_password.set_title("Proxy password (saved — type to change)")
+        self.doh.set_active(settings["dns_mode"] == "doh")
+        servers = [s for s, _ in DNS_SERVERS]
+        custom = settings["doh_url"] not in servers
+        self.doh_server.set_selected(servers.index("custom") if custom else servers.index(settings["doh_url"]))
+        self.doh_url.set_text(settings["doh_url"] if custom else "")
+        agents = [a for a, _ in USER_AGENTS]
+        known = settings["user_agent"] in agents
+        self.user_agent.set_selected(agents.index(settings["user_agent"]) if known else agents.index("custom"))
+        self.user_agent_custom.set_text("" if known else settings["user_agent"])
+        self._sync_network()
+        for row in (self.proxy_mode, self.doh, self.doh_server, self.user_agent):
+            row.set_sensitive(True)
+        self.proxy_mode.connect("notify::selected", lambda r, _p: (
+            self._save({"proxy_mode": modes[r.get_selected()]}), self._sync_network()))
+        self.doh.connect("notify::active", lambda r, _p: (
+            self._save({"dns_mode": "doh" if r.get_active() else "system"}), self._sync_network()))
+        self.doh_server.connect("notify::selected", self._on_doh_server)
+        self.user_agent.connect("notify::selected", self._on_user_agent)
+
+    def _sync_network(self) -> None:
+        manual = PROXY_MODES[self.proxy_mode.get_selected()][0] == "manual"
+        for row in (self.proxy_url, self.proxy_user, self.proxy_password):
+            row.set_visible(manual)
+        self.doh_server.set_visible(self.doh.get_active())
+        self.doh_url.set_visible(self.doh.get_active() and DNS_SERVERS[self.doh_server.get_selected()][0] == "custom")
+        self.user_agent_custom.set_visible(USER_AGENTS[self.user_agent.get_selected()][0] == "custom")
+
+    def _on_doh_server(self, row, _param) -> None:
+        server = DNS_SERVERS[row.get_selected()][0]
+        if server != "custom":
+            self._save({"doh_url": server})
+        self._sync_network()
+
+    def _on_user_agent(self, row, _param) -> None:
+        agent = USER_AGENTS[row.get_selected()][0]
+        if agent != "custom":
+            self._save({"user_agent": agent})
+        self._sync_network()
+
+    def _choose_move_folder(self, key: str) -> None:
+        dialog = Gtk.FileDialog(title="Move Finished Downloads To")
+
+        def done(d, result) -> None:
+            try:
+                self._set_move_folder(key, d.select_folder_finish(result).get_path())
+            except GLib.Error:
+                pass
+
+        dialog.select_folder(self.get_root(), None, done)
+
+    def _set_move_folder(self, key: str, path: str) -> None:
+        self._save({key: path})
+        self.folder_rows[key].set_subtitle(short_path(path) if path else "Leave them where they are")
+
+    # --- logins ----------------------------------------------------------------------------
+
+    def _reload_logins(self) -> None:
+        self.client.list_logins(self._show_logins)
+
+    def _show_logins(self, logins: list[dict[str, Any]] | None, error) -> None:
+        for row in self.login_rows:
+            self.logins.remove(row)
+        self.login_rows = []
+        for login in logins or []:
+            scope = "" if login["include_subdomains"] else " · exact host"
+            row = Adw.ActionRow(title=login["host"], subtitle=login["username"] + scope, activatable=True)
+            row.connect("activated", lambda _r, entry=login: self._edit_login(entry))
+            delete = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text="Remove Login", valign=Gtk.Align.CENTER)
+            delete.add_css_class("flat")
+            delete.connect("clicked", lambda _b, host=login["host"]: self.client.remove_login(
+                host, lambda *_: self._reload_logins()))
+            row.add_suffix(delete)
+            self.logins.add(row)
+            self.login_rows.append(row)
+
+    def _edit_login(self, login: dict[str, Any] | None) -> None:
+        def save(host: str, user: str, password: str, subdomains: bool) -> None:
+            self.client.set_login(host, user, password, subdomains,
+                                  lambda r, e: self._report(r, e) if e else self._reload_logins())
+
+        ask_login(self, login["host"] if login else "", login["username"] if login else "", save,
+                  login["include_subdomains"] if login else True)
 
     def _reload_rules(self) -> None:
         self.client.list_host_rules(self._show_rules)

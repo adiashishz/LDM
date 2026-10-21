@@ -72,6 +72,19 @@ def steps(app: Application):
     preferences.set_visible_page(preferences.schedule_page)
     yield 0.5
     save(window, "3b-schedule")
+    preferences.set_visible_page(preferences.network_page)
+    yield 0.5
+    save(window, "3c-network")
+    preferences.set_visible_page(preferences.sites_page)
+    yield 0.5
+    save(window, "3d-sites")
+    close_dialog(window)
+    batch = window.batch_download()
+    batch.url.set_text("https://example.com/photos/img*.jpg")
+    batch.last.set_value(25)
+    batch.pad.set_value(3)
+    yield 0.5
+    save(window, "3e-batch")
     close_dialog(window)
     window.filters.set_active_name("problems")
     yield 0.5

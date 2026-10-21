@@ -2,7 +2,7 @@
 
 import { api, getSettings } from "./lib/api.js";
 import { addCapture, clearCaptures, listCaptures } from "./lib/capture.js";
-import { sniff, STREAM_KINDS } from "./lib/classify.js";
+import { pageMedia, sniff, STREAM_KINDS } from "./lib/classify.js";
 import { HostError, request } from "./lib/host.js";
 import { cookieHeader, filenameFromDisposition, filenameFromUrl, shouldIntercept } from "./lib/names.js";
 
@@ -17,13 +17,19 @@ async function cookiesFor(url) {
 }
 
 /** Build the bridge item for one URL: filename, referer, cookies, user agent. */
-async function itemFor({ url, filename = "", referer = "", size = null, pageUrl = "", kind = "" }) {
+async function itemFor({ url, filename = "", referer = "", size = null, pageUrl = "", kind = "", tabId = null,
+                        headers = {} }) {
+  // A video page: also send what the sniffer caught on the tab, for sites yt-dlp doesn't support.
+  const captures = kind === "media" && tabId != null && url === pageUrl ? pageMedia(await listCaptures(tabId)) : [];
   return {
+    captures: captures.length ? captures : undefined,
     url,
     kind: kind || undefined,      // "media": a video page or stream playlist for yt-dlp
     filename: filename || "",
-    referer: referer || pageUrl || "",
-    cookies: await cookiesFor(url),
+    // `headers`: what the browser itself sent for a grabbed file — signed stream links often need them.
+    referer: headers.referer || referer || pageUrl || "",
+    origin: headers.origin || "",
+    cookies: headers.cookie || await cookiesFor(url),
     user_agent: navigator.userAgent,
     size,
     page_url: pageUrl || "",
@@ -102,9 +108,10 @@ api.contextMenus.onClicked.addListener((info, tab) => {
   } else if (info.menuItemId === "ldm-media") {
     // A <video> fed by MediaSource has a blob: URL that can't be downloaded: use the page instead.
     const direct = /^https?:/i.test(info.srcUrl || "");
-    sendOne(direct ? { url: info.srcUrl, pageUrl } : { url: pageUrl, pageUrl, kind: "media" }).catch(reportError);
+    const tabId = tab?.id ?? null;
+    sendOne(direct ? { url: info.srcUrl, pageUrl } : { url: pageUrl, pageUrl, kind: "media", tabId }).catch(reportError);
   } else if (info.menuItemId === "ldm-video-page") {
-    sendOne({ url: pageUrl, pageUrl, kind: "media" }).catch(reportError);
+    sendOne({ url: pageUrl, pageUrl, kind: "media", tabId: tab?.id ?? null }).catch(reportError);
   } else if (info.menuItemId === "ldm-video-link") {
     sendOne({ url: info.linkUrl, pageUrl, kind: "media" }).catch(reportError);
   } else if (info.menuItemId === "ldm-page" && tab) {
@@ -117,11 +124,34 @@ api.contextMenus.onClicked.addListener((info, tab) => {
 
 // --- media sniffer -------------------------------------------------------------------------
 
+// Request headers the browser sent (Origin, Referer, Cookie), kept until the response arrives.
+const sentHeaders = new Map();
+const SNIFF_FILTER = { urls: ["<all_urls>"], types: ["media", "xmlhttprequest", "object", "other"] };
+const extraHeaders = api.webRequest.OnSendHeadersOptions?.EXTRA_HEADERS; // Chromium hides some without it
+
+api.webRequest.onSendHeaders.addListener(
+  (details) => {
+    if (details.tabId < 0) return;
+    const kept = {};
+    for (const h of details.requestHeaders || []) {
+      const name = h.name.toLowerCase();
+      if (name === "origin" || name === "referer" || name === "cookie") kept[name] = h.value || "";
+    }
+    sentHeaders.set(details.requestId, kept);
+    if (sentHeaders.size > 500) sentHeaders.delete(sentHeaders.keys().next().value);
+  },
+  SNIFF_FILTER,
+  extraHeaders ? ["requestHeaders", extraHeaders] : ["requestHeaders"],
+);
+api.webRequest.onErrorOccurred.addListener((details) => sentHeaders.delete(details.requestId), SNIFF_FILTER);
+
 api.webRequest.onHeadersReceived.addListener(
   (details) => {
     if (details.tabId < 0) return;
     const headers = {};
     for (const h of details.responseHeaders || []) headers[h.name.toLowerCase()] = h.value || "";
+    const requestHeaders = sentHeaders.get(details.requestId) || {};
+    sentHeaders.delete(details.requestId);
     const found = sniff(details.url, details.statusCode, headers);
     if (!found) return;
     getSettings().then((settings) => {
@@ -134,10 +164,11 @@ api.webRequest.onHeadersReceived.addListener(
         filename: filenameFromDisposition(headers["content-disposition"]) || filenameFromUrl(details.url),
         referer: details.documentUrl || details.initiator || details.originUrl || "",
         stream: STREAM_KINDS.has(found.kind),
+        headers: requestHeaders,
       });
     });
   },
-  { urls: ["<all_urls>"], types: ["media", "xmlhttprequest", "object", "other"] },
+  SNIFF_FILTER,
   ["responseHeaders"],
 );
 

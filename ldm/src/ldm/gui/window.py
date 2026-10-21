@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+from typing import TYPE_CHECKING, Callable
+from urllib.parse import urlsplit
 
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
 
+from ..batch import parse_link_list
 from ..clipboard import Offer
 from ..format import parse_rate
 from .add_dialog import AddDialog
-from .dialogs import ask_text, confirm, is_url, limit_text, read_clipboard_url
+from .dialogs import ask_text, confirm, is_url, limit_text, read_clipboard_url, short_path
 from .model import DownloadItem
 from .row import DownloadRow
 from .schedule_rows import ask_schedule
+from .tools import BatchDialog, ChecksumDialog, ImportLinksDialog, LogDialog, ask_login
 from .torrent_details import TorrentDetailsDialog
 
 if TYPE_CHECKING:
@@ -38,9 +42,23 @@ class MainWindow(Adw.ApplicationWindow):
         add = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add Download", action_name="app.add")
         header.pack_start(add)
         menu = Gio.Menu()
-        menu.append("Preferences", "app.preferences")
-        menu.append("Keyboard Shortcuts", "app.shortcuts")
-        menu.append("About LDM", "app.about")
+        tools = Gio.Menu()
+        for label, action in (("Batch Download…", "win.batch"), ("Import Links…", "win.import-links"),
+                              ("Export Links…", "win.export-links"), ("Export Unfinished…", "win.export-unfinished"),
+                              ("Import Unfinished…", "win.import-unfinished")):
+            tools.append(label, action)
+        app_items = Gio.Menu()
+        app_items.append("Preferences", "app.preferences")
+        app_items.append("Keyboard Shortcuts", "app.shortcuts")
+        app_items.append("About LDM", "app.about")
+        menu.append_section(None, tools)
+        menu.append_section(None, app_items)
+        for name, handler in (("batch", self.batch_download), ("import-links", self.import_links),
+                              ("export-links", self.export_links), ("export-unfinished", self.export_unfinished),
+                              ("import-unfinished", self.import_unfinished)):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", lambda *_, h=handler: h())
+            self.add_action(action)
         header.pack_end(Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, primary=True,
                                        tooltip_text="Main Menu"))
         self.filters = Adw.ToggleGroup()
@@ -148,24 +166,158 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _download_offered(self, banner) -> None:
         banner.set_revealed(False)
-        self.open_add_dialog(self.offered, kind="torrent" if self.offered.startswith("magnet:") else "")
+        self.request_download(self.offered, kind="torrent" if self.offered.startswith("magnet:") else "")
 
     # --- adding ----------------------------------------------------------------------------
 
     def open_add_dialog(self, url: str = "", name: str = "", headers: dict[str, str] | None = None,
-                        kind: str = "") -> None:
+                        kind: str = "", captures: list[dict] | None = None) -> None:
         if not self.client.connected:
             self.toast("Start the download service first")
             return
-        AddDialog(self.client, url, name=name, headers=headers, kind=kind).present(self)
+        AddDialog(self.client, url, name=name, headers=headers, kind=kind, on_show=self.show_download,
+                  captures=captures).present(self)
+
+    def request_download(self, url: str, name: str = "", headers: dict[str, str] | None = None,
+                         kind: str = "", captures: list[dict] | None = None) -> None:
+        """A link from the browser, clipboard, a drop or the desktop: the add dialog, or added at once when
+        "Add without asking" is on (1DM's "skip editor")."""
+        if not self.client.connected:
+            self.toast("Start the download service first")
+            return
+        self.client.get_settings(lambda settings, error: self._quick_add(url, name, headers, kind)
+                                 if settings and settings.get("skip_add_dialog")
+                                 else self.open_add_dialog(url, name, headers, kind, captures))
+
+    def _quick_add(self, url: str, name: str, headers: dict[str, str] | None, kind: str) -> None:
+        options = {"name": name or None, "headers": headers or None, "kind": kind or None, "start": True}
+
+        def add(*_) -> None:
+            self.client.add(url, options, added)
+
+        def added(download_id, error) -> None:
+            if error:
+                self._report(None, error)
+                return
+            toast = Adw.Toast(title=GLib.markup_escape_text(f"Added {name or url}"), button_label="Undo")
+            toast.connect("button-clicked", lambda *_: self.client.remove(download_id, True, self._report))
+            self.toasts.add_toast(toast)
+
+        def checked(found, error) -> None:
+            if not found:
+                add()
+                return
+            toast = Adw.Toast(title="Already in your list", button_label="Add Again")
+            toast.connect("button-clicked", add)
+            self.toasts.add_toast(toast)
+            self.show_download(found[0]["id"])
+
+        self.client.find_duplicates(url, checked)
+
+    def show_download(self, download_id: int) -> None:
+        """Scroll to a download and focus its row."""
+        self.filters.set_active_name("all")
+        view = self.views["all"]
+        for index in range(view.get_n_items()):
+            if view.get_item(index).id == download_id:
+                row = self.list.get_row_at_index(index)
+                if row is not None:
+                    row.grab_focus()
+                return
 
     def _on_drop(self, _target, value: str, _x, _y) -> bool:
         url = next((line.strip() for line in value.splitlines()
                     if is_url(line) or line.strip().startswith(("magnet:", "file:"))), "")
         if not url:
             return False
-        self.open_add_dialog(url)
+        self.request_download(url)
         return True
+
+    # --- tools (main menu) -----------------------------------------------------------------
+
+    def batch_download(self) -> BatchDialog | None:
+        return BatchDialog(self.client, self, self.toast) if self._need_service() else None
+
+    def import_links(self) -> None:
+        if self._need_service():
+            self._choose_file("Import Links", False, self._read_links)
+
+    def _read_links(self, file: Gio.File) -> None:
+        try:
+            text = file.load_contents(None)[1].decode(errors="replace")
+        except GLib.Error as e:
+            self.toast(f"Could not read the file: {e.message}")
+            return
+        links = parse_link_list(text)
+        if not links:
+            self.toast("No links found in that file")
+            return
+        ImportLinksDialog(self.client, self, links, self.app.downloads.urls(), self.toast)
+
+    def export_links(self) -> None:
+        name = self.filters.get_active_name() or "all"
+        view = self.views[name]
+        links = [view.get_item(i).url for i in range(view.get_n_items())]
+        if not links:
+            self.toast("No downloads to export")
+            return
+        self._choose_file("Export Links", True, lambda file: self._write(file, "".join(f"{u}\n" for u in links),
+                                                                         f"{len(links)} links exported"),
+                          "ldm-links.txt")
+
+    def export_unfinished(self) -> None:
+        if not self._need_service():
+            return
+
+        def got(text, error) -> None:
+            if error:
+                self._report(None, error)
+                return
+            count = len(json.loads(text)["downloads"])
+            self._choose_file("Export Unfinished Downloads", True,
+                              lambda file: self._write(file, text, f"{count} downloads exported"),
+                              "ldm-unfinished.json")
+
+        self.client.export_downloads(True, got)
+
+    def import_unfinished(self) -> None:
+        if not self._need_service():
+            return
+
+        def chosen(file: Gio.File) -> None:
+            try:
+                text = file.load_contents(None)[1].decode()
+            except (GLib.Error, UnicodeDecodeError) as e:
+                self.toast(f"Could not read the file: {getattr(e, 'message', e)}")
+                return
+            self.client.import_downloads(text, lambda ids, error: self._report(None, error) if error else
+                                         self.toast(f"{len(ids)} downloads imported — they are paused"))
+
+        self._choose_file("Import Unfinished Downloads", False, chosen)
+
+    def _need_service(self) -> bool:
+        if not self.client.connected:
+            self.toast("Start the download service first")
+        return self.client.connected
+
+    def _choose_file(self, title: str, save: bool, on_file: Callable[[Gio.File], None], name: str = "") -> None:
+        dialog = Gtk.FileDialog(title=title, initial_name=name or None)
+
+        def done(d, result) -> None:
+            try:
+                file = d.save_finish(result) if save else d.open_finish(result)
+            except GLib.Error:
+                return  # cancelled
+            on_file(file)
+
+        (dialog.save if save else dialog.open)(self, None, done)
+
+    def _write(self, file: Gio.File, text: str, message: str) -> None:
+        try:
+            file.replace_contents(text.encode(), None, False, Gio.FileCreateFlags.REPLACE_DESTINATION, None)
+            self.toast(message)
+        except GLib.Error as e:
+            self.toast(f"Could not save: {e.message}")
 
     # --- row actions (called by DownloadRow) -----------------------------------------------
 
@@ -239,6 +391,41 @@ class MainWindow(Adw.ApplicationWindow):
                                      lambda r, e: self._report(r, e) if e else self.app.refresh(item.id))
 
         self.client.get(item.id, with_row)
+
+    def show_checksum(self, item: DownloadItem) -> None:
+        ChecksumDialog(self.client, self, item.id, item.title)
+
+    def show_log(self, item: DownloadItem) -> None:
+        LogDialog(self.client, self, item.id, item.title)
+
+    def ask_rename(self, item: DownloadItem) -> None:
+        ask_text(self, "Rename", "A new name for the file. An existing file is never replaced.", "Rename",
+                 item.name or item.title, "", lambda name: name and self.client.rename(item.id, name, self._moved))
+
+    def ask_move(self, item: DownloadItem) -> None:
+        dialog = Gtk.FileDialog(title="Move to Folder")
+        if item.dir:
+            dialog.set_initial_folder(Gio.File.new_for_path(item.dir))
+
+        def done(d, result) -> None:
+            try:
+                folder = d.select_folder_finish(result)
+            except GLib.Error:
+                return
+            self.client.move_to(item.id, folder.get_path(), self._moved)
+
+        dialog.select_folder(self, None, done)
+
+    def _moved(self, path, error) -> None:
+        if error:
+            self._report(None, error)
+        else:
+            self.toast(f"Now at {short_path(path)}")
+
+    def ask_login(self, item: DownloadItem) -> None:
+        host = urlsplit(item.url).hostname or ""
+        ask_login(self, host, "", lambda h, user, password, subdomains: self.client.set_login(
+            h, user, password, subdomains, lambda r, e: self._report(r, e) if e else self.resume(item)))
 
     def show_torrent_details(self, item: DownloadItem) -> None:
         TorrentDetailsDialog(self.client, item).present(self)

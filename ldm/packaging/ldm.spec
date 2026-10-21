@@ -23,7 +23,8 @@ BuildRequires:  ffmpeg-free
 BuildRequires:  rb_libtorrent-python3
 %endif
 
-# Python dependencies (httpx, dbus-fast, yt-dlp[default]) are generated from pyproject.toml.
+# Python dependencies (httpx[socks], dbus-fast, yt-dlp[default], dnspython, secretstorage) are generated
+# from pyproject.toml.
 Requires:       python3-gobject
 Requires:       gtk4
 Requires:       libadwaita

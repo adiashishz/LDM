@@ -16,6 +16,22 @@ export const GROUPS = {
 export const MEDIA_KINDS = new Set(["video", "audio", "hls", "dash", "subtitle"]);
 export const STREAM_KINDS = new Set(["hls", "dash"]);
 
+/**
+ * Media caught on a tab, for "download video from this page" (1DM's grabber): video, audio and
+ * stream playlists — streams first, then the biggest files — so LDM can offer them when yt-dlp
+ * doesn't know the site.
+ */
+export function pageMedia(captures, limit = 20) {
+  const rank = (c) => (STREAM_KINDS.has(c.kind) ? 0 : c.kind === "video" ? 1 : 2);
+  return captures
+    .filter((c) => ["video", "audio", "hls", "dash"].includes(c.kind))
+    .sort((a, b) => rank(a) - rank(b) || (b.size || 0) - (a.size || 0))
+    .slice(0, limit)
+    .map(({ url, kind, size, mime, filename, referer, headers }) => ({
+      url, kind, size: size || null, mime, filename, referer, headers: headers || {},
+    }));
+}
+
 // Pieces of adaptive streams: never useful on their own.
 const SEGMENT_EXT = new Set(["ts", "m4s", "m4f", "cmfv", "cmfa", "m4v_seg"]);
 const MIN_MEDIA_BYTES = 50 * 1024;
@@ -51,7 +67,18 @@ function bareMime(mime) {
 }
 
 export function isSegment(url, mime) {
-  return SEGMENT_EXT.has(extensionOf(url)) || bareMime(mime) === "video/mp2t";
+  return SEGMENT_EXT.has(extensionOf(url)) || bareMime(mime) === "video/mp2t" || isSubtitleSegment(url);
+}
+
+/** Pieces of a stream's subtitle track (seg-3.vtt, segment12.webvtt, 0004.vtt): not files on their own. */
+export function isSubtitleSegment(url) {
+  let name = "";
+  try {
+    name = new URL(url).pathname.split("/").pop().toLowerCase();
+  } catch {
+    return false;
+  }
+  return /^(seg|segment|chunk|frag|fragment|part|sub)?[-_]?\d+\.(vtt|webvtt)$/.test(name);
 }
 
 /** Kind of a URL with optional Content-Type: one of GROUPS' keys, or null. */

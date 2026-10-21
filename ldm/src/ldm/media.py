@@ -26,6 +26,7 @@ from yt_dlp.utils import DownloadCancelled
 from yt_dlp.utils import DownloadError as YtDlpError
 
 from .engine import DownloadError, LinkExpired, ProgressCallback
+from .net import DEFAULT_USER_AGENT, NetConfig
 from .ratelimit import TokenBucket
 from .store import DownloadRow, Store
 
@@ -48,8 +49,10 @@ def find_js_runtime(configured: str = "") -> tuple[str, str] | None:
     home = Path.home()
     candidates = [configured] if configured else []
     candidates += [shutil.which(name) or "" for name in RUNTIMES]
-    candidates += [str(home / ".deno/bin/deno"), str(home / ".bun/bin/bun")]
+    # deno, then node, then bun: yt-dlp supports new bun releases last (it warns about them)
+    candidates += [str(home / ".deno/bin/deno")]
     candidates += sorted(glob.glob(str(home / ".nvm/versions/node/*/bin/node")), key=_node_version, reverse=True)
+    candidates += [str(home / ".bun/bin/bun")]
     for path in filter(None, candidates):
         name = Path(path).name.removesuffix("js") if Path(path).name == "nodejs" else Path(path).name
         if name in RUNTIMES and os.access(path, os.X_OK):
@@ -63,9 +66,15 @@ def _node_version(path: str) -> tuple[int, ...]:
 
 
 class _Logger:
-    """Route yt-dlp's messages to logging instead of stdout/stderr."""
+    """Route yt-dlp's messages to logging instead of stdout/stderr; `on_event` also gets
+    warnings, errors and its "[extractor] …" progress lines (download diagnostics)."""
+
+    def __init__(self, on_event: Callable[[str], None] | None = None):
+        self.on_event = on_event
 
     def debug(self, message):
+        if self.on_event and message.startswith("[") and not message.startswith(("[debug] ", "[download] ")):
+            self.on_event(message)
         if not message.startswith("[debug] "):
             log.debug(message)
 
@@ -74,14 +83,30 @@ class _Logger:
 
     def warning(self, message):
         log.info("yt-dlp: %s", message)
+        if self.on_event:
+            self.on_event(f"warning: {message}")
 
     def error(self, message):
         log.info("yt-dlp: %s", message)
+        if self.on_event:
+            self.on_event(message)
 
 
-def base_options(settings: dict[str, Any], headers: dict[str, str] | None) -> dict[str, Any]:
+def base_options(settings: dict[str, Any], headers: dict[str, str] | None, net: NetConfig | None = None,
+                 url: str = "", on_event: Callable[[str], None] | None = None) -> dict[str, Any]:
+    """yt-dlp options; `net` adds the proxy, timeout and user agent (call from a thread: system proxy lookup)."""
     options = {"quiet": True, "no_warnings": True, "noprogress": True, "noplaylist": True,
-               "logger": _Logger(), "http_headers": dict(headers or {})}
+               "logger": _Logger(on_event), "http_headers": dict(headers or {})}
+    if net is not None:
+        net = net.resolve_sync(url)
+        if net.proxy or net.proxy_mode == "none":
+            options["proxy"] = net.proxy or ""  # "" = direct, ignoring the environment
+            if on_event and net.proxy:
+                on_event(f"using proxy {urlsplit(net.proxy).scheme}://{urlsplit(net.proxy).hostname}"
+                         f":{urlsplit(net.proxy).port}")
+        options["socket_timeout"] = net.read_timeout
+        if net.user_agent != DEFAULT_USER_AGENT:  # otherwise yt-dlp's own browser-like default
+            options["http_headers"] = {"User-Agent": net.user_agent, **options["http_headers"]}
     runtime = find_js_runtime(settings.get("js_runtime", ""))
     if runtime:
         options["js_runtimes"] = {runtime[0]: {"path": runtime[1]}}
@@ -101,7 +126,8 @@ def _error(exc: Exception) -> DownloadError:
     if re.search(r"HTTP Error (401|403|404|410)", message):
         return LinkExpired(message)
     if "Unsupported URL" in message:
-        return DownloadError("this site or link is not supported by yt-dlp")
+        return DownloadError("yt-dlp doesn't support this site — play the video in your browser and pick it "
+                             "from the LDM button's Media tab")
     return DownloadError(message)
 
 
@@ -157,10 +183,11 @@ def build_choices(formats: list[dict], duration: float | None = None) -> list[di
     return choices
 
 
-def probe_media(url: str, headers: dict[str, str] | None, settings: dict[str, Any]) -> dict[str, Any]:
+def probe_media(url: str, headers: dict[str, str] | None, settings: dict[str, Any],
+                net: NetConfig | None = None) -> dict[str, Any]:
     """What yt-dlp can download from `url` (blocking; run in a thread)."""
     try:
-        with yt_dlp.YoutubeDL(base_options(settings, headers)) as ydl:
+        with yt_dlp.YoutubeDL(base_options(settings, headers, net, url)) as ydl:
             info = ydl.extract_info(url, download=False)
     except YtDlpError as e:
         raise _error(e) from e
@@ -185,14 +212,21 @@ def media_temp_dir(d: DownloadRow) -> Path:
     return d.dir / f".ldm-media-{d.id}"
 
 
+class _Paused(Exception):
+    """Ends the yt-dlp thread on pause (not CancelledError: asyncio logs that from a shielded future)."""
+
+
 class MediaDownloader:
     """Runs one yt-dlp download; cancelling the task pauses it (yt-dlp resumes from its .part files)."""
 
     def __init__(self, store: Store, download_id: int, *, on_progress: ProgressCallback | None = None,
                  limiters: Sequence[TokenBucket] = (), connections: int | None = None,
                  on_state: Callable[[str], None] | None = None, progress_interval: float = 0.5,
+                 net: NetConfig | None = None, on_event: Callable[[str], None] | None = None,
                  **_engine_options):
         self.store = store
+        self.net = net
+        self.on_event = on_event
         self.id = download_id
         self.on_progress = on_progress
         self.limiters = limiters
@@ -261,7 +295,8 @@ class MediaDownloader:
             if event.get("status") == "started" and event.get("postprocessor") in PROCESSORS:
                 loop.call_soon_threadsafe(self._set_processing, PROCESSORS[event["postprocessor"]])
 
-        options = base_options(settings, d.headers)
+        threadsafe = (lambda text: loop.call_soon_threadsafe(self.on_event, text)) if self.on_event else None
+        options = base_options(settings, d.headers, self.net, d.url, threadsafe)
         subtitles = d.options.get("subtitles", "")
         options.update({
             "format": d.options.get("format") or default_selector(settings["media_quality"]),
@@ -282,10 +317,10 @@ class MediaDownloader:
                     info = ydl.extract_info(d.url, download=True)
                 break
             except DownloadCancelled:
-                raise asyncio.CancelledError
+                raise _Paused from None
             except YtDlpError as e:
                 if self._stop.is_set():
-                    raise asyncio.CancelledError
+                    raise _Paused from None
                 if attempt == 1 and "downloaded file is empty" in str(e) and self._discard_partial(d):
                     log.info("download %s: partial files could not be resumed, starting over", d.id)
                     continue

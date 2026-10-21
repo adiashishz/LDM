@@ -207,6 +207,59 @@ async def client(args) -> int:
             for r in map(values, await iface.call_list_host_rules()):
                 scope = "" if r["include_subdomains"] else " (exact)"
                 print(f"{r['host']}{scope}: max_connections={r['max_connections']} max_downloads={r['max_downloads']}")
+        elif args.command == "login":
+            if args.remove:
+                await iface.call_remove_login(args.host)
+            else:
+                if not args.user:
+                    raise SystemExit("ldm login HOST USER (or --remove)")
+                password = read_password(args.password_stdin, f"password for {args.user}@{args.host}: ")
+                await iface.call_set_login(args.host, args.user, password, not args.exact)
+        elif args.command == "logins":
+            for r in map(values, await iface.call_list_logins()):
+                print(f"{r['host']}{'' if r['include_subdomains'] else ' (exact)'}: {r['username']}")
+        elif args.command == "proxy-password":
+            password = read_password(args.password_stdin, "proxy password (empty to remove): ")
+            await iface.call_set_settings({"proxy_password": Variant("s", password)})
+        elif args.command == "log":
+            for line in await iface.call_get_log(args.id):
+                print(line)
+        elif args.command in ("batch", "import"):
+            from .batch import expand, parse_link_list
+            if args.command == "batch":
+                if not args.letters and args.last is None:
+                    raise SystemExit("ldm batch: give the last number with --to (or use --letters)")
+                try:
+                    links = expand(args.url, letters=tuple(args.letters) if args.letters else None,
+                                   numbers=None if args.letters else (args.first, args.last, args.pad))
+                except ValueError as e:
+                    raise SystemExit(f"ldm batch: {e}")
+            else:
+                links = parse_link_list(Path(args.file).expanduser().read_text())
+            options = {"start": Variant("b", not args.paused)}
+            if args.dir:
+                options["dir"] = Variant("s", str(args.dir.expanduser().resolve()))
+            for link in links:
+                kind = {"kind": Variant("s", "torrent")} if link.startswith("magnet:") else {}
+                await iface.call_add(link, {**options, **kind})
+            print(f"{len(links)} downloads added")
+        elif args.command == "checksum":
+            print(await iface.call_checksum(args.id, args.algo))
+        elif args.command == "rename":
+            print(await iface.call_rename(args.id, args.name))
+        elif args.command == "mv":
+            print(await iface.call_move_to(args.id, str(args.folder.expanduser().resolve())))
+        elif args.command == "export-links":
+            rows = [values(r) for r in await iface.call_list()]
+            links = [r["url"] for r in rows if not args.state or r["state"] in args.state.split(",")]
+            Path(args.file).expanduser().write_text("".join(f"{link}\n" for link in links))
+            print(f"{len(links)} links written to {args.file}")
+        elif args.command == "export-unfinished":
+            Path(args.file).expanduser().write_text(await iface.call_export_downloads(not args.all))
+            print(f"saved to {args.file}")
+        elif args.command == "import-unfinished":
+            ids = await iface.call_import_downloads(Path(args.file).expanduser().read_text())
+            print(f"{len(ids)} downloads imported (paused — resume them with `ldm resume ID`)")
         elif args.command == "torrent-files":
             source = args.source if "://" in args.source or args.source.startswith("magnet:") \
                 else Path(args.source).resolve().as_uri()
@@ -231,6 +284,14 @@ def file_priorities(text: str) -> list[int]:
 def media_selector(quality: str) -> str:
     from .media import default_selector
     return default_selector(quality)
+
+
+def read_password(from_stdin: bool, prompt: str) -> str:
+    """Never from the command line (shell history, `ps`): a prompt, or stdin for scripts."""
+    if from_stdin:
+        return sys.stdin.readline().rstrip("\n")
+    import getpass
+    return getpass.getpass(prompt)
 
 
 def schedule_window(args) -> dict[str, str]:
@@ -332,6 +393,46 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--exact", action="store_true", help="do not apply to subdomains")
     p.add_argument("--remove", action="store_true")
     sub.add_parser("host-rules", help="list host rules")
+    p = sub.add_parser("login", help="save a site login (HTTP Basic/Digest); asks for the password")
+    p.add_argument("host")
+    p.add_argument("user", nargs="?")
+    p.add_argument("--exact", action="store_true", help="only this host, not its subdomains")
+    p.add_argument("--remove", action="store_true", help="forget the login for HOST")
+    p.add_argument("--password-stdin", action="store_true", help="read the password from stdin")
+    sub.add_parser("logins", help="list saved site logins (without passwords)")
+    p = sub.add_parser("proxy-password", help="set the manual proxy's password (kept in the keyring)")
+    p.add_argument("--password-stdin", action="store_true", help="read the password from stdin")
+    p = sub.add_parser("log", help="diagnostics of a download: requests, responses, retries")
+    p.add_argument("id", type=int)
+    p = sub.add_parser("batch", help="download a numbered series: one * in the link, e.g. https://site/img*.jpg")
+    p.add_argument("url")
+    p.add_argument("--from", dest="first", type=int, default=1, help="first number (default 1)")
+    p.add_argument("--to", dest="last", type=int, help="last number")
+    p.add_argument("--pad", type=int, default=0, help="zero-pad numbers to this width, e.g. 3 → 001")
+    p.add_argument("--letters", nargs=2, metavar=("FIRST", "LAST"), help="letters instead, e.g. a z")
+    p.add_argument("--paused", action="store_true", help="add without starting")
+    p.add_argument("-o", "--dir", type=Path, help="folder")
+    p = sub.add_parser("import", help="add the links in a text file (one per line, # for comments)")
+    p.add_argument("file")
+    p.add_argument("--paused", action="store_true", help="add without starting")
+    p.add_argument("-o", "--dir", type=Path, help="folder")
+    p = sub.add_parser("checksum", help="checksum of a finished file")
+    p.add_argument("id", type=int)
+    p.add_argument("--algo", choices=("md5", "sha1", "sha256"), default="sha256")
+    p = sub.add_parser("rename", help="rename a download (the file, or the name it will get)")
+    p.add_argument("id", type=int)
+    p.add_argument("name")
+    p = sub.add_parser("mv", help="move a download to another folder")
+    p.add_argument("id", type=int)
+    p.add_argument("folder", type=Path)
+    p = sub.add_parser("export-links", help="write the links of your downloads to a text file")
+    p.add_argument("file")
+    p.add_argument("--state", help="only these states, e.g. done or queued,paused,error")
+    p = sub.add_parser("export-unfinished", help="save unfinished downloads to a file (to move them elsewhere)")
+    p.add_argument("file")
+    p.add_argument("--all", action="store_true", help="finished downloads too")
+    p = sub.add_parser("import-unfinished", help="add downloads from an export-unfinished file")
+    p.add_argument("file")
     p = sub.add_parser("torrent-files", help="list the files in a magnet link or .torrent (index, size, path)")
     p.add_argument("source")
     sub.add_parser("watch", help="show live progress")

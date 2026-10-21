@@ -25,10 +25,10 @@ import httpx
 
 from .ratelimit import TokenBucket
 from .segments import Part, split_even, steal
+from .net import DEFAULT_USER_AGENT, EventCallback, NetConfig
 from .store import DownloadRow, Store
 
 UNKNOWN_LAST = 1 << 62  # `last` of the single part when the size is unknown; EOF ends it
-DEFAULT_USER_AGENT = "ldm/0.1"
 
 _CONTENT_RANGE = re.compile(r"bytes\s+(?:(\d+)-(\d+)|\*)/(\d+|\*)")
 
@@ -45,6 +45,10 @@ class LinkExpired(DownloadError):
 
 class RemoteChanged(DownloadError):
     """The remote file no longer matches the partial download."""
+
+
+class LoginRequired(DownloadError):
+    """HTTP 401/407: the site (or proxy) wants a user name and password."""
 
 
 class _Retryable(Exception):
@@ -106,14 +110,11 @@ def unique_path(path: Path) -> Path:
     return candidate
 
 
-def new_client(headers: dict[str, str] | None = None, max_connections: int = 2) -> httpx.AsyncClient:
-    """HTTP client with ldm's defaults; `headers` (Referer, Cookie, …) override them."""
-    return httpx.AsyncClient(
-        follow_redirects=True,
-        headers={"User-Agent": DEFAULT_USER_AGENT, "Accept-Encoding": "identity", **(headers or {})},
-        timeout=httpx.Timeout(30.0, connect=15.0),
-        limits=httpx.Limits(max_connections=max_connections),
-    )
+def new_client(headers: dict[str, str] | None = None, max_connections: int = 2, net: NetConfig | None = None,
+               on_event: EventCallback | None = None) -> httpx.AsyncClient:
+    """HTTP client with the network settings (`net`, already resolved for the URL); `headers` (Referer,
+    Cookie, …) override the defaults."""
+    return (net or NetConfig()).client(headers, max_connections, on_event)
 
 
 def _retry_after(r: httpx.Response) -> float | None:
@@ -132,7 +133,11 @@ def _retry_after(r: httpx.Response) -> float | None:
 
 
 def _check_status(r: httpx.Response) -> None:
-    if r.status_code in (401, 403, 404, 410):
+    if r.status_code == 401:
+        raise LoginRequired(f"login required for {r.url.host}")
+    if r.status_code == 407:
+        raise LoginRequired("the proxy wants a login — check Preferences → Network")
+    if r.status_code in (403, 404, 410):
         raise LinkExpired(f"HTTP {r.status_code}")
     if r.status_code in (429, 503):
         raise _Throttled(f"HTTP {r.status_code}", _retry_after(r))
@@ -167,9 +172,12 @@ class Downloader:
                  chunk_size: int = 1 << 16, persist_interval: float = 2.0, max_retries: int = 5,
                  retry_base_delay: float = 0.5, on_progress: ProgressCallback | None = None,
                  limiters: Sequence[TokenBucket] = (), connections: int | None = None,
-                 progress_interval: float = 0.5, on_throttled: Callable[[int], None] | None = None):
+                 progress_interval: float = 0.5, on_throttled: Callable[[int], None] | None = None,
+                 net: NetConfig | None = None, on_event: EventCallback | None = None,
+                 restart_non_resumable: bool = True):
         """`limiters` throttle every received chunk; `connections` caps the download's own setting;
-        `on_throttled(n)` reports that the server only tolerates n connections."""
+        `on_throttled(n)` reports that the server only tolerates n connections; `net` holds the proxy,
+        DNS, timeout and login settings; `on_event(text)` receives diagnostics lines."""
         self.store = store
         self.id = download_id
         self.limiters = limiters
@@ -182,6 +190,9 @@ class Downloader:
         self.on_progress = on_progress
         self.progress_interval = progress_interval
         self.on_throttled = on_throttled
+        self.net = net or NetConfig()
+        self.on_event = on_event
+        self.restart_non_resumable = restart_non_resumable
         self.parts: list[Part] = []
         self._refresh_lock = asyncio.Lock()
         self._workers = 0     # connections currently running
@@ -194,27 +205,38 @@ class Downloader:
         d = self.store.get(self.id)
         self.store.set_state(self.id, "running")
         try:
-            async with new_client(d.headers, self._connections(d) + 1) as client:
+            net = await self.net.resolve(d.final_url or d.url)
+            async with new_client(d.headers, self._connections(d) + 1, net, self.on_event) as client:
                 self.client = client
                 return await self._run(d)
         except asyncio.CancelledError:
             self.store.set_state(self.id, "paused")
             raise
         except LinkExpired as e:
+            self._event(f"link expired: {e}")
             self.store.set_state(self.id, "expired", str(e))
             raise
         except RemoteChanged as e:
+            self._event(f"start over needed: {e}")
             self.store.set_state(self.id, "changed", str(e))
             raise
         except Exception as e:
+            self._event(f"failed: {e}")
             self.store.set_state(self.id, "error", str(e))
             raise
+
+    def _event(self, text: str) -> None:
+        if self.on_event:
+            self.on_event(text)
 
     async def _run(self, d: DownloadRow) -> Path:
         parts = self.store.load_parts(self.id)
         fresh = not parts and d.final_url is None
         if fresh:
             p = await self._retrying(lambda: probe(self.client, d.url))
+            self._event(f"probe: size {p.size if p.size is not None else 'unknown'}, "
+                        f"{'resumable' if p.resumable else 'not resumable'}, name {p.filename!r}, "
+                        f"final URL {p.final_url}")
             d = self.store.update(self.id, final_url=p.final_url, size=p.size, resumable=p.resumable,
                                   name=d.name or p.filename, etag=p.etag, last_modified=p.last_modified)
             parts = self._initial_parts(d)
@@ -222,6 +244,8 @@ class Downloader:
         if not fresh and not d.temp_path.exists():
             parts = self._initial_parts(d)  # downloaded data was removed: start over
         if not d.resumable:
+            if not fresh and not self.restart_non_resumable and any(p.done for p in parts):
+                raise RemoteChanged("the server can't resume this download")
             parts = self._initial_parts(d)  # cannot continue mid-file
 
         self.d, self.parts = d, parts
@@ -315,6 +339,8 @@ class Downloader:
                 throttles = 1 if part.done > before else throttles + 1
                 if throttles > MAX_THROTTLES:
                     raise DownloadError(f"the server keeps refusing requests ({e})") from e
+                self._event(f"server is limiting requests ({e}); "
+                            + ("using one connection fewer" if self._workers > 1 else "waiting"))
                 if self._workers > 1:  # this connection drops out; the others take over its part
                     self._worker_cap = self._workers - 1
                     if self.on_throttled:
@@ -326,6 +352,7 @@ class Downloader:
                 attempt = 1 if part.done > before else attempt + 1
                 if attempt > self.max_retries:
                     raise DownloadError(f"bytes {part.first}-{part.last}: {e}") from e
+                self._event(f"retry {attempt}/{self.max_retries} for bytes {part.pos}-{part.last}: {e}")
                 if not self.d.resumable:
                     part.done = 0
                 await asyncio.sleep(self.retry_base_delay * 2 ** (attempt - 1))

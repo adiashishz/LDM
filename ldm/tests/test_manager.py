@@ -273,3 +273,28 @@ def test_paused_video_keeps_its_progress(tmp_path):
     i = run(manager, scenario)
     info = Manager(Store(tmp_path / "state.db")).describe(i)  # also after a service restart
     assert (info["state"], info["done"], info["size"]) == ("paused", 300_000, 1_000_000)
+
+
+def test_shutdown_keeps_a_failure_that_happens_while_stopping(tmp_path):
+    """Regression: shutdown re-queued every task it was waiting for, including one that had just failed."""
+    store = Store(tmp_path / "state.db")
+    store.set_setting("download_dir", str(tmp_path / "dl"))
+
+    class FailsSlowly:
+        def __init__(self, store, download_id, **_):
+            self.store, self.id = store, download_id
+
+        async def run(self):
+            self.store.set_state(self.id, "error", "boom")
+            await asyncio.sleep(0.2)  # still closing connections when the service stops
+            raise RuntimeError("boom")
+
+    manager = Manager(store, downloader_factory=FailsSlowly)
+
+    async def scenario():
+        i = manager.add("http://127.0.0.1:9/x")
+        await wait_state(manager, i, "error")
+        return i
+
+    i = run(manager, scenario)
+    assert (store.get(i).state, store.get(i).error) == ("error", "boom")

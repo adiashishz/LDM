@@ -67,7 +67,7 @@ class Application(Adw.Application):
         for file in files:
             uri = file.get_uri()
             torrent = uri.startswith("magnet:") or uri.lower().endswith(".torrent")
-            window.open_add_dialog(uri, kind="torrent" if torrent else "")
+            window.request_download(uri, kind="torrent" if torrent else "")
 
     def window(self) -> MainWindow:
         return self.get_active_window() or MainWindow(self)
@@ -95,8 +95,9 @@ class Application(Adw.Application):
         GLib.timeout_add_seconds(10, self._request_timeout, request)
 
     def _show_request(self, request: dict) -> None:
-        self.window().open_add_dialog(request.get("url", ""), name=request.get("filename") or "",
-                                      headers=request.get("headers") or {}, kind=request.get("kind") or "")
+        self.window().request_download(request.get("url", ""), name=request.get("filename") or "",
+                                       headers=request.get("headers") or {}, kind=request.get("kind") or "",
+                                       captures=request.get("captures") or [])
 
     def _request_timeout(self, request: dict) -> bool:
         if request in self._pending_requests:

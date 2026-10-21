@@ -19,6 +19,7 @@ from urllib.parse import unquote, urlsplit
 
 from . import __version__
 from .engine import DownloadError, ProgressCallback, new_client
+from .net import NetConfig
 from .ratelimit import TokenBucket
 from .store import DownloadRow, Store
 
@@ -48,7 +49,22 @@ def is_torrent_source(url: str) -> bool:
 
 # --- configuration -------------------------------------------------------------------------
 
-def session_settings(settings: dict[str, Any], listen_host: str = "0.0.0.0") -> dict[str, Any]:
+def proxy_settings(proxy: str | None) -> dict[str, Any]:
+    """libtorrent settings for a manual proxy URL (http:// or socks5://, optionally with a login)."""
+    if not proxy:
+        return {"proxy_type": int(lt.proxy_type_t.none)}
+    parts = urlsplit(proxy)
+    socks = parts.scheme.startswith("socks")
+    kind = (("socks5_pw" if parts.username else "socks5") if socks else ("http_pw" if parts.username else "http"))
+    return {
+        "proxy_type": int(getattr(lt.proxy_type_t, kind)),
+        "proxy_hostname": parts.hostname, "proxy_port": parts.port,
+        "proxy_username": unquote(parts.username or ""), "proxy_password": unquote(parts.password or ""),
+        "proxy_peer_connections": True, "proxy_tracker_connections": True, "proxy_hostnames": True,
+    }
+
+
+def session_settings(settings: dict[str, Any], listen_host: str = "0.0.0.0", proxy: str | None = None) -> dict[str, Any]:
     encryption = {"prefer": lt.enc_policy.pe_enabled, "require": lt.enc_policy.pe_forced,
                   "off": lt.enc_policy.pe_disabled}[settings["torrent_encryption"]]
     port = settings["torrent_listen_port"]
@@ -67,6 +83,7 @@ def session_settings(settings: dict[str, Any], listen_host: str = "0.0.0.0") -> 
         "connections_limit": settings["torrent_max_connections"],
         "upload_rate_limit": settings["torrent_upload_limit"],
         "alert_mask": int(lt.alert_category.error | lt.alert_category.status | lt.alert_category.storage),
+        **proxy_settings(proxy),
     }
 
 
@@ -120,11 +137,12 @@ def describe_info(info: "lt.torrent_info") -> dict[str, Any]:
     }
 
 
-async def read_source(url: str, headers: dict[str, str] | None = None) -> bytes:
+async def read_source(url: str, headers: dict[str, str] | None = None, net: NetConfig | None = None) -> bytes:
     """Bytes of a .torrent from an http(s) URL, file:// URL or local path."""
     parts = urlsplit(url)
     if parts.scheme in ("http", "https"):
-        async with new_client(headers) as client:
+        net = await (net or NetConfig()).resolve(url)
+        async with new_client(headers, net=net) as client:
             response = await client.get(url)
             response.raise_for_status()
             return response.content
@@ -137,10 +155,10 @@ async def read_source(url: str, headers: dict[str, str] | None = None) -> bytes:
 class TorrentSession:
     """The daemon's libtorrent session: settings, alert pump, active handles, seeding."""
 
-    def __init__(self, settings: dict[str, Any], listen_host: str = "0.0.0.0"):
+    def __init__(self, settings: dict[str, Any], listen_host: str = "0.0.0.0", proxy: str | None = None):
         _require()
         self.listen_host = listen_host
-        self.ses = lt.session(session_settings(settings, listen_host))
+        self.ses = lt.session(session_settings(settings, listen_host, proxy))
         self.handles: dict[int, Any] = {}     # download id -> handle
         self.seeding: dict[int, float] = {}   # download id -> monotonic time seeding started
         self._waiters: list[tuple[Callable[[Any], bool], asyncio.Future]] = []
@@ -158,8 +176,8 @@ class TorrentSession:
                 await self._pump_task
         self.ses.pause()
 
-    def apply(self, settings: dict[str, Any]) -> None:
-        self.ses.apply_settings(session_settings(settings, self.listen_host))
+    def apply(self, settings: dict[str, Any], proxy: str | None = None) -> None:
+        self.ses.apply_settings(session_settings(settings, self.listen_host, proxy))
         self.apply_ip_filter(settings)
 
     def apply_ip_filter(self, settings: dict[str, Any]) -> None:

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { classify, extensionOf, sniff } from "../src/lib/classify.js";
+import { classify, extensionOf, isSubtitleSegment, pageMedia, sniff } from "../src/lib/classify.js";
 import {
   cookieHeader, filenameFromDisposition, filenameFromUrl, filterLinks, humanSize, shouldIntercept,
 } from "../src/lib/names.js";
@@ -68,4 +68,30 @@ test("download interception rules", () => {
   assert.equal(shouldIntercept({ url: "https://cdn.example.org/a.iso", fileSize: 5e9 }, settings), false);
   assert.equal(shouldIntercept({ url: "blob:https://x/123", fileSize: 5e9 }, settings), false);
   assert.equal(shouldIntercept({ url: "https://x/a.iso" }, { ...settings, intercept: false }), false);
+});
+
+test("page media for sites yt-dlp doesn't know: streams first, then the biggest files", () => {
+  const caught = [
+    { url: "https://cdn/x/small.mp4", kind: "video", size: 1000, seen: 1 },
+    { url: "https://cdn/x/sub.vtt", kind: "subtitle", size: 10 },
+    { url: "https://cdn/x/big.mp4", kind: "video", size: 9000, mime: "video/mp4", filename: "big.mp4", referer: "https://site/v" },
+    { url: "https://cdn/x/master.m3u8", kind: "hls", size: null },
+    { url: "https://cdn/x/track.m4a", kind: "audio", size: 500 },
+  ];
+  const media = pageMedia(caught);
+  assert.deepEqual(media.map((m) => m.url), ["https://cdn/x/master.m3u8", "https://cdn/x/big.mp4",
+    "https://cdn/x/small.mp4", "https://cdn/x/track.m4a"]);
+  assert.deepEqual(media[1], { url: "https://cdn/x/big.mp4", kind: "video", size: 9000, mime: "video/mp4",
+    filename: "big.mp4", referer: "https://site/v", headers: {} });
+  assert.equal(pageMedia(caught, 2).length, 2);
+});
+
+test("subtitle pieces of a stream are not offered as files", () => {
+  for (const url of ["https://h/x/seg-2.vtt", "https://h/x/segment12.webvtt", "https://h/x/0004.vtt",
+    "https://h/x/chunk_7.vtt?token=a"]) {
+    assert.equal(isSubtitleSegment(url), true, url);
+    assert.equal(sniff(url, 200, { "content-type": "text/vtt", "content-length": "300" }), null, url);
+  }
+  assert.equal(isSubtitleSegment("https://h/x/english.vtt"), false);
+  assert.deepEqual(sniff("https://h/x/english.vtt", 200, { "content-type": "text/vtt" }), { kind: "subtitle", size: null });
 });

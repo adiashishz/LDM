@@ -45,3 +45,47 @@ def test_schedule_commands_against_daemon(daemon, monkeypatch, capsys):
     assert main(["settings"]) == 0
     out = capsys.readouterr().out
     assert "schedule_start = 01:30" in out and "schedule_speed_limit = 2097152" in out
+
+
+def test_login_and_log_commands(daemon, http_server, monkeypatch, capsys):
+    import io
+    import random
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", daemon)
+    data = random.Random(3).randbytes(100_000)
+    cfg, url = http_server(data=data, auth=("digest", "ann", "s3cret"))
+    monkeypatch.setattr("sys.stdin", io.StringIO("s3cret\n"))
+    assert main(["login", "127.0.0.1", "ann", "--exact", "--password-stdin"]) == 0
+    assert main(["settings", "proxy_mode", "none"]) == 0
+    assert main(["add", url, "--wait"]) == 0
+    capsys.readouterr()
+    assert main(["logins"]) == 0
+    assert capsys.readouterr().out == "127.0.0.1 (exact): ann\n"
+    assert main(["log", "1"]) == 0
+    log = capsys.readouterr().out
+    assert "← HTTP 401" in log and "← HTTP 206" in log and "s3cret" not in log
+    monkeypatch.setattr("sys.stdin", io.StringIO("proxypw\n"))
+    assert main(["proxy-password", "--password-stdin"]) == 0
+    assert main(["login", "127.0.0.1", "--remove"]) == 0
+    capsys.readouterr()
+    assert main(["logins"]) == 0 and capsys.readouterr().out == ""
+
+
+def test_batch_import_and_export_commands(daemon, monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", daemon)
+    assert main(["batch", "http://127.0.0.1:9/img*.jpg", "--from", "8", "--to", "10", "--pad", "2", "--paused"]) == 0
+    links = tmp_path / "links.txt"
+    links.write_text("# list\nhttp://127.0.0.1:9/a.zip\nhttp://127.0.0.1:9/b.zip\n")
+    assert main(["import", str(links), "--paused"]) == 0
+    out = tmp_path / "out.txt"
+    assert main(["export-links", str(out)]) == 0
+    assert out.read_text().splitlines() == ["http://127.0.0.1:9/img08.jpg", "http://127.0.0.1:9/img09.jpg",
+                                            "http://127.0.0.1:9/img10.jpg", "http://127.0.0.1:9/a.zip",
+                                            "http://127.0.0.1:9/b.zip"]
+    saved = tmp_path / "unfinished.json"
+    assert main(["export-unfinished", str(saved)]) == 0
+    assert main(["import-unfinished", str(saved)]) == 0
+    assert "5 downloads imported" in capsys.readouterr().out
+    with pytest.raises(SystemExit, match="exactly one"):
+        main(["batch", "http://127.0.0.1:9/img.jpg", "--to", "3"])
+    with pytest.raises(SystemExit, match="--to"):
+        main(["batch", "http://127.0.0.1:9/img*.jpg"])

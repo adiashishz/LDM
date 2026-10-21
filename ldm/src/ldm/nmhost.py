@@ -112,7 +112,8 @@ def has_owner(name: str) -> bool:
 
 def headers_for(item: dict) -> dict:
     headers = {}
-    for key, header in (("referer", "Referer"), ("cookies", "Cookie"), ("user_agent", "User-Agent")):
+    for key, header in (("referer", "Referer"), ("origin", "Origin"), ("cookies", "Cookie"),
+                        ("user_agent", "User-Agent")):
         if item.get(key):
             headers[header] = item[key]
     return headers
@@ -126,7 +127,8 @@ def add_direct(item: dict) -> int:
 def add_dialog(item: dict) -> None:
     gdbus(BUS_NAME, OBJECT_PATH, f"{INTERFACE}.GetSettings")  # starts the daemon first
     request = {"url": item["url"], "filename": item.get("filename"), "headers": headers_for(item),
-               "size": item.get("size"), "page_url": item.get("page_url"), "kind": item.get("kind")}
+               "size": item.get("size"), "page_url": item.get("page_url"), "kind": item.get("kind"),
+               "captures": item.get("captures") or []}  # media the extension caught on the page
     gdbus(GUI_NAME, GUI_PATH, "org.gtk.Actions.Activate", gv_str("add-request"),
           f"[<{gv_str(json.dumps(request))}>]", "@a{sv} {}")
 

@@ -84,6 +84,14 @@ DELETE FROM settings WHERE key = 'schedule_enabled';
     """
 ALTER TABLE downloads ADD COLUMN done_bytes INTEGER NOT NULL DEFAULT 0;
 """,
+    # Site logins (1DM's credentials); passwords live in the keyring, not here.
+    """
+CREATE TABLE logins (
+    host               TEXT PRIMARY KEY,
+    username           TEXT NOT NULL,
+    include_subdomains INTEGER NOT NULL DEFAULT 1
+);
+""",
 ]
 
 
@@ -138,6 +146,25 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "notify_when_closed": True,        # desktop notifications from the service when LDM is closed
     "clipboard_watch": True,           # offer to download links you copy
     "clipboard_exclude": "",           # extensions never offered, e.g. "html,php"
+    # Network (LDM's own HTTP requests; yt-dlp and torrents use the proxy and user agent too)
+    "proxy_mode": "system",            # "system" (desktop settings / environment), "none", "manual"
+    "proxy_url": "",                   # manual: http://host:port or socks5://host:port
+    "proxy_user": "",                  # the password is kept in the keyring
+    "dns_mode": "system",              # "system" or "doh" (DNS-over-HTTPS)
+    "doh_url": "cloudflare",           # cloudflare / google / quad9 or a URL
+    "connect_timeout": 15,             # seconds
+    "read_timeout": 30,                # seconds without data before retrying
+    "user_agent": "default",           # default / firefox / chrome / mobile or a custom string
+    "always_retry": False,             # retry failed downloads without a limit
+    "restart_non_resumable": True,     # resume = start over when the server can't continue
+    # Adding and finished downloads
+    "skip_add_dialog": False,          # links from the browser/clipboard/drops are added without asking
+    "open_html_in_browser": True,      # a link that is a web page: offer to open it instead
+    "move_finished_dir": "",           # move finished files here ("" = leave them)
+    "move_finished_torrent_dir": "",   # same for torrents (after seeding)
+    "remove_finished": False,          # remove finished downloads from the list (files stay)
+    "cleanup_days": 0,                 # remove list entries older than this many days (0 = never)
+    "cleanup_finished_only": True,     # … but only finished ones
 }
 
 
@@ -273,14 +300,36 @@ class Store:
                 self.db.execute(f"UPDATE torrents SET {cols} WHERE download_id = ?", (*fields.values(), download_id))
 
     def host_rule_for(self, host: str) -> HostRule | None:
-        """Exact host first, then parent domains whose rule includes subdomains."""
+        row = self._for_host("host_rules", host)
+        return _to_rule(row) if row else None
+
+    def _for_host(self, table: str, host: str) -> sqlite3.Row | None:
+        """Exact host first, then parent domains whose entry includes subdomains."""
         labels = host.lower().split(".")
         for i in range(len(labels)):
             candidate = ".".join(labels[i:])
-            row = self.db.execute("SELECT * FROM host_rules WHERE host = ?", (candidate,)).fetchone()
+            row = self.db.execute(f"SELECT * FROM {table} WHERE host = ?", (candidate,)).fetchone()
             if row and (i == 0 or row["include_subdomains"]):
-                return _to_rule(row)
+                return row
         return None
+
+    def set_login(self, host: str, username: str, include_subdomains: bool = True) -> None:
+        with self.db:
+            self.db.execute("INSERT OR REPLACE INTO logins (host, username, include_subdomains) VALUES (?, ?, ?)",
+                            (host.lower(), username, int(include_subdomains)))
+
+    def remove_login(self, host: str) -> None:
+        with self.db:
+            self.db.execute("DELETE FROM logins WHERE host = ?", (host.lower(),))
+
+    def list_logins(self) -> list[dict[str, Any]]:
+        return [{"host": r["host"], "username": r["username"], "include_subdomains": bool(r["include_subdomains"])}
+                for r in self.db.execute("SELECT * FROM logins ORDER BY host")]
+
+    def login_for(self, host: str) -> tuple[str, str] | None:
+        """(host the login is saved under, user name) for a request host."""
+        row = self._for_host("logins", host)
+        return (row["host"], row["username"]) if row else None
 
     def get(self, download_id: int) -> DownloadRow:
         row = self.db.execute("SELECT * FROM downloads WHERE id = ?", (download_id,)).fetchone()

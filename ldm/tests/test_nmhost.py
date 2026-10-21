@@ -127,15 +127,16 @@ def test_dialog_mode_activates_gui_action(daemon, tmp_path):
     gui = subprocess.Popen([sys.executable, "-c", FAKE_GUI, str(out)])
     host = Host()
     wait_for(lambda: host.request(cmd="ping")["gui"])
+    capture = {"url": "https://cdn.example.com/v.m3u8", "kind": "hls", "size": None}
     reply = host.request(cmd="add", url="https://example.com/a.iso", filename="a.iso",
-                         referer="https://example.com/", cookies="k=v")
+                         referer="https://example.com/", cookies="k=v", captures=[capture])
     host.close()
     gui.wait(10)
     assert reply["ok"] and reply["dialog"]
     assert json.loads(out.read_text()) == {
         "url": "https://example.com/a.iso", "filename": "a.iso",
         "headers": {"Referer": "https://example.com/", "Cookie": "k=v"}, "size": None, "page_url": None,
-        "kind": None}
+        "kind": None, "captures": [capture]}  # media found on the page reaches the add dialog
 
 
 @needs_dbus
@@ -177,3 +178,11 @@ def test_daemon_is_started_by_dbus_activation(tmp_path, http_server, monkeypatch
             else:
                 os.kill(daemon_pid, signal.SIGTERM)
                 pytest.fail("daemon kept running after its bus went away")
+
+
+def test_headers_for_maps_browser_fields():
+    from ldm.nmhost import headers_for
+    assert headers_for({"referer": "https://site/", "origin": "https://site", "cookies": "a=1", "user_agent": "UA",
+                        "url": "x"}) == {"Referer": "https://site/", "Origin": "https://site", "Cookie": "a=1",
+                                         "User-Agent": "UA"}
+    assert headers_for({"origin": ""}) == {}

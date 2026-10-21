@@ -171,6 +171,10 @@ def test_js_runtime_found_outside_path(tmp_path, monkeypatch):
     node.parent.mkdir(parents=True)
     node.write_text("#!/bin/sh\n")
     node.chmod(0o755)
+    bun = tmp_path / ".bun/bin/bun"  # yt-dlp lags behind new bun releases: node is preferred
+    bun.parent.mkdir(parents=True)
+    bun.write_text("#!/bin/sh\n")
+    bun.chmod(0o755)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("PATH", "/nonexistent")
     assert find_js_runtime() == ("node", str(node))

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from gi.repository import Adw, Gio, GLib, Gtk
 
-from ..format import human
+from ..format import STATE_LABELS, human
 from .client import DaemonClient
 from .schedule_rows import ScheduleEditor
 from .dialogs import is_url, parse_limit, read_clipboard_url, short_path
@@ -24,6 +25,17 @@ FOLDERS = [
 OTHER_FOLDER = "Other folder…"
 MAX_PARTS = 32
 PLAYLIST_EXTENSIONS = (".m3u8", ".mpd")
+
+
+def capture_details(capture: dict[str, Any]) -> str:
+    kind = {"hls": "HLS stream", "dash": "DASH stream", "video": "Video", "audio": "Audio"}.get(capture.get("kind"), "")
+    host = urlsplit(capture["url"]).hostname or ""
+    return " · ".join(p for p in (kind, human(capture["size"]) if capture.get("size") else "", host) if p)
+
+
+def looks_like_login(url: str) -> bool:
+    """A download link that ended on the site's sign-in page (the site wants a logged-in browser)."""
+    return bool(re.search(r"/(log-?in|sign-?in|auth|account/login)(/|$|\?)", urlsplit(url).path.lower() + "/"))
 
 
 def is_torrent_link(text: str) -> bool:
@@ -43,9 +55,13 @@ def duration_text(seconds: float | None) -> str:
 
 class AddDialog(Adw.Dialog):
     def __init__(self, client: DaemonClient, url: str = "", on_added: Callable[[int], None] | None = None,
-                 name: str = "", headers: dict[str, str] | None = None, kind: str = ""):
+                 name: str = "", headers: dict[str, str] | None = None, kind: str = "",
+                 on_show: Callable[[int], None] | None = None, captures: list[dict[str, Any]] | None = None):
         super().__init__(title="Download File", content_width=560)
         self.client = client
+        self.on_show = on_show         # show an existing download of the same link in the list
+        self.duplicate: dict[str, Any] | None = None
+        self._html_page = self._login_page = False
         self.kind_hint = kind          # "media" when the browser sent a video page or stream
         self.media: dict[str, Any] | None = None  # ProbeMedia result once the link is a video
         self.torrent: dict[str, Any] | None = None  # ProbeTorrent result (empty dict: no file list)
@@ -146,18 +162,40 @@ class AddDialog(Adw.Dialog):
         self.referer = Adw.EntryRow(title="Referer", text=headers.get("Referer", ""))
         self.cookie = Adw.PasswordEntryRow(title="Cookie", text=headers.get("Cookie", ""))
         self.user_agent = Adw.EntryRow(title="User-Agent", text=headers.get("User-Agent", ""))
-        for row in (self.referer, self.cookie, self.user_agent):
+        self.origin = Adw.EntryRow(title="Origin", text=headers.get("Origin", ""))
+        for row in (self.referer, self.origin, self.cookie, self.user_agent):
             expander.add_row(row)
             row.connect("changed", self._schedule_probe)
         expander.set_expanded(bool(headers))
         header_group.add(expander)
 
         page = Adw.PreferencesPage()
-        for group in (file_group, self.media_group, self.torrent_group, where, options, header_group):
+        # 1DM's grabber: media the browser loaded on the page, for sites yt-dlp doesn't know.
+        self.captures = captures or []
+        self.found_group = Adw.PreferencesGroup(
+            title="Found on this page", visible=bool(self.captures),
+            description="Video files and streams your browser loaded while the page played.")
+        self.found_row = Adw.ExpanderRow(title=f"{len(self.captures)} files and streams")
+        for capture in self.captures:
+            row = Adw.ActionRow(title=capture.get("filename") or capture["url"].rsplit("/", 1)[-1] or capture["url"],
+                                subtitle=capture_details(capture), activatable=True, title_lines=1)
+            row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+            row.connect("activated", lambda _r, c=capture: self._use_capture(c))
+            self.found_row.add_row(row)
+        self.found_group.add(self.found_row)
+        for group in (file_group, self.found_group, self.media_group, self.torrent_group, where, options,
+                      header_group):
             page.add(group)
         self.toasts = Adw.ToastOverlay(child=page)
         view = Adw.ToolbarView(content=self.toasts)
         view.add_top_bar(header)
+        # 1DM: "Download link already exists!" — show or resume it, or press Start to add it again.
+        self.duplicate_banner = Adw.Banner(button_label="Show")
+        self.duplicate_banner.connect("button-clicked", self._on_duplicate)
+        view.add_top_bar(self.duplicate_banner)
+        self.web_banner = Adw.Banner(title="This link is a web page, not a file", button_label="Open in Browser")
+        self.web_banner.connect("button-clicked", self._open_in_browser)
+        view.add_top_bar(self.web_banner)
         self.set_child(view)
 
         self.url.connect("changed", self._on_url_changed)
@@ -231,7 +269,8 @@ class AddDialog(Adw.Dialog):
 
     def headers(self) -> dict[str, str]:
         return {k: row.get_text().strip() for k, row in
-                (("Referer", self.referer), ("Cookie", self.cookie), ("User-Agent", self.user_agent))
+                (("Referer", self.referer), ("Origin", self.origin), ("Cookie", self.cookie),
+                 ("User-Agent", self.user_agent))
                 if row.get_text().strip()}
 
     def _schedule_probe(self, *_) -> None:
@@ -252,6 +291,9 @@ class AddDialog(Adw.Dialog):
             return GLib.SOURCE_REMOVE
         self._set_media(None)
         self._set_torrent(None)
+        self._html_page = self._login_page = False
+        self.web_banner.set_revealed(False)
+        self._check_duplicate(url)
         if self.kind_hint == "torrent" or is_torrent_link(url):
             self._probe_torrent(url)
             return GLib.SOURCE_REMOVE
@@ -352,7 +394,17 @@ class AddDialog(Adw.Dialog):
         self.spinner.set_visible(False)
         if error:
             self._show_probe_state(None)
+            if self._html_page and self._login_page:
+                self.size.set_subtitle("The site sent its login page: log in on the site in your browser, "
+                                       "then download again")
+                return
+            if self.captures:
+                self.size.set_subtitle("yt-dlp doesn't support this site — pick one of the videos found on the page")
+                self.found_row.set_expanded(True)
+                return
             self.size.set_subtitle(f"No downloadable video found: {error.message}")
+            if self._html_page and self.settings.get("open_html_in_browser", True):
+                self.web_banner.set_revealed(True)  # 1DM: open web pages in the browser instead
             return
         self._set_media(result)
 
@@ -363,9 +415,59 @@ class AddDialog(Adw.Dialog):
             self.size.set_subtitle(f"Could not check the link: {error.message}")
             return
         if (result.get("content_type") or "").startswith("text/html"):
+            self._html_page = True
+            self._login_page = looks_like_login(result.get("final_url") or "")
             self._probe_media(self.url.get_text().strip())  # a web page: is there a video on it?
             return
         self._show_probe_state(result)
+
+    # --- duplicates and web pages ---------------------------------------------------------------
+
+    def _check_duplicate(self, url: str) -> None:
+        generation = self._probe_generation
+        self.client.find_duplicates(url, lambda found, error: generation == self._probe_generation
+                                    and self._show_duplicate(found[0] if found else None))
+
+    def _show_duplicate(self, existing: dict[str, Any] | None) -> None:
+        self.duplicate = existing
+        if existing is None:
+            self.duplicate_banner.set_revealed(False)
+            return
+        size = f" · {human(existing['size'])}" if existing.get("size") else ""
+        state = STATE_LABELS.get(existing["state"], existing["state"])
+        self.duplicate_banner.set_title(f"Already in your list — {state}{size}")
+        resumable = existing["state"] in ("paused", "error", "expired", "queued")
+        self.duplicate_banner.set_button_label("Resume" if resumable else "Show")
+        self.duplicate_banner.set_revealed(True)
+
+    def _on_duplicate(self, _banner) -> None:
+        existing = self.duplicate
+        if existing is None:
+            return
+        if existing["state"] in ("paused", "error", "expired"):
+            self.client.resume(existing["id"])
+        if self.on_show:
+            self.on_show(existing["id"])
+        self.close()
+
+    def _use_capture(self, capture: dict[str, Any]) -> None:
+        """Download a file or stream the browser loaded on the page instead of the page itself."""
+        self.kind_hint = "media" if capture.get("kind") in ("hls", "dash") else ""
+        sent = capture.get("headers") or {}  # what the browser sent for it: signed links check these
+        referer = sent.get("referer") or capture.get("referer")
+        if referer or not self.referer.get_text():
+            self.referer.set_text(referer or self.url.get_text().strip())
+        self.origin.set_text(sent.get("origin", ""))
+        if "cookie" in sent:
+            self.cookie.set_text(sent["cookie"])
+        if capture.get("filename") and self._auto_name:
+            self.name.set_text(capture["filename"])
+        self.found_row.set_expanded(False)
+        self.url.set_text(capture["url"])  # checks the new link
+
+    def _open_in_browser(self, _banner) -> None:
+        Gtk.UriLauncher.new(self.url.get_text().strip()).launch(self.get_root(), None, None)
+        self.close()
 
     # --- video mode ----------------------------------------------------------------------------
 

@@ -38,6 +38,7 @@ class ServerConfig:
     range_limit: int = 0            # more simultaneous range requests than this get HTTP 429 ...
     retry_after: str | None = None  # ... with this Retry-After header
     throttled: int = 0              # 429 responses sent
+    auth: tuple[str, str, str] | None = None  # ("basic" | "digest", user, password): else HTTP 401
     requests: list[dict[str, str]] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -52,6 +53,14 @@ class _Handler(BaseHTTPRequestHandler):
         cfg: ServerConfig = self.server.cfg
         with cfg.lock:
             cfg.requests.append(dict(self.headers))
+        if cfg.auth and not _authorized(cfg.auth, self.command, self.headers.get("Authorization", "")):
+            self.send_response(401)
+            scheme = cfg.auth[0]
+            self.send_header("WWW-Authenticate", 'Basic realm="ldm"' if scheme == "basic" else
+                             f'Digest realm="ldm", qop="auth", nonce="{DIGEST_NONCE}", algorithm=MD5')
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if self.path in cfg.redirects:
             self.send_response(302)
             self.send_header("Location", cfg.redirects[self.path])
@@ -160,6 +169,24 @@ class _Handler(BaseHTTPRequestHandler):
             cfg.bytes_sent += n
 
 
+DIGEST_NONCE = "a1b2c3d4"
+
+
+def _authorized(auth: tuple[str, str, str], method: str, header: str) -> bool:
+    import base64
+    import hashlib
+    scheme, user, password = auth
+    if scheme == "basic":
+        return header == "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
+    if not header.startswith("Digest "):
+        return False
+    fields = dict(re.findall(r'(\w+)="?([^",]*)"?', header[7:]))
+    md5 = lambda text: hashlib.md5(text.encode()).hexdigest()  # noqa: E731
+    ha1, ha2 = md5(f"{user}:ldm:{password}"), md5(f"{method}:{fields.get('uri')}")
+    expected = md5(f"{ha1}:{DIGEST_NONCE}:{fields.get('nc')}:{fields.get('cnonce')}:auth:{ha2}")
+    return fields.get("username") == user and fields.get("response") == expected
+
+
 @pytest.fixture
 def http_server():
     """Start test servers: `cfg, url = http_server(data=b"...", ranges=False, ...)`."""
@@ -200,7 +227,9 @@ def daemon(bus_address, tmp_path):
     """Run `serve()` in its own thread and event loop."""
     loop = asyncio.new_event_loop()
     stop, ready = asyncio.Event(), threading.Event()
-    options = {"progress_interval": 0.05, "downloader_options": {"min_part": 64 * 1024}}
+    from ldm.passwords import MemoryPasswords
+    options = {"progress_interval": 0.05, "downloader_options": {"min_part": 64 * 1024},
+               "passwords": MemoryPasswords()}  # never the user's keyring
     from ldm.daemon import serve
 
     async def run():
@@ -219,3 +248,46 @@ def daemon(bus_address, tmp_path):
     yield bus_address
     loop.call_soon_threadsafe(stop.set)
     thread.join(10)
+
+
+# --- proxies and DNS-over-HTTPS ---------------------------------------------------------
+
+@pytest.fixture
+def proxy_server():
+    """HTTP forward proxy: `proxy = proxy_server(login=("u", "p"))`; `proxy.url`, `proxy.requests`."""
+    from netservers import ForwardProxy
+    proxies = []
+
+    def start(login=None):
+        proxy = ForwardProxy(login)
+        proxies.append(proxy)
+        return proxy
+
+    yield start
+    for proxy in proxies:
+        proxy.close()
+
+
+@pytest.fixture
+def socks_server():
+    from netservers import Socks5Proxy
+    proxy = Socks5Proxy()
+    yield proxy
+    proxy.close()
+
+
+@pytest.fixture
+def doh_server():
+    """Fake DNS-over-HTTPS server (plain HTTP): `doh = doh_server({"files.test": "127.0.0.1"})`."""
+    pytest.importorskip("dns", reason="python3-dns (dnspython) not installed")
+    from netservers import DohServer
+    servers = []
+
+    def start(names):
+        server = DohServer(names)
+        servers.append(server)
+        return server
+
+    yield start
+    for server in servers:
+        server.close()

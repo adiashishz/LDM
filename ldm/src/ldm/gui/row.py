@@ -42,6 +42,11 @@ ACTIONS = {
     "limit": ("Speed Limit…", "ask_speed_limit", {"queued", "running", "paused", "error"}),
     "schedule": ("Schedule…", "ask_schedule", {"queued", "running", "paused", "error"}),
     "move-top": ("Move to Top", "move_to_top", {"queued", "paused"}),
+    "rename": ("Rename…", "ask_rename", {"queued", "paused", "error", "expired", "changed", "done"}),
+    "move-to": ("Move to Folder…", "ask_move", {"queued", "paused", "error", "expired", "changed", "done"}),
+    "checksum": ("Checksum…", "show_checksum", {"done", "seeding"}),
+    "login": ("Add Login…", "ask_login", {"error"}),  # only for "login required" errors
+    "log": ("Diagnostics…", "show_log", None),
     "remove": ("Remove from List", "remove", None),
     "delete": ("Remove and Delete File", "remove_and_delete", None),
 }
@@ -88,7 +93,7 @@ class DownloadRow(Gtk.Box):
         main, removal = Gio.Menu(), Gio.Menu()
         for name, (label, _, _) in ACTIONS.items():
             entry = Gio.MenuItem.new(label, f"dl.{name}")
-            if name == "details":  # only torrents have it
+            if name in ("details", "login"):  # only torrents / login errors have them
                 entry.set_attribute_value("hidden-when", GLib.Variant("s", "action-disabled"))
             (removal if name in ("remove", "delete") else main).append_item(entry)
         menu.append_section(None, main)
@@ -111,6 +116,7 @@ class DownloadRow(Gtk.Box):
         item.bind_property("status", self.status, "label", sync)
         item.bind_property("fraction", self.progress, "fraction", sync)
         item.connect("notify::state", self._sync)
+        item.connect("notify::error", self._sync)
         item.connect("notify::title", self._sync_icon)
         self._sync()
         self._sync_icon()
@@ -131,6 +137,10 @@ class DownloadRow(Gtk.Box):
             enabled = states is None or state in states
             if name == "details":
                 enabled = self.item.kind == "torrent"
+            elif name == "login":
+                enabled = state == "error" and self.item.error.startswith("login required")
+            elif name in ("rename", "move-to") and self.item.kind == "torrent":
+                enabled = state == "done"
             elif name in ("set-url", "limit") and self.item.kind == "torrent":
                 enabled = enabled and name == "limit"
             self.actions.lookup_action(name).set_enabled(enabled)

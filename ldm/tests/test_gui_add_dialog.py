@@ -39,6 +39,14 @@ class FakeClient:
         self.added.append((url, options))
         callback(1, None)
 
+    duplicates: dict = {}
+
+    def find_duplicates(self, url, callback):
+        callback(self.duplicates.get(url, []), None)
+
+    def resume(self, download_id, callback=None):
+        self.resumed = download_id
+
 
 def test_browser_request_prefills_headers_and_name():
     client = FakeClient()
@@ -196,3 +204,67 @@ def test_schedule_follows_new_link_setting_and_defaults():
     dialog._submit(start=True)
     _, options = client.added[0]
     assert options["scheduled"] is True and options["schedule_start"] == "01:00"  # = defaults: daemon follows them
+
+
+def test_duplicate_link_banner():
+    client = FakeClient()
+    client.duplicates = {"https://site/a.iso": [{"id": 4, "state": "paused", "size": 64 * 1024 * 1024}]}
+    shown = []
+    dialog = AddDialog(client, "https://site/a.iso", on_show=shown.append)
+    assert dialog.duplicate_banner.get_revealed()
+    assert dialog.duplicate_banner.get_title() == "Already in your list — Paused · 64.0 MiB"
+    assert dialog.duplicate_banner.get_button_label() == "Resume"
+    dialog._on_duplicate(dialog.duplicate_banner)
+    assert (client.resumed, shown) == (4, [4])
+    dialog = AddDialog(client, "https://site/other.iso")
+    assert not dialog.duplicate_banner.get_revealed()
+
+
+def test_web_page_banner():
+    client = FakeClient()
+    dialog = AddDialog(client, "https://site/article")
+    client.probes[-1][2]({"size": 5000, "resumable": False, "filename": "article", "content_type": "text/html"}, None)
+    client.media_probes[-1][2](None, type("E", (), {"message": "Unsupported URL"})())
+    assert dialog.web_banner.get_revealed()
+    client.settings_override = {"open_html_in_browser": False}
+    dialog = AddDialog(client, "https://site/article")
+    client.probes[-1][2]({"size": 5000, "resumable": False, "filename": "article", "content_type": "text/html"}, None)
+    client.media_probes[-1][2](None, type("E", (), {"message": "Unsupported URL"})())
+    assert not dialog.web_banner.get_revealed()
+
+
+def test_login_redirect_is_explained():
+    from ldm.gui.add_dialog import looks_like_login
+    assert looks_like_login("https://www.site.com/login/L2Rsb2Fk")
+    assert looks_like_login("https://accounts.site.com/signin?next=/x")
+    assert not looks_like_login("https://site.com/videos/blogin-tutorial.mp4")
+    client = FakeClient()
+    dialog = AddDialog(client, "https://www.site.com/dload/1080.mp4")
+    client.probes[-1][2]({"size": 5000, "resumable": False, "filename": "x", "content_type": "text/html",
+                          "final_url": "https://www.site.com/login/L2Rsb2Fk"}, None)
+    client.media_probes[-1][2](None, type("E", (), {"message": "yt-dlp doesn't support this site"})())
+    assert dialog.size.get_subtitle().startswith("The site sent its login page")
+
+
+def test_media_found_on_the_page_when_yt_dlp_cannot():
+    captures = [{"url": "https://cdn.host/v/master.m3u8", "kind": "hls", "size": None, "referer": "https://host/v/1",
+                 "headers": {"origin": "https://host", "referer": "https://host/", "cookie": "cdn=1"}},
+                {"url": "https://cdn.host/v/clip.mp4", "kind": "video", "size": 64 * 1024 * 1024,
+                 "filename": "clip.mp4", "referer": "https://host/v/1"}]
+    client = FakeClient()
+    dialog = AddDialog(client, "https://host/v/1", kind="media", captures=captures)
+    assert dialog.found_group.get_visible() and not dialog.found_row.get_expanded()
+    client.media_probes[-1][2](None, type("E", (), {"message": "yt-dlp doesn't support this site"})())
+    assert dialog.found_row.get_expanded()
+    assert dialog.size.get_subtitle().startswith("yt-dlp doesn't support this site — pick one")
+
+    dialog._use_capture(captures[1])  # a plain video file: checked as a normal download
+    dialog._probe()
+    assert client.probes[-1][:2] == ("https://cdn.host/v/clip.mp4", {"Referer": "https://host/v/1"})
+    assert dialog.name.get_text() == "clip.mp4"
+    dialog._use_capture(captures[0])  # a stream: yt-dlp downloads the playlist
+    dialog._probe()
+    assert client.media_probes[-1][0] == "https://cdn.host/v/master.m3u8"
+    # the headers the browser sent for it (signed stream links check Origin/Referer/cookies)
+    assert client.media_probes[-1][1] == {"Referer": "https://host/", "Origin": "https://host", "Cookie": "cdn=1"}
+    assert AddDialog(FakeClient(), "https://x/y").found_group.get_visible() is False

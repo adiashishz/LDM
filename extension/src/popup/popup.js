@@ -76,7 +76,8 @@ async function showMedia() {
     button.textContent = "Download";
     button.title = item.stream ? "Stream playlist: LDM downloads all pieces and joins them" : "";
     button.addEventListener("click", () => send([{ url: item.url, filename: item.stream ? "" : item.filename,
-      referer: item.referer, size: item.size, pageUrl, kind: item.stream ? "media" : "" }], button));
+      referer: item.referer, size: item.size, pageUrl, kind: item.stream ? "media" : "",
+      headers: item.headers || {} }], button));
     const meta = [humanSize(item.size), item.mime, new URL(item.url).hostname].filter(Boolean).join(" · ");
     return row(item.filename || item.url, meta, item.kind, button);
   }));
@@ -147,7 +148,7 @@ async function main() {
   $("tab-media").addEventListener("click", () => showView("media"));
   $("tab-links").addEventListener("click", () => showView("links"));
   $("options").addEventListener("click", () => api.runtime.openOptionsPage());
-  $("page-video").addEventListener("click", () => send([{ url: pageUrl, pageUrl, kind: "media" }], $("page-video")));
+  $("page-video").addEventListener("click", () => send([{ url: pageUrl, pageUrl, kind: "media", tabId }], $("page-video")));
   $("page-video").disabled = !/^https?:/i.test(pageUrl);
   $("group").addEventListener("change", renderLinks);
   $("search").addEventListener("input", renderLinks);

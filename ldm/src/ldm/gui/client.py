@@ -58,6 +58,9 @@ def _bytes_fields(value: Any) -> Any:
     return value
 
 
+NO_TIMEOUT = 2**31 - 1  # G_MAXINT: wait as long as it takes (hashing or moving big files)
+
+
 class DaemonClient(GObject.Object):
     __gsignals__ = {
         "added": (GObject.SignalFlags.RUN_FIRST, None, (GObject.TYPE_UINT64,)),
@@ -120,7 +123,8 @@ class DaemonClient(GObject.Object):
 
     # --- calls -----------------------------------------------------------------------------
 
-    def _call(self, method: str, signature: str, args: tuple, callback: Callback | None) -> None:
+    def _call(self, method: str, signature: str, args: tuple, callback: Callback | None, timeout: int = -1) -> None:
+        """`timeout` in ms; -1 = D-Bus default (25 s), NO_TIMEOUT for long file work."""
         if self._proxy is None:
             if callback:
                 GLib.idle_add(callback, None, DaemonError("NotRunning", "the download service is not running"))
@@ -137,7 +141,7 @@ class DaemonClient(GObject.Object):
             if callback:
                 callback(_bytes_fields(value[0]) if len(value) == 1 else None, None)
 
-        self._proxy.call(method, parameters, Gio.DBusCallFlags.NO_AUTO_START, -1, None, done)
+        self._proxy.call(method, parameters, Gio.DBusCallFlags.NO_AUTO_START, timeout, None, done)
 
     def add(self, url: str, options: dict[str, Any] | None = None, callback: Callback | None = None) -> None:
         variants = {k: to_variant(v) for k, v in (options or {}).items() if v is not None}
@@ -198,3 +202,34 @@ class DaemonClient(GObject.Object):
 
     def list_host_rules(self, callback: Callback) -> None:
         self._call("ListHostRules", "", (), callback)
+
+    def set_login(self, host: str, username: str, password: str, include_subdomains: bool,
+                  callback: Callback | None = None) -> None:
+        self._call("SetLogin", "sssb", (host, username, password, include_subdomains), callback)
+
+    def remove_login(self, host: str, callback: Callback | None = None) -> None:
+        self._call("RemoveLogin", "s", (host,), callback)
+
+    def list_logins(self, callback: Callback) -> None:
+        self._call("ListLogins", "", (), callback)
+
+    def get_log(self, download_id: int, callback: Callback) -> None:
+        self._call("GetLog", "t", (download_id,), callback)
+
+    def find_duplicates(self, url: str, callback: Callback) -> None:
+        self._call("FindDuplicates", "s", (url,), callback)
+
+    def export_downloads(self, unfinished_only: bool, callback: Callback) -> None:
+        self._call("ExportDownloads", "b", (unfinished_only,), callback)
+
+    def import_downloads(self, text: str, callback: Callback | None = None) -> None:
+        self._call("ImportDownloads", "s", (text,), callback)
+
+    def checksum(self, download_id: int, algorithm: str, callback: Callback) -> None:
+        self._call("Checksum", "ts", (download_id, algorithm), callback, NO_TIMEOUT)
+
+    def rename(self, download_id: int, name: str, callback: Callback | None = None) -> None:
+        self._call("Rename", "ts", (download_id, name), callback, NO_TIMEOUT)
+
+    def move_to(self, download_id: int, folder: str, callback: Callback | None = None) -> None:
+        self._call("MoveTo", "ts", (download_id, folder), callback, NO_TIMEOUT)

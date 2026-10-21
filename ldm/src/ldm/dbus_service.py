@@ -174,6 +174,57 @@ class ManagerInterface(ServiceInterface):
     def ListHostRules(self) -> "aa{sv}":
         return [to_vardict(vars(rule)) for rule in self.manager.host_rules()]
 
+    @method()
+    def SetLogin(self, host: "s", username: "s", password: "s", include_subdomains: "b"):
+        """Site login (HTTP Basic/Digest); the password goes to the keyring."""
+        with _errors():
+            self.manager.set_login(host, username, password, include_subdomains)
+
+    @method()
+    def RemoveLogin(self, host: "s"):
+        with _errors():
+            self.manager.remove_login(host)
+
+    @method()
+    def ListLogins(self) -> "aa{sv}":
+        return [to_vardict(login) for login in self.manager.list_logins()]
+
+    @method()
+    async def Checksum(self, download_id: "t", algorithm: "s") -> "s":
+        with _errors():
+            return await self.manager.checksum(download_id, algorithm)
+
+    @method()
+    async def Rename(self, download_id: "t", name: "s") -> "s":
+        """Returns the new path (a taken name gets a number)."""
+        with _errors():
+            return await self.manager.rename(download_id, name)
+
+    @method()
+    async def MoveTo(self, download_id: "t", folder: "s") -> "s":
+        with _errors():
+            return await self.manager.move_to(download_id, folder)
+
+    @method()
+    def FindDuplicates(self, url: "s") -> "aa{sv}":
+        return [to_vardict(d) for d in self.manager.find_duplicates(url)]
+
+    @method()
+    def ExportDownloads(self, unfinished_only: "b") -> "s":
+        """JSON text of the downloads (the caller saves it to a file)."""
+        return self.manager.export_downloads(unfinished_only)
+
+    @method()
+    def ImportDownloads(self, text: "s") -> "at":
+        with _errors():
+            return self.manager.import_downloads(text)
+
+    @method()
+    def GetLog(self, download_id: "t") -> "as":
+        """Diagnostics for one download (requests, responses, retries) since the service started."""
+        with _errors():
+            return self.manager.get_log(download_id)
+
     @signal()
     def Added(self, download_id) -> "t":
         return download_id

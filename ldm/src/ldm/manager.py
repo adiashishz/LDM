@@ -11,22 +11,27 @@ import contextlib
 import json
 import logging
 import shutil
-from collections import Counter
+import time
+from collections import Counter, deque
 from datetime import datetime
 from functools import partial
+from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
 import httpx
 
-from . import media, torrent
+from . import files, media, torrent, transfer
 from .engine import DownloadError, Downloader, new_client, probe
 from .media import MediaDownloader
+from . import net
+from .net import DOH_PRESETS, NetConfig, check_proxy_url, with_login
+from .passwords import open_store
 from .torrent import TorrentDownloader, TorrentSession
 from .ratelimit import TokenBucket
 from .schedule import describe_start, in_window, next_start, parse_days, parse_time
 from .system import Conditions
-from .store import DEFAULT_SETTINGS, DownloadRow, HostRule, Store
+from .store import DEFAULT_SETTINGS, DownloadRow, HostRule, Store, default_db_path
 
 RESUMABLE_STATES = {"paused", "error", "expired", "changed"}
 MAX_CONNECTIONS = 32
@@ -36,6 +41,8 @@ TORRENT_OPTIONS = {"priorities", "sequential", "metadata", "peers"}
 WINDOW_KEYS = ("schedule_start", "schedule_stop", "schedule_days")  # a download's own times override the defaults
 RUN_OPTIONS = {"scheduled", "unmetered_only", *WINDOW_KEYS}  # stored in options_json for every kind
 CONDITION_TICK = 30.0
+CLEANUP_INTERVAL = 3600.0  # seconds between "remove old entries" checks
+LOG_LINES = 300  # diagnostics kept per download
 SCHEMES = {"http": ("http", "https"), "media": ("http", "https"), "torrent": ("http", "https", "magnet", "file")}
 
 log = logging.getLogger(__name__)
@@ -61,13 +68,26 @@ class Busy(ManagerError):
     pass
 
 
+def _link_key(url: str) -> str:
+    """Same link: ignore the #fragment and a trailing slash."""
+    return url.split("#", 1)[0].rstrip("/")
+
+
 class Manager:
     def __init__(self, store: Store, *, downloader_factory: Callable[..., Downloader] = Downloader,
                  media_factory: Callable[..., MediaDownloader] = MediaDownloader,
                  downloader_options: dict[str, Any] | None = None, progress_interval: float = 0.5,
                  torrent_listen_host: str = "0.0.0.0", conditions: Conditions | None = None,
-                 inhibitor=None, clock: Callable[[], datetime] = datetime.now):
+                 inhibitor=None, clock: Callable[[], datetime] = datetime.now, passwords=None,
+                 passwords_path: Path | None = None):
         self.store = store
+        # Keyring (or file) for proxy and site-login passwords: opened only when one is needed.
+        self._passwords = passwords
+        self._passwords_path = passwords_path or default_db_path("passwords.json")
+        self._secrets: dict[tuple[str, str], str] = {}
+        self._logs: dict[int, deque[str]] = {}  # download id -> diagnostics lines
+        self._background: set[asyncio.Task] = set()  # after-finish moves, cleanup removals
+        self._last_cleanup = float("-inf")
         self.conditions = conditions or Conditions()  # metered / battery (system.SystemMonitor)
         self.inhibitor = inhibitor                     # system.SleepInhibitor or None
         self._clock = clock
@@ -100,6 +120,8 @@ class Manager:
     # --- lifecycle -------------------------------------------------------------------------
 
     async def start(self) -> None:
+        await self._load_secrets()
+        self._apply_dns()
         self.store.requeue_interrupted()
         self._global.set_rate(self.store.get_settings()["speed_limit"])
         self._progress_task = asyncio.create_task(self._progress_loop())
@@ -109,9 +131,95 @@ class Manager:
                 self._resume_seeding(d)
         self._schedule()
 
+    # --- network, passwords, logins, diagnostics ----------------------------------------------
+
+    def _net(self) -> NetConfig:
+        """Proxy, DNS, timeouts, user agent and site logins from the current settings."""
+        return NetConfig.from_settings(self.store.get_settings(), self._secrets.get(("proxy", "proxy")),
+                                       self._login_for)
+
+    def _apply_dns(self) -> None:
+        """DNS-over-HTTPS also for yt-dlp (it resolves names itself): see net.use_doh_for_process."""
+        settings = self.store.get_settings()
+        doh = settings["dns_mode"] == "doh" and net.doh_available()
+        net.use_doh_for_process(net.doh_endpoint(settings["doh_url"]) if doh else None,
+                                float(settings["connect_timeout"]))
+
+    def _login_for(self, host: str) -> tuple[str, str] | None:
+        found = self.store.login_for(host)
+        if found is None:
+            return None
+        saved_under, user = found
+        return user, self._secrets.get(("login", saved_under), "")
+
+    def _torrent_proxy(self) -> str | None:
+        """libtorrent only uses a manual proxy (it has no desktop proxy lookup)."""
+        net = self._net()
+        return net.proxy if net.proxy_mode == "manual" else None
+
+    async def _load_secrets(self) -> None:
+        """Read the passwords that are in use; the keyring is not opened when there are none."""
+        keys = [("login", login["host"]) for login in self.store.list_logins()]
+        if self.store.get_settings()["proxy_user"] or self._passwords is not None:
+            keys.append(("proxy", "proxy"))
+        if not keys:
+            return
+
+        def read() -> dict[tuple[str, str], str]:
+            store = self._open_passwords()
+            return {key: value for key in keys if (value := store.get(*key)) is not None}
+
+        try:
+            self._secrets.update(await asyncio.to_thread(read))
+        except Exception as e:  # locked keyring that the user declined to unlock, …
+            log.warning("could not read saved passwords: %s", e)
+
+    def _open_passwords(self):
+        if self._passwords is None:
+            self._passwords = open_store(self._passwords_path)
+        return self._passwords
+
+    def _set_secret(self, kind: str, key: str, password: str) -> None:
+        """Remember now; save to the keyring in the background ("" deletes)."""
+        if password:
+            self._secrets[(kind, key)] = password
+        else:
+            self._secrets.pop((kind, key), None)
+
+        def save() -> None:
+            store = self._open_passwords()
+            store.set(kind, key, password) if password else store.delete(kind, key)
+
+        task = asyncio.get_running_loop().run_in_executor(None, save)
+        task.add_done_callback(lambda t: t.exception() and log.warning("could not save password: %s", t.exception()))
+
+    def set_login(self, host: str, username: str, password: str, include_subdomains: bool = True) -> None:
+        host = host.strip().lower()
+        if not host or "/" in host or not username:
+            raise InvalidArgument("a login needs a host name (e.g. example.com) and a user name")
+        self.store.set_login(host, username, include_subdomains)
+        self._set_secret("login", host, password)
+
+    def remove_login(self, host: str) -> None:
+        host = host.strip().lower()
+        self.store.remove_login(host)
+        self._set_secret("login", host, "")
+
+    def list_logins(self) -> list[dict[str, Any]]:
+        return self.store.list_logins()  # never the passwords
+
+    def _log(self, download_id: int, text: str) -> None:
+        lines = self._logs.setdefault(download_id, deque(maxlen=LOG_LINES))
+        lines.append(f"{time.strftime('%H:%M:%S')} {text}")
+
+    def get_log(self, download_id: int) -> list[str]:
+        self._get(download_id)
+        return list(self._logs.get(download_id, ()))
+
     def _torrent_session(self) -> TorrentSession:
         if self._torrent is None:
-            self._torrent = TorrentSession(self.store.get_settings(), self._torrent_listen_host)
+            self._torrent = TorrentSession(self.store.get_settings(), self._torrent_listen_host,
+                                           self._torrent_proxy())
             self._torrent.start()
         return self._torrent
 
@@ -138,13 +246,19 @@ class Manager:
             self._tick_task.cancel()
         if self.inhibitor:
             self.inhibitor.close()
+        for task in list(self._background):
+            task.cancel()
+        net.use_doh_for_process(None)
         running = list(self._tasks)
         tasks = list(self._tasks.values())
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         for download_id in running:
-            self.store.set_state(download_id, "queued")
+            # Interrupted by the shutdown (now "paused" by the engine): queue again for the next start.
+            # One that failed or finished while stopping keeps that state.
+            if self.store.get(download_id).state in ("paused", "running", "processing"):
+                self.store.set_state(download_id, "queued")
         if self._torrent is not None:  # seeding torrents stay "seeding" and restart next time
             for download_id in list(self._torrent.seeding):
                 handle = self._torrent.handles.get(download_id)
@@ -258,6 +372,7 @@ class Manager:
                 await task
             self._forget(download_id)
         self.store.delete(download_id)
+        self._logs.pop(download_id, None)
         if delete_files:
             if d.kind == "torrent" and d.name:
                 target = d.dir / d.name
@@ -287,7 +402,7 @@ class Manager:
             self.store.update(download_id, url=url)
             self._reset(download_id)
         else:
-            async with new_client(d.headers) as client:
+            async with new_client(d.headers, net=await self._net().resolve(url)) as client:
                 p = await probe(client, url)
             if p.size != d.size:
                 raise SizeMismatch(f"new link is {p.size} bytes, download is {d.size} bytes")
@@ -303,7 +418,8 @@ class Manager:
         if urlsplit(url).scheme not in ("http", "https"):
             raise InvalidArgument(f"unsupported URL: {url}")
         try:
-            async with new_client(headers) as client:
+            net = await self._net().resolve(url)
+            async with new_client(headers, net=net) as client:
                 p = await probe(client, url)
         except httpx.HTTPError as e:
             raise DownloadError(f"could not reach the server: {e}") from e
@@ -323,7 +439,7 @@ class Manager:
                 result.update(torrent.describe_info(info), metadata=torrent.metadata_bytes(info))
             return result
         try:
-            data = await torrent.read_source(source, headers)
+            data = await torrent.read_source(source, headers, self._net())
             info = torrent.lt.torrent_info(torrent.lt.bdecode(data))
         except (OSError, httpx.HTTPError) as e:
             raise DownloadError(f"could not read the torrent: {e}") from e
@@ -352,12 +468,13 @@ class Manager:
             self._torrent.remove(download_id)
         self.store.set_state(download_id, "done")
         self._emit_state(download_id)
+        self._after_finish(download_id)
 
     async def probe_media(self, url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
         """Title, qualities and subtitles yt-dlp can get from a page or stream playlist."""
         if urlsplit(url).scheme not in ("http", "https"):
             raise InvalidArgument(f"unsupported URL: {url}")
-        return await asyncio.to_thread(media.probe_media, url, headers, self.store.get_settings())
+        return await asyncio.to_thread(media.probe_media, url, headers, self.store.get_settings(), self._net())
 
     def set_schedule(self, download_id: int, scheduled: bool, window: dict[str, str] | None = None) -> None:
         """Put a download on the schedule or take it off. `window` (schedule_start/stop/days) gives it its
@@ -411,17 +528,29 @@ class Manager:
         settings = self.store.get_settings()
         runtime = media.find_js_runtime(settings["js_runtime"])  # read-only, shown in preferences
         settings["js_runtime_detected"] = f"{runtime[0]}: {runtime[1]}" if runtime else ""
+        settings["proxy_password_set"] = ("proxy", "proxy") in self._secrets  # read-only
+        settings["passwords_in"] = getattr(self._passwords, "where", "")     # keyring / file / memory
         return settings
 
     def update_settings(self, values: dict[str, Any]) -> None:
+        values = dict(values)
+        password = values.pop("proxy_password", None)  # not a setting: goes to the keyring
+        if password is not None and not isinstance(password, str):
+            raise InvalidArgument("proxy_password must be a string")
         for key, value in values.items():
             self._check_setting(key, value)
         for key, value in values.items():
             self.store.set_setting(key, value)
+        if password is not None:
+            self._set_secret("proxy", "proxy", password)
+        if any(k in values for k in ("dns_mode", "doh_url", "connect_timeout")):
+            self._apply_dns()
+        if self._torrent is not None and (password is not None or any(k.startswith("proxy_") for k in values)):
+            self._torrent.apply(self.store.get_settings(), self._torrent_proxy())
         if "speed_limit" in values:
             self._global.set_rate(values["speed_limit"])
         if self._torrent is not None and any(k.startswith("torrent_") for k in values):
-            self._torrent.apply(self.store.get_settings())
+            self._torrent.apply(self.store.get_settings(), self._torrent_proxy())
         if any(k.startswith("schedule_") or k in ("pause_on_metered", "battery_limit", "prevent_sleep")
                for k in values):
             self.conditions_changed()
@@ -434,7 +563,10 @@ class Manager:
         """Values must match the type of the default; a few settings have narrower rules."""
         if key not in DEFAULT_SETTINGS:
             raise InvalidArgument(f"unknown setting: {key}")
-        choices = {"media_container": ("mp4", "mkv"), "torrent_encryption": ("prefer", "require", "off")}
+        if key == "dns_mode" and value == "doh" and not net.doh_available():
+            raise InvalidArgument("DNS-over-HTTPS needs python3-dns: sudo dnf install python3-dns")
+        choices = {"media_container": ("mp4", "mkv"), "torrent_encryption": ("prefer", "require", "off"),
+                   "proxy_mode": ("system", "none", "manual"), "dns_mode": ("system", "doh")}
         if key in choices:
             if value not in choices[key]:
                 raise InvalidArgument(f"{key} must be one of: {', '.join(choices[key])}")
@@ -452,6 +584,21 @@ class Manager:
                 raise InvalidArgument(f"{key}: {e}") from None
         elif key == "battery_limit" and not (isinstance(value, int) and 0 <= value <= 100):
             raise InvalidArgument("battery_limit must be 0-100")
+        elif key == "proxy_url" and value:
+            try:
+                check_proxy_url(value)
+            except (ValueError, AttributeError) as e:
+                raise InvalidArgument(str(e)) from None
+        elif key == "doh_url" and not (value in DOH_PRESETS or (isinstance(value, str) and
+                                       urlsplit(value).scheme in ("https", "http") and urlsplit(value).hostname)):
+            raise InvalidArgument(f"doh_url must be {', '.join(DOH_PRESETS)} or an https:// URL")
+        elif key == "user_agent" and not (isinstance(value, str) and value.strip()):
+            raise InvalidArgument("user_agent must be default, firefox, chrome, mobile or a custom string")
+        elif key in ("connect_timeout", "read_timeout") and not (isinstance(value, int) and 1 <= value <= 600):
+            raise InvalidArgument(f"{key} must be 1-600 seconds")
+        elif key in ("move_finished_dir", "move_finished_torrent_dir") and value and not (
+                isinstance(value, str) and Path(value).expanduser().is_absolute()):
+            raise InvalidArgument(f"{key} must be an absolute folder path or empty")
         else:
             default = DEFAULT_SETTINGS[key]
             if isinstance(default, bool):
@@ -486,6 +633,28 @@ class Manager:
 
     def host_rules(self) -> list[HostRule]:
         return self.store.list_host_rules()
+
+    # --- duplicates, export/import -------------------------------------------------------------
+
+    def find_duplicates(self, url: str) -> list[dict[str, Any]]:
+        """Downloads of the same link (1DM: "Download link already exists!")."""
+        key = _link_key(url)
+        return [self.describe(d.id) for d in self.store.list()
+                if key in (_link_key(d.url), _link_key(d.final_url or ""))]
+
+    def export_downloads(self, unfinished_only: bool = True) -> str:
+        return json.dumps(transfer.export_downloads(self.store, unfinished_only), indent=1)
+
+    def import_downloads(self, text: str) -> list[int]:
+        """Downloads from an export file; they arrive paused (finished ones as finished)."""
+        try:
+            ids = transfer.import_downloads(self.store, text)
+        except (ValueError, KeyError, TypeError) as e:
+            raise InvalidArgument(f"could not import: {e}") from None
+        for download_id in ids:
+            self._emit(self.on_added, download_id)
+            self._emit_state(download_id)
+        return ids
 
     # --- queries ---------------------------------------------------------------------------
 
@@ -595,6 +764,12 @@ class Manager:
             rate = min(r for r in (rate, settings["schedule_speed_limit"]) if r)
         bucket = TokenBucket(rate)
         extra = {"on_state": lambda state, i=d.id: self._emit_state(i)} if d.kind in ("media", "torrent") else {}
+        extra["on_event"] = partial(self._log, d.id)
+        self._log(d.id, f"starting ({d.kind}) {d.url}")
+        if d.kind in ("http", "media"):
+            extra["net"] = self._net()
+        if d.kind == "http":
+            extra["restart_non_resumable"] = settings["restart_non_resumable"]
         connections = (rule.max_connections or None) if rule else None
         if d.kind == "http":
             host = (urlsplit(d.final_url or d.url).hostname or "").lower()
@@ -656,23 +831,124 @@ class Manager:
                 self.store.set_state(download_id, "queued")
         elif d.state in ("running", "processing"):  # cancelled before the engine started
             self.store.set_state(download_id, "paused")
-        elif d.state == "error":
+        elif d.state == "error" and not (d.error or "").startswith("login required"):
             settings = self.store.get_settings()
             attempt = self._attempts.get(download_id, 0) + 1
-            if attempt <= settings["retry_count"]:
+            if settings["always_retry"] or attempt <= settings["retry_count"]:
                 self._attempts[download_id] = attempt
                 self._retry_timers[download_id] = asyncio.get_running_loop().call_later(
                     settings["retry_interval"], self._auto_retry, download_id)
         elif d.state == "done":
             self._attempts.pop(download_id, None)
         self._emit_state(download_id)
+        if d.state == "done":
+            self._after_finish(download_id)
         self._schedule()
 
     async def _condition_loop(self) -> None:
         """Schedule windows open and close with the clock: re-check twice a minute."""
         while True:
+            self._cleanup()
             await asyncio.sleep(CONDITION_TICK)
             self.conditions_changed()
+
+    # --- files -----------------------------------------------------------------------------
+
+    async def checksum(self, download_id: int, algorithm: str = "sha256") -> str:
+        d = self._get(download_id)
+        if d.state not in ("done", "seeding") or not d.name:
+            raise InvalidArgument("the download isn't finished")
+        try:
+            return await asyncio.to_thread(files.checksum, d.dest, algorithm)
+        except (ValueError, OSError) as e:
+            raise InvalidArgument(str(e)) from None
+
+    async def rename(self, download_id: int, name: str) -> str:
+        try:
+            return await self._relocate(download_id, name=files.check_name(name))
+        except ValueError as e:
+            raise InvalidArgument(str(e)) from None
+
+    async def move_to(self, download_id: int, folder: str) -> str:
+        if not folder or not Path(folder).expanduser().is_absolute():
+            raise InvalidArgument("choose a folder (an absolute path)")
+        return await self._relocate(download_id, folder=Path(folder).expanduser())
+
+    async def _relocate(self, download_id: int, *, name: str | None = None, folder: Path | None = None) -> str:
+        """Rename/move a download: the finished file, or the partial data of one that isn't running."""
+        d = self._get(download_id)
+        if self._active(download_id) or d.state in ("running", "processing", "seeding"):
+            raise Busy("pause the download first" if d.state != "seeding" else "stop seeding first")
+        folder = folder or d.dir
+        name = name or d.name
+        if d.state == "done" and d.name:
+            try:
+                final = await asyncio.to_thread(files.move, d.dest, folder / name)
+            except OSError as e:
+                raise InvalidArgument(f"could not move the file: {e}") from None
+            self.store.update(download_id, dir=str(final.parent), name=final.name)
+        elif d.kind == "torrent" and d.name:
+            raise InvalidArgument("torrents can be moved or renamed after they finish")
+        else:
+            moved = DownloadRow(**{**vars(d), "dir": folder, "name": name})
+            try:
+                if d.kind == "http" and d.name and d.temp_path.exists() and d.temp_path != moved.temp_path:
+                    await asyncio.to_thread(files.move, d.temp_path, moved.temp_path)
+                elif d.kind == "media" and folder != d.dir and media.media_temp_dir(d).is_dir():
+                    await asyncio.to_thread(files.move, media.media_temp_dir(d), media.media_temp_dir(moved))
+            except OSError as e:
+                raise InvalidArgument(f"could not move the partial download: {e}") from None
+            options = {**d.options, "custom_name": True} if d.kind == "media" and name != d.name else d.options
+            self.store.update(download_id, dir=str(folder), name=name, options_json=json.dumps(options))
+        self._emit_state(download_id)
+        d = self.store.get(download_id)
+        return str(d.dir / (d.name or ""))
+
+    def _after_finish(self, download_id: int) -> None:
+        """1DM's "move files after download finishes" and "remove link when download finishes"."""
+        settings = self.store.get_settings()
+        d = self.store.get(download_id)
+        target = settings["move_finished_torrent_dir" if d.kind == "torrent" else "move_finished_dir"]
+        move = bool(target and d.name and Path(target).expanduser() != d.dir)
+        if not move and not settings["remove_finished"]:
+            return
+
+        async def run() -> None:
+            if move:
+                try:
+                    final = await asyncio.to_thread(files.move, d.dest, Path(target).expanduser() / d.name)
+                    self.store.update(download_id, dir=str(final.parent), name=final.name)
+                    self._log(download_id, f"moved to {final}")
+                    self._emit_state(download_id)
+                except (OSError, KeyError) as e:
+                    self._log(download_id, f"could not move to {target}: {e}")
+            if settings["remove_finished"]:
+                with contextlib.suppress(KeyError, ManagerError):
+                    await self.remove(download_id)
+
+        self._spawn(run())
+
+    def _cleanup(self) -> None:
+        """Remove list entries older than `cleanup_days` (finished files stay; partial data goes)."""
+        if time.monotonic() - self._last_cleanup < CLEANUP_INTERVAL:
+            return
+        self._last_cleanup = time.monotonic()
+        settings = self.store.get_settings()
+        if not settings["cleanup_days"]:
+            return
+        cutoff = self._clock().timestamp() - settings["cleanup_days"] * 86400
+        for d in self.store.list():
+            if d.state == "done":
+                if (d.finished_at or d.added_at) < cutoff:
+                    self._spawn(self.remove(d.id))
+            elif (not settings["cleanup_finished_only"] and d.added_at < cutoff and not self._active(d.id)
+                  and d.state != "seeding"):
+                self._spawn(self.remove(d.id, delete_files=True))
+
+    def _spawn(self, coroutine) -> None:
+        task = asyncio.get_running_loop().create_task(coroutine)
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
 
     def _auto_retry(self, download_id: int) -> None:
         self._retry_timers.pop(download_id, None)

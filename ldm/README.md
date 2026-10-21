@@ -77,7 +77,23 @@ uv venv --python /usr/bin/python3 --system-site-packages .venv && uv pip install
 .venv/bin/ldm schedule 1 off                  # take it off the schedule (starts now)
 .venv/bin/ldm settings battery_limit 20       # hold downloads on battery below 20 %
 .venv/bin/ldm clipboard-watch                 # offer copied links (KDE/wlroots Wayland, X11)
+
+# M8: network, adding links, files
+.venv/bin/ldm settings proxy_mode manual && .venv/bin/ldm settings proxy_url socks5://127.0.0.1:1080
+.venv/bin/ldm proxy-password                  # asks; kept in the keyring
+.venv/bin/ldm settings dns_mode doh           # DNS-over-HTTPS (doh_url: cloudflare / google / quad9 / URL)
+.venv/bin/ldm settings user_agent firefox     # or default / chrome / mobile / any string
+.venv/bin/ldm login example.com alice         # site login (HTTP Basic/Digest); asks for the password
+.venv/bin/ldm log 3                           # diagnostics: requests, responses, retries
+.venv/bin/ldm batch 'https://site/img*.jpg' --from 1 --to 50 --pad 3
+.venv/bin/ldm import links.txt && .venv/bin/ldm export-links all.txt
+.venv/bin/ldm export-unfinished moving.json   # and import-unfinished on the other computer
+.venv/bin/ldm checksum 3 --algo md5
+.venv/bin/ldm rename 3 new-name.iso && .venv/bin/ldm mv 3 ~/ISOs
+.venv/bin/ldm settings move_finished_dir ~/Done && .venv/bin/ldm settings cleanup_days 30
 ```
+
+DNS-over-HTTPS needs `python3-dns`, SOCKS proxies need `python3-socksio` (both packaged in Fedora).
 
 State: `$XDG_DATA_HOME/ldm/ldm.db` (daemon) and `standalone.db` (`ldm get`); `--db` overrides.
 Downloads go to `~/Downloads` unless `-o` / `settings download_dir` say otherwise. While a download
