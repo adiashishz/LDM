@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from gi.repository import Adw, Gio, GLib, Gtk
 
 from ..format import STATE_LABELS, human
+from ..hlskey import aes_hex
 from .client import DaemonClient
 from .schedule_rows import ScheduleEditor
 from .dialogs import is_url, parse_limit, read_clipboard_url, short_path
@@ -31,6 +32,16 @@ def capture_details(capture: dict[str, Any]) -> str:
     kind = {"hls": "HLS stream", "dash": "DASH stream", "video": "Video", "audio": "Audio"}.get(capture.get("kind"), "")
     host = urlsplit(capture["url"]).hostname or ""
     return " · ".join(p for p in (kind, human(capture["size"]) if capture.get("size") else "", host) if p)
+
+
+def key_valid(text: str) -> bool:
+    if not text.strip():
+        return True
+    try:
+        aes_hex(text)
+        return True
+    except ValueError:
+        return False
 
 
 def looks_like_login(url: str) -> bool:
@@ -109,7 +120,10 @@ class AddDialog(Adw.Dialog):
         self.quality = Adw.ComboRow(title="Quality")
         self.quality.connect("notify::selected", self._on_quality)
         self.subtitles = Adw.SwitchRow(title="Subtitles", visible=False)
-        for row in (self.media_title, self.quality, self.subtitles):
+        # 1DM's "m3u8 key base64": only for encrypted streams whose key the site doesn't hand out
+        self.hls_key = Adw.EntryRow(title="Decryption key (optional, base64 or hex)")
+        self.hls_key.connect("changed", self._validate)
+        for row in (self.media_title, self.quality, self.subtitles, self.hls_key):
             self.media_group.add(row)
 
         # --- torrent (magnets and .torrent files)
@@ -563,11 +577,14 @@ class AddDialog(Adw.Dialog):
         if self.file_checks and not any(box.get_active() for _, box, _ in self.file_checks):
             url_ok = False  # nothing selected
         limit_ok = parse_limit(self.limit.get_text()) is not None
+        key_ok = key_valid(self.hls_key.get_text()) if hasattr(self, "hls_key") else True
         for row, ok in ((self.url, url_ok or not self.url.get_text()), (self.limit, limit_ok)):
             (row.remove_css_class if ok else row.add_css_class)("error")
+        if hasattr(self, "hls_key"):
+            (self.hls_key.remove_css_class if key_ok else self.hls_key.add_css_class)("error")
         for button in (self.start_button, self.later_button):
-            button.set_sensitive(url_ok and limit_ok)
-        return url_ok and limit_ok
+            button.set_sensitive(url_ok and limit_ok and key_ok)
+        return url_ok and limit_ok and key_ok
 
     def options(self, start: bool) -> dict[str, Any]:
         options = {
@@ -594,7 +611,8 @@ class AddDialog(Adw.Dialog):
         choice = self._choice()
         if self.media and choice:
             options.update(kind="media", format=choice["selector"], format_label=choice["label"],
-                           title=self.media.get("title"), subtitles=self._subtitle_languages() or None)
+                           title=self.media.get("title"), subtitles=self._subtitle_languages() or None,
+                           hls_key=self.hls_key.get_text().strip() or None)
             if self._auto_name:
                 options["name"] = None  # let yt-dlp name the file after the title
         return options

@@ -221,3 +221,47 @@ def test_failed_add_leaves_no_row(tmp_path):
     with pytest.raises(Exception):
         manager.add("https://example.org/x.torrent", metadata={"not": "bytes"})
     assert manager.store.list() == []
+
+
+def test_duplicate_torrent_gets_the_new_trackers(tmp_path, swarm):
+    from ldm.manager import Duplicate
+
+    manager = new_manager(tmp_path)
+
+    async def scenario():
+        first = manager.add(swarm.magnet + "&tr=udp%3A%2F%2Fone.example%3A80", start=False)
+        with pytest.raises(Duplicate, match="added 1 new tracker"):
+            manager.add(swarm.magnet + "&tr=udp%3A%2F%2Ftwo.example%3A80")  # same torrent, other link
+        with pytest.raises(Duplicate, match="is already in your list$"):
+            manager.add(swarm.torrent_file.as_uri(), kind="torrent", metadata=swarm.data)  # nothing new
+        found = manager.find_duplicates(lt.make_magnet_uri(swarm.info))
+        return first, found
+
+    first, found = run(manager, scenario)
+    assert manager.store.get(first).options["trackers"] == ["udp://two.example:80"]
+    assert [d["id"] for d in found] == [first] and len(manager.store.list()) == 1
+
+
+def test_tracker_list_and_announce_all(tmp_path, http_server):
+    from ldm import torrent
+
+    cfg, _ = http_server(data=b"", files={"/trackers.txt": b"udp://a.example:1337/announce\n\n"
+                                                           b"# comment\nhttps://b.example/announce\nnot-a-url\n"})
+    manager = new_manager(tmp_path, torrent_announce_all=True)
+    assert torrent.session_settings(manager.store.get_settings())["announce_to_all_tiers"] is True
+
+    async def scenario():
+        manager.update_settings({"torrent_tracker_list_url": f"{cfg.base}/trackers.txt", "torrent_tracker_list": True})
+        for _ in range(200):
+            if manager.store.get_settings()["torrent_tracker_list_cache"]:
+                break
+            await asyncio.sleep(0.02)
+        manager._refresh_tracker_list()  # fresh for a day: no second fetch
+        await asyncio.sleep(0.1)
+
+    run(manager, scenario)
+    settings = manager.store.get_settings()
+    assert settings["torrent_tracker_list_cache"] == "udp://a.example:1337/announce\nhttps://b.example/announce"
+    assert len([r for r in cfg.requests]) == 1
+    assert torrent.extra_trackers(settings, ["udp://own.example:1"]) == [
+        "udp://a.example:1337/announce", "https://b.example/announce", "udp://own.example:1"]

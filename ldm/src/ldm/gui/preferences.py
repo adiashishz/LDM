@@ -32,6 +32,9 @@ TORRENT_SWITCHES = {
     "torrent_fetch_metadata": ("Get file list before adding", "For magnet links"),
     "torrent_sequential": ("Download in order by default", "Lets you play videos while they download"),
     "torrent_seed": ("Seed after finishing", "Keep uploading to other peers"),
+    "torrent_announce_all": ("Contact all trackers", "At once, instead of one at a time"),
+    "torrent_merge_duplicates": ("Add trackers to torrents already in the list", "When you add one again"),
+    "torrent_tracker_list": ("Add a public tracker list", "Fetched daily from the address below; more peers"),
 }
 TORRENT_SPINS = {  # key -> (title, subtitle, min, max, step, digits)
     "torrent_listen_port": ("Listening port", "0 picks a random port", 0, 65535, 1, 0),
@@ -286,7 +289,8 @@ class PreferencesDialog(Adw.PreferencesDialog):
         for key, (title, subtitle) in TORRENT_SWITCHES.items():
             row = Adw.SwitchRow(title=title, subtitle=subtitle, sensitive=False)
             group = (seeding_group if key == "torrent_seed" else
-                     behaviour if key in ("torrent_fetch_metadata", "torrent_sequential") else network_group)
+                     behaviour if key in ("torrent_fetch_metadata", "torrent_sequential", "torrent_merge_duplicates",
+                                          "torrent_tracker_list") else network_group)
             group.add(row)
             self.torrent_rows[key] = row
         for key, (title, subtitle, low, high, step, digits) in TORRENT_SPINS.items():
@@ -310,6 +314,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.ip_filter = Adw.EntryRow(title="IP block list file (P2P or DAT, empty = none)", show_apply_button=True)
         self.ip_filter.connect("apply", lambda row: self._save({"torrent_ip_filter": row.get_text().strip()}))
         behaviour.add(self.trackers)
+        self.tracker_list_url = Adw.EntryRow(title="Public tracker list address", show_apply_button=True)
+        self.tracker_list_url.connect("apply", lambda row: self._save(
+            {"torrent_tracker_list_url": row.get_text().strip()}))
+        behaviour.add(self.tracker_list_url)
         network_group.add(self.ip_filter)
         for group in (behaviour, network_group, seeding_group):
             torrents.add(group)
@@ -425,6 +433,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.upload.set_text(limit_text(settings["torrent_upload_limit"]))
         self.trackers.set_text(" ".join(settings["torrent_trackers"].split()))
         self.ip_filter.set_text(settings["torrent_ip_filter"])
+        self.tracker_list_url.set_text(settings["torrent_tracker_list_url"])
 
     def _bind_rows(self, rows: dict[str, Gtk.Widget], settings: dict[str, Any]) -> None:
         """Show the values of switch and spin rows, then save every change."""

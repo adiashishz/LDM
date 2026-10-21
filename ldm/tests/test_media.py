@@ -223,3 +223,29 @@ def test_quality_names_from_dimensions():
     assert _quality_name({"height": 1920, "width": 1080}) == "1080p"   # vertical video
     assert _quality_name({"height": 240, "width": 320}) == "240p"
     assert _quality_name({"height": 1000}) == "1080p"
+
+
+def test_encrypted_hls_with_a_pasted_key(tmp_path, http_server, streams):
+    """1DM's "m3u8 key base64": the playlist's key URL can't be fetched, the user supplies the key."""
+    import base64
+
+    from ldm.hlskey import aes_hex
+    from ldm.manager import InvalidArgument
+
+    key = streams["/aes/key.bin"]
+    hidden = {path: data for path, data in streams.items() if path != "/aes/key.bin"}  # key URL: 404
+    cfg, _ = http_server(data=b"", files=hidden)
+    store = new_store(tmp_path)
+    url = f"{cfg.base}/aes/index.m3u8"
+    without = store.add(url, tmp_path / "a", kind="media")
+    with pytest.raises(Exception):
+        run_download(store, without)
+
+    manager = Manager(store)
+    with pytest.raises(InvalidArgument, match="16 bytes"):
+        manager.add(url, kind="media", hls_key="too-short", start=False)
+    did = manager.add(url, kind="media", hls_key=base64.b64encode(key).decode(), start=False)
+    assert store.get(did).options["hls_key"] == key.hex()
+    result = probe(run_download(store, did))
+    assert result["streams"] == ["audio", "video"] and 3.5 < result["duration"] < 4.6
+    assert aes_hex("0x" + key.hex().upper()) == key.hex()

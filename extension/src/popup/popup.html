@@ -35,6 +35,14 @@
       </select>
       <input id="search" type="search" placeholder="Filter">
     </div>
+    <div class="deeper">
+      <label>Levels
+        <select id="depth"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
+      </label>
+      <button id="go-deeper" type="button" title="Follow links on this site and collect the files they lead to">Go deeper</button>
+      <button id="check-sizes" type="button" title="Ask the servers how big the listed files are">Check sizes</button>
+    </div>
+    <p id="crawl-status" class="status" hidden></p>
     <label class="select-all"><input id="select-all" type="checkbox"> Select all <span id="links-count"></span></label>
     <ul id="links" class="list"></ul>
     <p id="links-empty" class="empty" hidden>No matching links.</p>

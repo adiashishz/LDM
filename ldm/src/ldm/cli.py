@@ -153,11 +153,12 @@ async def client(args) -> int:
                        "headers": Variant("a{ss}", parse_headers(args.header)) if args.header else None,
                        "speed_limit": Variant("x", args.limit) if args.limit else None,
                        "start": Variant("b", not args.paused),
-                       "kind": Variant("s", "media") if args.media or args.quality else None,
+                       "kind": Variant("s", "media") if args.media or args.quality or args.hls_key else None,
                        "format": Variant("s", media_selector(args.quality)) if args.quality else None,
                        "format_label": Variant("s", args.quality) if args.quality else None,
                        "sequential": Variant("b", True) if args.sequential else None,
                        "scheduled": Variant("b", True) if args.scheduled or schedule_window(args) else None,
+                       "hls_key": Variant("s", args.hls_key) if args.hls_key else None,
                        **{k: Variant("s", v) for k, v in schedule_window(args).items()},
                        "unmetered_only": Variant("b", True) if args.unmetered_only else None,
                        "priorities": Variant("ax", file_priorities(args.files)) if args.files else None}
@@ -376,6 +377,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--media", action="store_true",
                    help="download a video/stream page with yt-dlp (YouTube, HLS/DASH playlists, …)")
     p.add_argument("--quality", help="media quality: best, audio, or a maximum height such as 720")
+    p.add_argument("--hls-key", metavar="KEY", help="AES-128 key for an encrypted stream whose key can't be "
+                                                    "fetched (base64 or hex)")
     p.add_argument("--files", help="torrent: only these file indexes, e.g. 0,2 (see `ldm torrent-files`)")
     p.add_argument("--sequential", action="store_true", help="torrent: download pieces in order")
     p.add_argument("--scheduled", action="store_true", help="only download inside the schedule window")

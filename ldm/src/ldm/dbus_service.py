@@ -12,12 +12,12 @@ from dbus_fast.service import ServiceInterface, method, signal
 
 from .busnames import BUS_NAME, ERROR_PREFIX, INTERFACE, OBJECT_PATH  # noqa: F401 (re-exported)
 from .engine import DownloadError
-from .manager import Busy, InvalidArgument, Manager, NotFound, SizeMismatch
+from .manager import Busy, Duplicate, InvalidArgument, Manager, NotFound, SizeMismatch
 
 ADD_OPTIONS = {"dir", "name", "connections", "headers", "speed_limit", "start",
                "kind", "format", "format_label", "subtitles", "title", "page_url",
                "priorities", "sequential", "metadata", "peers", "scheduled", "unmetered_only",
-               "schedule_start", "schedule_stop", "schedule_days"}
+               "schedule_start", "schedule_stop", "schedule_days", "hls_key", "hls_iv"}
 
 
 def to_variant(value: Any) -> Variant:
@@ -63,6 +63,8 @@ def _errors():
         raise DBusError(ERROR_PREFIX + "SizeMismatch", str(e)) from e
     except Busy as e:
         raise DBusError(ERROR_PREFIX + "Busy", str(e)) from e
+    except Duplicate as e:
+        raise DBusError(ERROR_PREFIX + "Duplicate", str(e)) from e
     except DownloadError as e:
         raise DBusError(ERROR_PREFIX + "Failed", str(e)) from e
 

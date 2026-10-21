@@ -172,6 +172,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "backup_dir": "",                  # "" = ~/Documents/LDM Backups
     "backup_keep": 10,                 # automatic backups kept in that folder
     "backup_last": 0.0,                # unix time of the last automatic backup (bookkeeping)
+    "torrent_announce_all": False,     # contact all trackers at once (all tiers), not one per tier
+    "torrent_tracker_list": False,     # add a public tracker list to every torrent …
+    "torrent_tracker_list_url": "https://raw.githubusercontent.com/ngosang/trackerslist/master/trackers_best.txt",
+    "torrent_tracker_list_cache": "",  # … refreshed daily (bookkeeping)
+    "torrent_tracker_list_fetched": 0.0,
+    "torrent_merge_duplicates": True,  # adding a torrent already in the list adds its trackers to it
 }
 
 

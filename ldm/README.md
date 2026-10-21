@@ -107,6 +107,16 @@ DNS-over-HTTPS needs `python3-dns`, SOCKS proxies need `python3-socksio` (both p
 
 The tray icon needs a tray (KDE, Xfce, Cinnamon, Budgie…; on GNOME the AppIndicator extension).
 
+```sh
+# M10: torrent extras and encrypted streams
+.venv/bin/ldm settings torrent_announce_all true
+.venv/bin/ldm settings torrent_tracker_list true   # public list from torrent_tracker_list_url, daily
+.venv/bin/ldm add 'https://site/stream/index.m3u8' --hls-key 'BASE64-OR-HEX'   # key the site doesn't give out
+```
+
+In the browser: LDM button → Links → **Go deeper** (follows links on the same site, 1–3 levels) and
+**Check sizes** (asks the servers how big each file is; the list shows the largest first).
+
 State: `$XDG_DATA_HOME/ldm/ldm.db` (daemon) and `standalone.db` (`ldm get`); `--db` overrides.
 Downloads go to `~/Downloads` unless `-o` / `settings download_dir` say otherwise. While a download
 runs, its data is in `<name>.<id>.part` next to the target.

@@ -1,5 +1,6 @@
 import { api } from "../lib/api.js";
 import { bySize } from "../lib/classify.js";
+import { checkSizes, crawl } from "../lib/crawl.js";
 import { filterLinks, filenameFromUrl, humanSize, linkGroup, linksBySize } from "../lib/names.js";
 
 const params = new URLSearchParams(location.search);
@@ -103,7 +104,8 @@ function renderLinks() {
       else selected.delete(link.url);
       updateSendButton();
     });
-    const li = row(filenameFromUrl(link.url) || link.url, link.text || link.url, linkGroup(link.url), box);
+    const meta = [humanSize(link.size), link.text || link.url].filter(Boolean).join(" · ");
+    const li = row(filenameFromUrl(link.url) || link.url, meta, linkGroup(link.url), box);
     li.querySelector(".info").addEventListener("click", () => box.click());
     return li;
   }));
@@ -124,6 +126,92 @@ async function loadLinks() {
     setStatus(`Cannot read links on this page: ${error.message}`, true);
     links = [];
   }
+  renderLinks();
+}
+
+// --- go deeper (crawl the site) and check sizes ---------------------------------------------
+
+const PAGE_LIMIT = 3 * 1024 * 1024;
+let crawling = null; // AbortController while a crawl runs
+
+function crawlStatus(text) {
+  $("crawl-status").hidden = !text;
+  $("crawl-status").textContent = text;
+}
+
+async function timed(url, init = {}, seconds = 15) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), seconds * 1000);
+  try {
+    return await fetch(url, { credentials: "include", redirect: "follow", ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchPage(url) {
+  try {
+    const response = await timed(url);
+    const type = response.headers.get("content-type") || "";
+    if (!response.ok || !/html|xml/i.test(type) || Number(response.headers.get("content-length")) > PAGE_LIMIT) {
+      response.body?.cancel();
+      return null;
+    }
+    return (await response.text()).slice(0, PAGE_LIMIT);
+  } catch {
+    return null;
+  }
+}
+
+function goDeeper() {
+  const depth = Number($("depth").value);
+  if (!document.body.classList.contains("window")) {
+    // The toolbar popup closes when it loses focus: crawl in LDM's own window instead.
+    api.windows.create({
+      url: api.runtime.getURL(`popup/popup.html?tab=${tabId}&view=links&window=1&crawl=${depth}`),
+      type: "popup", width: 560, height: 680,
+    });
+    window.close();
+    return;
+  }
+  startCrawl(depth);
+}
+
+async function startCrawl(depth) {
+  if (crawling) {
+    crawling.abort();
+    return;
+  }
+  crawling = new AbortController();
+  $("go-deeper").textContent = "Stop";
+  if (!links.length) await loadLinks();
+  const known = new Set(links.map((l) => l.url));
+  try {
+    const found = await crawl({
+      start: pageUrl, depth, fetchPage, signal: crawling.signal,
+      onProgress: ({ pages, files }) => crawlStatus(`Looking through the site… ${pages} pages, ${files} files`),
+    });
+    const fresh = found.filter((l) => !known.has(l.url));
+    links = links.concat(fresh);
+    crawlStatus(`${crawling.signal.aborted ? "Stopped" : "Done"}: ${fresh.length} more files found`);
+    renderLinks();
+  } finally {
+    crawling = null;
+    $("go-deeper").textContent = "Go deeper";
+  }
+}
+
+async function checkVisibleSizes() {
+  const pending = visibleLinks().filter((l) => l.size === undefined).slice(0, 300);
+  if (!pending.length) return;
+  $("check-sizes").disabled = true;
+  await checkSizes(pending, async (url, method, headers = {}) => {
+    const response = await timed(url, { method, headers });
+    response.body?.cancel(); // only the headers are needed
+    return response;
+  }, { onProgress: (done) => crawlStatus(`Checking sizes… ${done} of ${pending.length}`) });
+  crawlStatus(`Sizes checked for ${pending.length} files`);
+  $("check-sizes").disabled = false;
   renderLinks();
 }
 
@@ -151,6 +239,8 @@ async function main() {
   $("options").addEventListener("click", () => api.runtime.openOptionsPage());
   $("page-video").addEventListener("click", () => send([{ url: pageUrl, pageUrl, kind: "media", tabId }], $("page-video")));
   $("page-video").disabled = !/^https?:/i.test(pageUrl);
+  $("go-deeper").addEventListener("click", goDeeper);
+  $("check-sizes").addEventListener("click", checkVisibleSizes);
   $("group").addEventListener("change", renderLinks);
   $("search").addEventListener("input", renderLinks);
   $("select-all").addEventListener("change", () => {
@@ -167,6 +257,10 @@ async function main() {
   checkStatus();
   await showMedia();
   showView(params.get("view") === "links" ? "links" : "media");
+  if (params.get("crawl")) {
+    $("depth").value = params.get("crawl");
+    startCrawl(Number(params.get("crawl")));
+  }
 }
 
 main();

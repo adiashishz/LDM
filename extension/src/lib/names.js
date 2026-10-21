@@ -75,9 +75,11 @@ export function sizeHint(text) {
   return Math.round(parseFloat(match[1].replace(",", ".")) * SIZE_UNITS[match[2].toLowerCase()]);
 }
 
-/** Links with a size in their text, largest first; the others after them, in page order. */
+/** Largest first: the size the server reported ("Check sizes"), else one written in the link text;
+ *  links of unknown size after them, in page order. */
 export function linksBySize(links) {
-  return [...links].sort((a, b) => (sizeHint(b.text) ?? -1) - (sizeHint(a.text) ?? -1));
+  const size = (link) => link.size ?? sizeHint(link.text) ?? -1;
+  return [...links].sort((a, b) => size(b) - size(a));
 }
 
 /** Should a browser download be handed to ldm? */

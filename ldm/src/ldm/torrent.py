@@ -83,8 +83,39 @@ def session_settings(settings: dict[str, Any], listen_host: str = "0.0.0.0", pro
         "connections_limit": settings["torrent_max_connections"],
         "upload_rate_limit": settings["torrent_upload_limit"],
         "alert_mask": int(lt.alert_category.error | lt.alert_category.status | lt.alert_category.storage),
+        "announce_to_all_trackers": settings["torrent_announce_all"],
+        "announce_to_all_tiers": settings["torrent_announce_all"],
         **proxy_settings(proxy),
     }
+
+
+def tracker_lines(text: str) -> list[str]:
+    return [t.strip() for t in text.splitlines() if t.strip() and not t.strip().startswith("#")]
+
+
+def extra_trackers(settings: dict[str, Any], own: list[str] | None = None) -> list[str]:
+    """Trackers added to a torrent: the user's list, the public list (when on) and its own merged ones."""
+    found = tracker_lines(settings["torrent_trackers"])
+    if settings["torrent_tracker_list"]:
+        found += tracker_lines(settings["torrent_tracker_list_cache"])
+    found += own or []
+    return list(dict.fromkeys(found))
+
+
+def identity(source: str, metadata: bytes | None = None) -> tuple[str | None, list[str]]:
+    """(info hash, trackers) of a magnet link or .torrent metadata; (None, []) if not known yet."""
+    if not available():
+        return None, []
+    try:
+        if metadata:
+            info = lt.torrent_info(lt.bdecode(metadata))
+            return str(info.info_hashes().get_best()), [t.url for t in info.trackers()]
+        if urlsplit(source).scheme == "magnet":
+            params = lt.parse_magnet_uri(source)
+            return str(params.info_hashes.get_best()), list(params.trackers)
+    except (RuntimeError, ValueError, TypeError):
+        pass
+    return None, []
 
 
 def load_ip_filter(path: str) -> "lt.ip_filter | None":
@@ -228,6 +259,17 @@ class TorrentSession:
         self.seeding.pop(download_id, None)
         if handle is not None and handle.is_valid():
             self.ses.remove_torrent(handle)
+
+    def add_trackers(self, urls: list[str], download_id: int | None = None) -> None:
+        """Add trackers to one running torrent, or to all of them (download_id None)."""
+        handles = list(self.handles.values()) if download_id is None else [self.handles.get(download_id)]
+        for handle in handles:
+            if handle is None or not handle.is_valid():
+                continue
+            known = {t["url"] for t in handle.trackers()}
+            for url in urls:
+                if url not in known:
+                    handle.add_tracker({"url": url, "tier": 4})
 
     async def fetch_metadata(self, magnet: str, timeout: float = METADATA_TIMEOUT) -> "lt.torrent_info":
         """File list of a magnet from peers, without downloading any file data."""
@@ -373,7 +415,7 @@ class TorrentDownloader:
         if not settings["torrent_pex"]:
             params.flags |= lt.torrent_flags.disable_pex
         params.max_connections = settings["torrent_max_peers"]
-        extra = [t.strip() for t in settings["torrent_trackers"].splitlines() if t.strip()]
+        extra = [t for t in extra_trackers(settings, d.options.get("trackers")) if t not in params.trackers]
         if extra:
             params.trackers = list(params.trackers) + extra
         if row and row.priorities and params.ti is not None:

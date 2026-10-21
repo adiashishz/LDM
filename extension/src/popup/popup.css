@@ -38,6 +38,12 @@ button:disabled { opacity: .5; cursor: default; }
 .filters select, .filters input { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line);
                                    border-radius: 6px; padding: 4px 6px; }
 .filters input { flex: 1; }
+.deeper { display: flex; align-items: center; gap: 6px; padding: 0 10px 6px; color: var(--muted); }
+.deeper select, .deeper button { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 3px 8px; }
+.deeper button { cursor: pointer; }
+.deeper button:disabled { opacity: 0.5; cursor: default; }
+#crawl-status { padding: 0 12px 6px; }
 .select-all { display: block; padding: 2px 12px 6px; color: var(--muted); }
 footer { padding: 8px 10px; text-align: right; border-top: 1px solid var(--line); }
 .page-video { padding: 8px 10px 4px; }

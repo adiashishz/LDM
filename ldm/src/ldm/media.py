@@ -113,6 +113,15 @@ def base_options(settings: dict[str, Any], headers: dict[str, str] | None, net: 
     return options
 
 
+def with_hls_key(info: dict[str, Any], key: str, iv: str | None) -> dict[str, Any]:
+    """Give yt-dlp the decryption key for HLS formats whose key URL can't be fetched (it then decrypts
+    natively instead of fetching #EXT-X-KEY)."""
+    for fmt in info.get("formats") or [info]:
+        if str(fmt.get("protocol", "")).startswith("m3u8"):
+            fmt["hls_aes"] = {"key": key, "iv": iv}
+    return info
+
+
 def default_selector(quality: Any) -> str:
     if quality == "audio":
         return "ba/b"
@@ -314,7 +323,12 @@ class MediaDownloader:
         for attempt in (1, 2):
             try:
                 with yt_dlp.YoutubeDL(options) as ydl:
-                    info = ydl.extract_info(d.url, download=True)
+                    key = d.options.get("hls_key")
+                    if key:  # a key the user pasted: attach it to the stream formats, then download
+                        raw = ydl.extract_info(d.url, download=False, process=False)
+                        info = ydl.process_ie_result(with_hls_key(raw, key, d.options.get("hls_iv")), download=True)
+                    else:
+                        info = ydl.extract_info(d.url, download=True)
                 break
             except DownloadCancelled:
                 raise _Paused from None

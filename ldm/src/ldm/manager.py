@@ -24,6 +24,7 @@ import httpx
 
 from . import backup, files, media, torrent, transfer
 from .engine import DownloadError, Downloader, new_client, probe
+from .hlskey import aes_hex
 from .media import MediaDownloader
 from . import net
 from .net import DOH_PRESETS, NetConfig, check_proxy_url, with_login
@@ -37,7 +38,7 @@ from .store import DEFAULT_SETTINGS, DownloadRow, HostRule, Store, default_db_pa
 RESUMABLE_STATES = {"paused", "error", "expired", "changed"}
 MAX_CONNECTIONS = 32
 MEDIA_EXTENSIONS = (".m3u8", ".mpd")  # stream playlists always go through yt-dlp
-MEDIA_OPTIONS = {"format", "format_label", "subtitles", "title", "page_url"}
+MEDIA_OPTIONS = {"format", "format_label", "subtitles", "title", "page_url", "hls_key", "hls_iv"}
 TORRENT_OPTIONS = {"priorities", "sequential", "metadata", "peers"}
 WINDOW_KEYS = ("schedule_start", "schedule_stop", "schedule_days")  # a download's own times override the defaults
 RUN_OPTIONS = {"scheduled", "unmetered_only", *WINDOW_KEYS}  # stored in options_json for every kind
@@ -70,6 +71,10 @@ class Busy(ManagerError):
     pass
 
 
+class Duplicate(ManagerError):
+    """The torrent is already in the list (its trackers may have been added to it)."""
+
+
 def _link_key(url: str) -> str:
     """Same link: ignore the #fragment and a trailing slash."""
     return url.split("#", 1)[0].rstrip("/")
@@ -90,6 +95,7 @@ class Manager:
         self._logs: dict[int, deque[str]] = {}  # download id -> diagnostics lines
         self._background: set[asyncio.Task] = set()  # after-finish moves, cleanup removals
         self._last_cleanup = float("-inf")
+        self._tracker_fetch: asyncio.Task | None = None
         self.conditions = conditions or Conditions()  # metered / battery (system.SystemMonitor)
         self.inhibitor = inhibitor                     # system.SleepInhibitor or None
         self._clock = clock
@@ -300,6 +306,8 @@ class Manager:
             raise InvalidArgument(torrent.INSTALL_HINT)
         torrent_options = {k: media_options.pop(k) for k in list(media_options) if k in TORRENT_OPTIONS}
         settings = self.store.get_settings()
+        if kind == "torrent":
+            self._refuse_duplicate_torrent(url, torrent_options.get("metadata"), settings)
         connections = connections or settings["default_connections"]
         if not 1 <= connections <= MAX_CONNECTIONS:
             raise InvalidArgument(f"connections must be 1-{MAX_CONNECTIONS}")
@@ -308,6 +316,12 @@ class Manager:
         options.update(self._own_window(media_options, settings))
         if "scheduled" not in options and settings["schedule_new_links"]:
             options["scheduled"] = True
+        for field in ("hls_key", "hls_iv"):  # stored as hex
+            if options.get(field):
+                try:
+                    options[field] = aes_hex(options[field], "key" if field == "hls_key" else "IV")
+                except ValueError as e:
+                    raise InvalidArgument(str(e)) from None
         if kind == "media":
             options["custom_name"] = bool(name)
             name = name or options.get("title")
@@ -583,6 +597,8 @@ class Manager:
             self._global.set_rate(values["speed_limit"])
         if self._torrent is not None and any(k.startswith("torrent_") for k in values):
             self._torrent.apply(self.store.get_settings(), self._torrent_proxy())
+        if any(k in values for k in ("torrent_tracker_list", "torrent_tracker_list_url")):
+            self._refresh_tracker_list(force=True)
         if any(k.startswith("schedule_") or k in ("pause_on_metered", "battery_limit", "prevent_sleep", "data_limit")
                for k in values):
             self.conditions_changed()
@@ -626,6 +642,9 @@ class Manager:
         elif key == "doh_url" and not (value in DOH_PRESETS or (isinstance(value, str) and
                                        urlsplit(value).scheme in ("https", "http") and urlsplit(value).hostname)):
             raise InvalidArgument(f"doh_url must be {', '.join(DOH_PRESETS)} or an https:// URL")
+        elif key == "torrent_tracker_list_url" and not (isinstance(value, str) and urlsplit(value).scheme
+                                                         in ("http", "https") and urlsplit(value).hostname):
+            raise InvalidArgument("the tracker list address must be an http(s) link")
         elif key == "user_agent" and not (isinstance(value, str) and value.strip()):
             raise InvalidArgument("user_agent must be default, firefox, chrome, mobile or a custom string")
         elif key in ("connect_timeout", "read_timeout") and not (isinstance(value, int) and 1 <= value <= 600):
@@ -671,10 +690,86 @@ class Manager:
     # --- duplicates, export/import -------------------------------------------------------------
 
     def find_duplicates(self, url: str) -> list[dict[str, Any]]:
-        """Downloads of the same link (1DM: "Download link already exists!")."""
+        """Downloads of the same link (1DM: "Download link already exists!"); torrents by info hash."""
         key = _link_key(url)
-        return [self.describe(d.id) for d in self.store.list()
-                if key in (_link_key(d.url), _link_key(d.final_url or ""))]
+        found = [d.id for d in self.store.list() if key in (_link_key(d.url), _link_key(d.final_url or ""))]
+        if not found and urlsplit(url).scheme == "magnet":
+            existing = self._torrent_with_hash(torrent.identity(url)[0])
+            found = [existing] if existing else []
+        return [self.describe(i) for i in found]
+
+    # --- torrent duplicates and tracker lists ----------------------------------------------
+
+    def _torrent_hash(self, d: DownloadRow) -> str | None:
+        row = self.store.get_torrent(d.id)
+        if row and row.info_hash:
+            return row.info_hash
+        return torrent.identity(d.url, row.metadata if row else None)[0]
+
+    def _torrent_with_hash(self, info_hash: str | None) -> int | None:
+        if not info_hash:
+            return None
+        return next((d.id for d in self.store.list() if d.kind == "torrent" and self._torrent_hash(d) == info_hash),
+                    None)
+
+    def _refuse_duplicate_torrent(self, url: str, metadata: Any, settings: dict[str, Any]) -> None:
+        """1DM: "add trackers to duplicates" — a torrent already in the list gets the new trackers instead."""
+        if isinstance(metadata, list):
+            metadata = bytes(metadata)
+        info_hash, trackers = torrent.identity(url, metadata or None)
+        existing = self._torrent_with_hash(info_hash)
+        if existing is None:
+            return
+        added = self._merge_trackers(existing, trackers) if settings["torrent_merge_duplicates"] else 0
+        name = self.store.get(existing).name or "this torrent"
+        raise Duplicate(f"“{name}” is already in your list"
+                        + (f" — added {added} new tracker{'s' if added != 1 else ''} to it" if added else ""))
+
+    def _merge_trackers(self, download_id: int, trackers: list[str]) -> int:
+        d = self.store.get(download_id)
+        row = self.store.get_torrent(download_id)
+        known = set(torrent.identity(d.url, row.metadata if row else None)[1]) | set(d.options.get("trackers", []))
+        new = [t for t in dict.fromkeys(trackers) if t not in known]
+        if new:
+            self.store.update(download_id, options_json=json.dumps(
+                {**d.options, "trackers": d.options.get("trackers", []) + new}))
+            if self._torrent is not None:
+                self._torrent.add_trackers(new, download_id)
+        return len(new)
+
+    def _refresh_tracker_list(self, force: bool = False) -> None:
+        """The public tracker list (when on): fetched daily, added to running torrents too."""
+        settings = self.store.get_settings()
+        if not settings["torrent_tracker_list"] or self._tracker_fetch is not None:
+            return  # off, or a fetch is already running
+        now = self._clock().timestamp()
+        if not force and settings["torrent_tracker_list_cache"] and now - settings["torrent_tracker_list_fetched"] < 86400:
+            return
+        self.store.set_setting("torrent_tracker_list_fetched", now)
+
+        async def fetch() -> None:
+            url = settings["torrent_tracker_list_url"]
+            try:
+                async with new_client(net=await self._net().resolve(url)) as client:
+                    response = await client.get(url)
+                    response.raise_for_status()
+            except httpx.HTTPError as e:
+                log.warning("could not fetch the tracker list: %s", e)
+                return
+            trackers = [t for t in torrent.tracker_lines(response.text)
+                        if urlsplit(t).scheme in ("udp", "http", "https", "ws", "wss")]
+            self.store.set_setting("torrent_tracker_list_cache", "\n".join(trackers))
+            log.info("tracker list: %d trackers", len(trackers))
+            if self._torrent is not None:
+                self._torrent.add_trackers(trackers)
+
+        self._tracker_fetch = asyncio.get_running_loop().create_task(fetch())
+        self._background.add(self._tracker_fetch)
+        self._tracker_fetch.add_done_callback(self._tracker_fetch_done)
+
+    def _tracker_fetch_done(self, task: asyncio.Task) -> None:
+        self._background.discard(task)
+        self._tracker_fetch = None
 
     def export_downloads(self, unfinished_only: bool = True) -> str:
         return json.dumps(transfer.export_downloads(self.store, unfinished_only), indent=1)
@@ -927,6 +1022,7 @@ class Manager:
         while True:
             self._cleanup()
             self._scheduled_backup()
+            self._refresh_tracker_list()
             await asyncio.sleep(CONDITION_TICK)
             self.conditions_changed()
 
