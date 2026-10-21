@@ -49,7 +49,8 @@ def test_install_and_uninstall(home):
     assert brave["path"] == str(brave_dir / "data/ldm/ldm_nmhost.py")  # visible inside the sandbox
     for manifest in (firefox, chrome, brave):
         host = Path(manifest["path"])
-        assert host.read_text().startswith("#!/usr/bin/env python3")
+        shebang = host.read_text().splitlines()[0]  # packages rewrite it to #!/usr/bin/python3
+        assert shebang in ("#!/usr/bin/env python3", "#!/usr/bin/python3")
         assert os.access(host, os.X_OK)
 
     services = home / ".local/share/dbus-1/services"

@@ -1,0 +1,4 @@
+# rpmlint findings that are expected for LDM
+addFilter(r"spelling-error .* (yt|dlp|libtorrent)")      # yt-dlp and libtorrent are names
+addFilter(r"explicit-lib-dependency (libadwaita|gtk4)")   # GObject introspection: no typelib() provides in Fedora
+addFilter(r"no-manual-page-for-binary ldm(-gui)?")        # `ldm --help` documents the command line
