@@ -1,7 +1,7 @@
 # Analysed APKs: large, untrusted binaries
-apk/
+/apk/
 # Downloaded tooling (JADX MCP JAR)
-tools/
+/tools/
 
 # Python
 ldm/.venv/
