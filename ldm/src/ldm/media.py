@@ -250,7 +250,10 @@ class MediaDownloader:
         loop = asyncio.get_running_loop()
         future = loop.run_in_executor(None, self._download, d, self.store.get_settings(), loop)
         try:
-            path = await asyncio.shield(future)
+            # wait() doesn't cancel the thread's future when this task is cancelled (pause), and unlike
+            # shield() it doesn't log the thread's own stop as an error.
+            await asyncio.wait([future])
+            path = future.result()
         except asyncio.CancelledError:
             self._stop.set()
             with contextlib.suppress(BaseException):

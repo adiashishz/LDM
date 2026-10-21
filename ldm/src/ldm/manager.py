@@ -939,9 +939,10 @@ class Manager:
         self._emit_state(d.id)
 
     def _check_all_finished(self) -> None:
-        """1DM's "app behavior after all downloads are finished/paused/stopped/errored"."""
-        if self._closing or self._tasks:
-            return
+        """1DM's "app behavior after all downloads are finished": called when a download ends by itself
+        (finished or failed), never because the user paused one."""
+        if self._closing or self._tasks or self._retry_timers:
+            return  # still running, or a failed one will be retried
         action = self.store.get_settings()["finish_action"]
         if action == "nothing":
             return
@@ -1015,7 +1016,8 @@ class Manager:
         if d.state == "done":
             self._after_finish(download_id)
         self._schedule()
-        self._check_all_finished()
+        if d.state in ("done", "seeding", "error", "expired", "changed"):  # ended by itself, not paused
+            self._check_all_finished()
 
     async def _condition_loop(self) -> None:
         """Schedule windows open and close with the clock: re-check twice a minute."""
