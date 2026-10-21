@@ -20,13 +20,25 @@ FOLDERS = [
 ]
 OTHER_FOLDER = "Other folder…"
 MAX_PARTS = 32
+PLAYLIST_EXTENSIONS = (".m3u8", ".mpd")
+
+
+def duration_text(seconds: float | None) -> str:
+    if not seconds:
+        return ""
+    seconds = int(seconds)
+    hours, rest = divmod(seconds, 3600)
+    return f"{hours}:{rest // 60:02d}:{rest % 60:02d}" if hours else f"{rest // 60}:{rest % 60:02d}"
 
 
 class AddDialog(Adw.Dialog):
     def __init__(self, client: DaemonClient, url: str = "", on_added: Callable[[int], None] | None = None,
-                 name: str = "", headers: dict[str, str] | None = None):
+                 name: str = "", headers: dict[str, str] | None = None, kind: str = ""):
         super().__init__(title="Download File", content_width=560)
         self.client = client
+        self.kind_hint = kind          # "media" when the browser sent a video page or stream
+        self.media: dict[str, Any] | None = None  # ProbeMedia result once the link is a video
+        self.settings: dict[str, Any] = {}
         self.on_added = on_added
         self.download_dir: str | None = None
         self.custom_folder: str | None = None
@@ -62,6 +74,15 @@ class AddDialog(Adw.Dialog):
         self.size.add_css_class("property")
         for row in (self.url, self.name, self.size):
             file_group.add(row)
+
+        # --- video (shown when yt-dlp finds one: site pages, HLS/DASH playlists)
+        self.media_group = Adw.PreferencesGroup(title="Video", visible=False)
+        self.media_title = Adw.ActionRow(title="", subtitle_lines=1, title_lines=2)
+        self.quality = Adw.ComboRow(title="Quality")
+        self.quality.connect("notify::selected", self._on_quality)
+        self.subtitles = Adw.SwitchRow(title="Subtitles", visible=False)
+        for row in (self.media_title, self.quality, self.subtitles):
+            self.media_group.add(row)
 
         # --- where
         where = Adw.PreferencesGroup(title="Save in")
@@ -101,7 +122,7 @@ class AddDialog(Adw.Dialog):
         header_group.add(expander)
 
         page = Adw.PreferencesPage()
-        for group in (file_group, where, options, header_group):
+        for group in (file_group, self.media_group, where, options, header_group):
             page.add(group)
         self.toasts = Adw.ToastOverlay(child=page)
         view = Adw.ToolbarView(content=self.toasts)
@@ -122,6 +143,7 @@ class AddDialog(Adw.Dialog):
     def _on_settings(self, settings: dict[str, Any] | None, error) -> None:
         if not settings:
             return
+        self.settings = settings
         self.download_dir = settings["download_dir"]
         if self.parts.get_sensitive():
             self.parts.set_value(settings["default_connections"])
@@ -193,6 +215,10 @@ class AddDialog(Adw.Dialog):
         if not is_url(url):
             self._show_probe_state(None)
             return GLib.SOURCE_REMOVE
+        self._set_media(None)
+        if self.kind_hint == "media" or url.split("?")[0].lower().endswith(PLAYLIST_EXTENSIONS):
+            self._probe_media(url)
+            return GLib.SOURCE_REMOVE
         generation = self._probe_generation
         self.spinner.set_visible(True)
         self.resume.set_label("")
@@ -201,13 +227,92 @@ class AddDialog(Adw.Dialog):
                           lambda result, error: generation == self._probe_generation and self._on_probe(result, error))
         return GLib.SOURCE_REMOVE
 
+    def _probe_media(self, url: str) -> None:
+        generation = self._probe_generation
+        self.spinner.set_visible(True)
+        self.resume.set_label("")
+        self.size.set_subtitle("Looking for a video…")
+        self.client.probe_media(url, self.headers(),
+                                lambda result, error: generation == self._probe_generation
+                                and self._on_media(result, error))
+
+    def _on_media(self, result: dict[str, Any] | None, error) -> None:
+        self.spinner.set_visible(False)
+        if error:
+            self._show_probe_state(None)
+            self.size.set_subtitle(f"No downloadable video found: {error.message}")
+            return
+        self._set_media(result)
+
     def _on_probe(self, result: dict[str, Any] | None, error) -> None:
         self.spinner.set_visible(False)
         if error:
             self._show_probe_state(None)
             self.size.set_subtitle(f"Could not check the link: {error.message}")
             return
+        if (result.get("content_type") or "").startswith("text/html"):
+            self._probe_media(self.url.get_text().strip())  # a web page: is there a video on it?
+            return
         self._show_probe_state(result)
+
+    # --- video mode ----------------------------------------------------------------------------
+
+    def _set_media(self, info: dict[str, Any] | None) -> None:
+        self.media = info
+        self.media_group.set_visible(info is not None)
+        self.parts_row.set_title("Parallel fragments" if info else "Number of parts")
+        if info is None:
+            return
+        for css in ("success", "warning"):
+            self.resume.remove_css_class(css)
+        self.resume.add_css_class("accent")
+        self.resume.set_label("Live" if info.get("is_live") else "Video")
+        details = [info.get("site", ""), duration_text(info.get("duration")), "live stream" if info.get("is_live") else ""]
+        self.media_title.set_title(GLib.markup_escape_text(info.get("title", "")))
+        self.media_title.set_subtitle(" · ".join(d for d in details if d))
+        choices = info.get("choices") or []
+        self.quality.set_model(Gtk.StringList.new(
+            [c["label"] + (f" · ~{human(c['size'])}" if c.get("size") else "") for c in choices]))
+        self.quality.set_selected(self._default_choice(choices))
+        languages = info.get("subtitles") or []
+        self.subtitles.set_visible(bool(languages))
+        self.subtitles.set_subtitle("Available: " + ", ".join(languages[:8]) + ("…" if len(languages) > 8 else ""))
+        self.subtitles.set_active(bool(self.settings.get("subtitles")))
+        if self._auto_name and info.get("title"):
+            self.name.set_text(info["title"])
+            self._auto_name = True
+        self.parts.set_sensitive(True)
+        self.parts_row.set_subtitle("Pieces of the stream downloaded at the same time")
+        self._on_quality()
+
+    def _default_choice(self, choices: list[dict[str, Any]]) -> int:
+        wanted = str(self.settings.get("media_quality", "best"))
+        ids = [c["id"] for c in choices]
+        if wanted in ids:
+            return ids.index(wanted)
+        if wanted.isdigit():  # highest choice not above the preferred height
+            heights = [(i, int(c["id"])) for i, c in enumerate(choices) if c["id"].isdigit()]
+            below = [i for i, h in heights if h <= int(wanted)]
+            if below:
+                return below[0]
+        return 0
+
+    def _choice(self) -> dict[str, Any] | None:
+        choices = (self.media or {}).get("choices") or []
+        index = self.quality.get_selected()
+        return choices[index] if 0 <= index < len(choices) else None
+
+    def _on_quality(self, *_) -> None:
+        choice = self._choice()
+        if choice:
+            self.size.set_subtitle(f"About {human(choice['size'])}" if choice.get("size") else "Size not known in advance")
+
+    def _subtitle_languages(self) -> str:
+        if not (self.media and self.subtitles.get_visible() and self.subtitles.get_active()):
+            return ""
+        available = self.media.get("subtitles") or []
+        wanted = [lang for lang in (self.settings.get("subtitles") or "").split(",") if lang in available]
+        return ",".join(wanted or available[:1])
 
     def _show_probe_state(self, result: dict[str, Any] | None) -> None:
         for css in ("success", "warning"):
@@ -249,7 +354,7 @@ class AddDialog(Adw.Dialog):
         return url_ok and limit_ok
 
     def options(self, start: bool) -> dict[str, Any]:
-        return {
+        options = {
             "name": self.name.get_text().strip() or None,
             "dir": self.folder(),
             "connections": int(self.parts.get_value()),
@@ -257,6 +362,13 @@ class AddDialog(Adw.Dialog):
             "headers": self.headers() or None,
             "start": start,
         }
+        choice = self._choice()
+        if self.media and choice:
+            options.update(kind="media", format=choice["selector"], format_label=choice["label"],
+                           title=self.media.get("title"), subtitles=self._subtitle_languages() or None)
+            if self._auto_name:
+                options["name"] = None  # let yt-dlp name the file after the title
+        return options
 
     def _submit(self, start: bool) -> None:
         if not self._validate():

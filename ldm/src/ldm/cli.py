@@ -152,7 +152,10 @@ async def client(args) -> int:
                        "name": Variant("s", args.name) if args.name else None,
                        "headers": Variant("a{ss}", parse_headers(args.header)) if args.header else None,
                        "speed_limit": Variant("x", args.limit) if args.limit else None,
-                       "start": Variant("b", not args.paused)}
+                       "start": Variant("b", not args.paused),
+                       "kind": Variant("s", "media") if args.media or args.quality else None,
+                       "format": Variant("s", media_selector(args.quality)) if args.quality else None,
+                       "format_label": Variant("s", args.quality) if args.quality else None}
             download_id = await iface.call_add(args.url, {k: v for k, v in options.items() if v is not None})
             print(f"download {download_id} added")
             if args.wait:
@@ -202,6 +205,11 @@ async def client(args) -> int:
     return 0
 
 
+def media_selector(quality: str) -> str:
+    from .media import default_selector
+    return default_selector(quality)
+
+
 def parse_setting(key: str, text: str | None):
     if text is None:
         raise SystemExit(f"ldm settings {key}: missing value")
@@ -247,6 +255,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-c", "--connections", type=int, choices=range(1, 33), metavar="1-32")
     p.add_argument("--limit", type=parse_rate, help="speed limit, e.g. 2M")
     p.add_argument("--paused", action="store_true", help="add without starting")
+    p.add_argument("--media", action="store_true",
+                   help="download a video/stream page with yt-dlp (YouTube, HLS/DASH playlists, …)")
+    p.add_argument("--quality", help="media quality: best, audio, or a maximum height such as 720")
     p.add_argument("--wait", action="store_true", help="show progress until it finishes")
 
     sub.add_parser("list", help="list downloads")

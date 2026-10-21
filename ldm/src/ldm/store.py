@@ -61,6 +61,9 @@ CREATE TABLE host_rules (
     include_subdomains INTEGER NOT NULL DEFAULT 1
 );
 """,
+    """
+ALTER TABLE downloads ADD COLUMN options_json TEXT NOT NULL DEFAULT '{}';
+""",
 ]
 
 
@@ -81,6 +84,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "retry_count": 3,        # automatic re-queues after an error
     "retry_interval": 30,    # seconds before an automatic re-queue
     "download_dir": None,    # None = XDG download dir
+    "media_quality": "best",  # "best", "audio" or a maximum height such as 1080
+    "media_container": "mp4",  # container for merged audio+video: "mp4" or "mkv"
+    "subtitles": "",          # subtitle languages to save next to videos, e.g. "en,hi"; "" = none
+    "js_runtime": "",         # path to deno/node/bun for YouTube; "" = find automatically
 }
 
 
@@ -104,6 +111,7 @@ class DownloadRow:
     error: str | None
     position: int
     speed_limit: int
+    options: dict[str, Any]
 
     @property
     def host(self) -> str:
@@ -135,13 +143,13 @@ class Store:
 
     def add(self, url: str, dir: Path | str, *, name: str | None = None,
             headers: dict[str, str] | None = None, connections: int = 8,
-            state: str = "queued") -> int:
+            state: str = "queued", kind: str = "http", options: dict[str, Any] | None = None) -> int:
         with self.db:
             cur = self.db.execute(
-                "INSERT INTO downloads (url, state, dir, name, connections, headers_json, added_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO downloads (url, state, dir, name, connections, headers_json, added_at, kind,"
+                " options_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (url, state, str(Path(dir).expanduser().resolve()), name, connections,
-                 json.dumps(headers or {}), time.time()),
+                 json.dumps(headers or {}), time.time(), kind, json.dumps(options or {})),
             )
             self.db.execute("UPDATE downloads SET position = id WHERE id = ?", (cur.lastrowid,))
         return cur.lastrowid
@@ -159,9 +167,9 @@ class Store:
 
     def requeue_interrupted(self) -> list[int]:
         """Downloads left `running` by a crash or kill go back to the queue."""
-        ids = [r[0] for r in self.db.execute("SELECT id FROM downloads WHERE state = 'running'")]
+        ids = [r[0] for r in self.db.execute("SELECT id FROM downloads WHERE state IN ('running', 'processing')")]
         with self.db:
-            self.db.execute("UPDATE downloads SET state = 'queued' WHERE state = 'running'")
+            self.db.execute("UPDATE downloads SET state = 'queued' WHERE state IN ('running', 'processing')")
         return ids
 
     def get_settings(self) -> dict[str, Any]:
@@ -251,6 +259,7 @@ def _to_row(r: sqlite3.Row) -> DownloadRow:
         connections=r["connections"], headers=json.loads(r["headers_json"]), etag=r["etag"],
         last_modified=r["last_modified"], added_at=r["added_at"], finished_at=r["finished_at"],
         error=r["error"], position=r["position"], speed_limit=r["speed_limit"],
+        options=json.loads(r["options_json"]),
     )
 
 

@@ -7,6 +7,7 @@ import re
 STATE_LABELS = {
     "queued": "Queued",
     "running": "Downloading",
+    "processing": "Processing",
     "paused": "Paused",
     "done": "Finished",
     "error": "Failed",
@@ -58,6 +59,8 @@ def status_text(state: str, done: int, size: int | None, speed: float = 0.0, err
         parts = [f"{done * 100 // size}%" if size else None, amount, f"{human(speed)}/s",
                  eta_text(size - done, speed) if size else ""]
         return " · ".join(p for p in parts if p)
+    if state == "processing":
+        return f"{error}…" if error else "Processing…"  # detail such as "Merging audio and video"
     if state == "done":
         return f"Finished — {human(size or done)}"
     if state in ("queued", "paused"):

@@ -13,12 +13,16 @@ Adw.init()
 
 from ldm.gui.add_dialog import AddDialog  # noqa: E402
 
-SETTINGS = {"download_dir": "/tmp/ldm-test-downloads", "default_connections": 8}
+SETTINGS = {"download_dir": "/tmp/ldm-test-downloads", "default_connections": 8, "media_quality": 720,
+            "subtitles": "hi"}
 
 
 class FakeClient:
     def __init__(self):
-        self.probes, self.added = [], []
+        self.probes, self.media_probes, self.added = [], [], []
+
+    def probe_media(self, url, headers, callback):
+        self.media_probes.append((url, headers, callback))
 
     def get_settings(self, callback):
         callback(dict(SETTINGS), None)
@@ -76,3 +80,41 @@ def test_plain_add_dialog_without_arguments():
     """Ctrl+N / + button: crashed in M4 before the fix (headers parameter shadowed)."""
     dialog = AddDialog(FakeClient())
     assert not dialog.start_button.get_sensitive()
+
+
+VIDEO = {"title": "Trailer 2", "site": "Youtube", "duration": 154, "is_live": False, "subtitles": ["en", "hi"],
+         "choices": [{"id": "best", "label": "Best quality", "selector": "bv*+ba/b", "size": 90_000_000},
+                     {"id": "1080", "label": "1080p", "selector": "bv*[height<=1080]+ba/b[height<=1080]/b",
+                      "size": 90_000_000},
+                     {"id": "720", "label": "720p", "selector": "bv*[height<=720]+ba/b[height<=720]/b",
+                      "size": 40_000_000},
+                     {"id": "audio", "label": "Audio only", "selector": "ba/b", "size": 3_000_000}]}
+
+
+def test_video_page_from_browser_shows_quality_choice():
+    client = FakeClient()
+    dialog = AddDialog(client, "https://www.youtube.com/watch?v=x", kind="media",
+                       headers={"Cookie": "c=1"})
+    assert not client.probes and client.media_probes[0][:2] == ("https://www.youtube.com/watch?v=x", {"Cookie": "c=1"})
+    client.media_probes[0][2](VIDEO, None)
+    assert dialog.media_group.get_visible()
+    assert dialog.media_title.get_subtitle() == "Youtube · 2:34"
+    assert dialog.quality.get_selected() == 2  # 720p from settings
+    assert dialog.quality.get_model().get_string(2) == "720p · ~38.1 MiB"
+    assert dialog.name.get_text() == "Trailer 2"
+    assert dialog.subtitles.get_visible() and dialog.subtitles.get_active()
+    dialog._submit(start=True)
+    _, options = client.added[0]
+    assert options["kind"] == "media" and options["format_label"] == "720p"
+    assert options["format"] == "bv*[height<=720]+ba/b[height<=720]/b"
+    assert options["subtitles"] == "hi" and options["name"] is None and options["title"] == "Trailer 2"
+
+
+def test_html_page_switches_to_video_mode():
+    client = FakeClient()
+    dialog = AddDialog(client, "https://example.com/watch/123")
+    client.probes[-1][2]({"size": 5000, "resumable": False, "filename": "123", "content_type": "text/html"}, None)
+    assert client.media_probes, "a web page should be checked for video"
+    client.media_probes[-1][2](None, type("E", (), {"message": "Unsupported URL"})())
+    assert not dialog.media_group.get_visible()
+    assert dialog.size.get_subtitle() == "No downloadable video found: Unsupported URL"

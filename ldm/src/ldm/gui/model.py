@@ -11,7 +11,7 @@ from ..format import status_text
 
 VIEWS = {
     "all": None,
-    "downloading": {"running", "queued", "paused"},
+    "downloading": {"running", "processing", "queued", "paused"},
     "finished": {"done"},
     "problems": {"error", "expired", "changed"},
 }

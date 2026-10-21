@@ -147,6 +147,9 @@ class DaemonClient(GObject.Object):
     def set_url(self, download_id: int, url: str, callback: Callback | None = None) -> None:
         self._call("SetUrl", "ts", (download_id, url), callback)
 
+    def probe_media(self, url: str, headers: dict[str, str], callback: Callback) -> None:
+        self._call("ProbeMedia", "sa{ss}", (url, headers), callback)
+
     def probe(self, url: str, headers: dict[str, str], callback: Callback) -> None:
         self._call("Probe", "sa{ss}", (url, headers), callback)
 

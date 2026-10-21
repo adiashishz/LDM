@@ -10,6 +10,10 @@ from ..format import human, parse_rate
 from .client import DaemonClient
 from .dialogs import limit_text, short_path
 
+QUALITIES = [("best", "Best available"), (2160, "2160p (4K)"), (1440, "1440p"), (1080, "1080p"), (720, "720p"),
+             (480, "480p"), (360, "360p"), ("audio", "Audio only")]
+CONTAINERS = [("mp4", "MP4 (plays everywhere)"), ("mkv", "MKV (keeps every codec)")]
+
 # setting key -> (title, subtitle, minimum, maximum)
 SPIN_SETTINGS = {
     "max_parallel": ("Parallel downloads", "How many files download at the same time", 1, 20),
@@ -45,8 +49,23 @@ class PreferencesDialog(Adw.PreferencesDialog):
             row.set_sensitive(False)  # until settings are loaded
             (downloads if key in ("max_parallel", "default_connections") else network).add(row)
             self.spins[key] = row
+        video = Adw.PreferencesGroup(title="Video", description="Streams and sites such as YouTube, via yt-dlp")
+        self.quality = Adw.ComboRow(title="Default quality",
+                                    model=Gtk.StringList.new([label for _, label in QUALITIES]))
+        self.container = Adw.ComboRow(title="Merge audio and video into",
+                                      model=Gtk.StringList.new([label for _, label in CONTAINERS]))
+        self.subtitles = Adw.EntryRow(title="Subtitle languages (e.g. en,hi — empty: none)", show_apply_button=True)
+        self.subtitles.connect("apply", lambda row: self._save({"subtitles": row.get_text().replace(" ", "")}))
+        self.runtime = Adw.EntryRow(title="JavaScript runtime for YouTube (empty: find automatically)",
+                                    show_apply_button=True)
+        self.runtime.connect("apply", lambda row: self._save({"js_runtime": row.get_text().strip()}))
+        self.runtime_found = Adw.ActionRow(title="Runtime in use", subtitle="…")
+        for row in (self.quality, self.container, self.subtitles, self.runtime, self.runtime_found):
+            row.set_sensitive(False)
+            video.add(row)
         general.add(downloads)
         general.add(network)
+        general.add(video)
 
         hosts = Adw.PreferencesPage(title="Host Rules", icon_name="network-server-symbolic")
         self.rules = Adw.PreferencesGroup(
@@ -78,6 +97,21 @@ class PreferencesDialog(Adw.PreferencesDialog):
             row.set_value(settings[key])
             row.set_sensitive(True)
             row.connect("notify::value", lambda r, _p, k=key: self._save({k: int(r.get_value())}))
+        quality = settings["media_quality"]
+        quality = int(quality) if str(quality).isdigit() else quality
+        self.quality.set_selected(next((i for i, (v, _) in enumerate(QUALITIES) if v == quality), 0))
+        self.container.set_selected(next((i for i, (v, _) in enumerate(CONTAINERS)
+                                          if v == settings["media_container"]), 0))
+        self.subtitles.set_text(settings["subtitles"])
+        self.runtime.set_text(settings["js_runtime"])
+        self.runtime_found.set_subtitle(settings.get("js_runtime_detected")
+                                        or "None found — YouTube needs deno, node or bun")
+        for row in (self.quality, self.container, self.subtitles, self.runtime, self.runtime_found):
+            row.set_sensitive(True)
+        self.quality.connect("notify::selected",
+                             lambda r, _p: self._save({"media_quality": QUALITIES[r.get_selected()][0]}))
+        self.container.connect("notify::selected",
+                               lambda r, _p: self._save({"media_container": CONTAINERS[r.get_selected()][0]}))
 
     def _save(self, values: dict[str, Any]) -> None:
         self.client.set_settings(values, self._report)

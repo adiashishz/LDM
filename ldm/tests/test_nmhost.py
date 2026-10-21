@@ -134,7 +134,8 @@ def test_dialog_mode_activates_gui_action(daemon, tmp_path):
     assert reply["ok"] and reply["dialog"]
     assert json.loads(out.read_text()) == {
         "url": "https://example.com/a.iso", "filename": "a.iso",
-        "headers": {"Referer": "https://example.com/", "Cookie": "k=v"}, "size": None, "page_url": None}
+        "headers": {"Referer": "https://example.com/", "Cookie": "k=v"}, "size": None, "page_url": None,
+        "kind": None}
 
 
 @needs_dbus

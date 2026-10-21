@@ -92,7 +92,7 @@ class Application(Adw.Application):
 
     def _show_request(self, request: dict) -> None:
         self.window().open_add_dialog(request.get("url", ""), name=request.get("filename") or "",
-                                      headers=request.get("headers") or {})
+                                      headers=request.get("headers") or {}, kind=request.get("kind") or "")
 
     def _request_timeout(self, request: dict) -> bool:
         if request in self._pending_requests:

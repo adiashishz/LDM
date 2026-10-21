@@ -22,6 +22,7 @@ GENERIC_FILE = ("text-x-generic-symbolic", "document-symbolic", "folder-download
 # Primary button per state: (icons, tooltip, handler name on the window)
 PRIMARY = {
     "running": (PAUSE, "Pause", "pause"),
+    "processing": (PAUSE, "Pause", "pause"),
     "queued": (PAUSE, "Pause", "pause"),
     "paused": (START, "Resume", "resume"),
     "error": (RETRY, "Retry", "resume"),

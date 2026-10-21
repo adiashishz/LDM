@@ -17,9 +17,10 @@ async function cookiesFor(url) {
 }
 
 /** Build the bridge item for one URL: filename, referer, cookies, user agent. */
-async function itemFor({ url, filename = "", referer = "", size = null, pageUrl = "" }) {
+async function itemFor({ url, filename = "", referer = "", size = null, pageUrl = "", kind = "" }) {
   return {
     url,
+    kind: kind || undefined,      // "media": a video page or stream playlist for yt-dlp
     filename: filename || "",
     referer: referer || pageUrl || "",
     cookies: await cookiesFor(url),
@@ -86,6 +87,9 @@ async function createMenus() {
   api.contextMenus.create({ id: "ldm-link", title: "Download link with ldm", contexts: ["link"] });
   api.contextMenus.create({ id: "ldm-media", title: "Download with ldm", contexts: ["image", "video", "audio"] });
   api.contextMenus.create({ id: "ldm-page", title: "Download links on this page with ldm…", contexts: ["page"] });
+  api.contextMenus.create({ id: "ldm-video-page", title: "Download video from this page with ldm",
+    contexts: ["page", "video", "audio"] });
+  api.contextMenus.create({ id: "ldm-video-link", title: "Download video from link with ldm", contexts: ["link"] });
 }
 
 api.runtime.onInstalled.addListener(createMenus);
@@ -96,7 +100,13 @@ api.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === "ldm-link") {
     sendOne({ url: info.linkUrl, pageUrl }).catch(reportError);
   } else if (info.menuItemId === "ldm-media") {
-    sendOne({ url: info.srcUrl, pageUrl }).catch(reportError);
+    // A <video> fed by MediaSource has a blob: URL that can't be downloaded: use the page instead.
+    const direct = /^https?:/i.test(info.srcUrl || "");
+    sendOne(direct ? { url: info.srcUrl, pageUrl } : { url: pageUrl, pageUrl, kind: "media" }).catch(reportError);
+  } else if (info.menuItemId === "ldm-video-page") {
+    sendOne({ url: pageUrl, pageUrl, kind: "media" }).catch(reportError);
+  } else if (info.menuItemId === "ldm-video-link") {
+    sendOne({ url: info.linkUrl, pageUrl, kind: "media" }).catch(reportError);
   } else if (info.menuItemId === "ldm-page" && tab) {
     api.windows.create({
       url: api.runtime.getURL(`popup/popup.html?tab=${tab.id}&view=links&window=1`),

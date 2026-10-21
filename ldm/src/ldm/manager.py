@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import shutil
 from collections import Counter
 from functools import partial
 from typing import Any, Callable
@@ -16,12 +17,16 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from . import media
 from .engine import DownloadError, Downloader, new_client, probe
+from .media import MediaDownloader
 from .ratelimit import TokenBucket
 from .store import DEFAULT_SETTINGS, DownloadRow, HostRule, Store
 
 RESUMABLE_STATES = {"paused", "error", "expired", "changed"}
 MAX_CONNECTIONS = 32
+MEDIA_EXTENSIONS = (".m3u8", ".mpd")  # stream playlists always go through yt-dlp
+MEDIA_OPTIONS = {"format", "format_label", "subtitles", "title", "page_url"}
 
 log = logging.getLogger(__name__)
 
@@ -48,9 +53,10 @@ class Busy(ManagerError):
 
 class Manager:
     def __init__(self, store: Store, *, downloader_factory: Callable[..., Downloader] = Downloader,
+                 media_factory: Callable[..., MediaDownloader] = MediaDownloader,
                  downloader_options: dict[str, Any] | None = None, progress_interval: float = 0.5):
         self.store = store
-        self._factory = downloader_factory
+        self._factories = {"http": downloader_factory, "media": media_factory}
         self._options = downloader_options or {}
         self._progress_interval = progress_interval
         self._tasks: dict[int, asyncio.Task] = {}
@@ -96,15 +102,27 @@ class Manager:
 
     def add(self, url: str, *, dir: str | None = None, name: str | None = None,
             connections: int | None = None, headers: dict[str, str] | None = None,
-            speed_limit: int = 0, start: bool = True) -> int:
+            speed_limit: int = 0, start: bool = True, kind: str | None = None, **media_options) -> int:
+        """`kind`: "http" (ldm's engine) or "media" (yt-dlp); default: media for .m3u8/.mpd links.
+        Media options: format (yt-dlp selector), format_label, subtitles ("en,hi"), title, page_url."""
         if urlsplit(url).scheme not in ("http", "https"):
             raise InvalidArgument(f"unsupported URL: {url}")
+        if set(media_options) - MEDIA_OPTIONS:
+            raise InvalidArgument(f"unknown options: {', '.join(sorted(set(media_options) - MEDIA_OPTIONS))}")
+        kind = kind or ("media" if urlsplit(url).path.lower().endswith(MEDIA_EXTENSIONS) else "http")
+        if kind not in self._factories:
+            raise InvalidArgument(f"unknown download kind: {kind}")
         settings = self.store.get_settings()
         connections = connections or settings["default_connections"]
         if not 1 <= connections <= MAX_CONNECTIONS:
             raise InvalidArgument(f"connections must be 1-{MAX_CONNECTIONS}")
+        options = {k: v for k, v in media_options.items() if v not in (None, "")}
+        if kind == "media":
+            options["custom_name"] = bool(name)
+            name = name or options.get("title")
         download_id = self.store.add(url, dir or settings["download_dir"], name=name, headers=headers,
-                                     connections=connections, state="queued" if start else "paused")
+                                     connections=connections, state="queued" if start else "paused",
+                                     kind=kind, options=options)
         if speed_limit:
             self.store.update(download_id, speed_limit=speed_limit)
         self._emit(self.on_added, download_id)
@@ -143,9 +161,12 @@ class Manager:
                 await task
             self._forget(download_id)
         self.store.delete(download_id)
-        if delete_files and d.name:
-            d.temp_path.unlink(missing_ok=True)
-            if d.state == "done":
+        if delete_files:
+            if d.kind == "media":
+                shutil.rmtree(media.media_temp_dir(d), ignore_errors=True)
+            elif d.name:
+                d.temp_path.unlink(missing_ok=True)
+            if d.state == "done" and d.name:
                 d.dest.unlink(missing_ok=True)
         self._emit(self.on_removed, download_id)
         self._schedule()
@@ -189,6 +210,12 @@ class Manager:
         return {"final_url": p.final_url, "size": p.size, "resumable": p.resumable,
                 "filename": p.filename, "content_type": p.content_type}
 
+    async def probe_media(self, url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+        """Title, qualities and subtitles yt-dlp can get from a page or stream playlist."""
+        if urlsplit(url).scheme not in ("http", "https"):
+            raise InvalidArgument(f"unsupported URL: {url}")
+        return await asyncio.to_thread(media.probe_media, url, headers, self.store.get_settings())
+
     def set_speed_limit(self, download_id: int, rate: int) -> None:
         self._get(download_id)
         self.store.update(download_id, speed_limit=rate)
@@ -196,7 +223,10 @@ class Manager:
             self._buckets[download_id].set_rate(rate)
 
     def settings(self) -> dict[str, Any]:
-        return self.store.get_settings()
+        settings = self.store.get_settings()
+        runtime = media.find_js_runtime(settings["js_runtime"])  # read-only, shown in preferences
+        settings["js_runtime_detected"] = f"{runtime[0]}: {runtime[1]}" if runtime else ""
+        return settings
 
     def update_settings(self, values: dict[str, Any]) -> None:
         for key, value in values.items():
@@ -205,6 +235,16 @@ class Manager:
             if key == "download_dir":
                 if not isinstance(value, str) or not value:
                     raise InvalidArgument("download_dir must be a path")
+            elif key == "media_quality":
+                if not (value in ("best", "audio") or (isinstance(value, int) and value > 0)
+                        or (isinstance(value, str) and value.isdigit())):
+                    raise InvalidArgument("media_quality must be best, audio or a height such as 1080")
+            elif key == "media_container":
+                if value not in ("mp4", "mkv"):
+                    raise InvalidArgument("media_container must be mp4 or mkv")
+            elif key in ("subtitles", "js_runtime"):
+                if not isinstance(value, str):
+                    raise InvalidArgument(f"{key} must be text")
             elif not isinstance(value, int) or isinstance(value, bool) or value < 0:
                 raise InvalidArgument(f"{key} must be a non-negative integer")
             elif key == "max_parallel" and value < 1:
@@ -244,7 +284,8 @@ class Manager:
             done = d.size if d.state == "done" else sum(p.done for p in self.store.load_parts(download_id))
             speed = 0.0
         return {
-            "id": d.id, "url": d.url, "name": d.name, "dir": str(d.dir), "state": d.state,
+            "id": d.id, "url": d.url, "kind": d.kind, "quality": d.options.get("format_label"),
+            "name": d.name, "dir": str(d.dir), "state": d.state,
             "error": d.error, "size": d.size, "done": done or 0, "speed": speed,
             "resumable": d.resumable, "connections": d.connections, "position": d.position,
             "speed_limit": d.speed_limit, "added_at": d.added_at, "finished_at": d.finished_at,
@@ -295,11 +336,12 @@ class Manager:
 
     def _start(self, d: DownloadRow, key: str | None, rule: HostRule | None) -> None:
         bucket = TokenBucket(d.speed_limit)
-        downloader = self._factory(
+        extra = {"on_state": lambda state, i=d.id: self._emit_state(i)} if d.kind == "media" else {}
+        downloader = self._factories[d.kind](
             self.store, d.id, limiters=[self._global, bucket],
             connections=(rule.max_connections or None) if rule else None,
             on_progress=partial(self._on_progress, d.id), progress_interval=self._progress_interval,
-            **self._options,
+            **extra, **self._options,
         )
         self.store.set_state(d.id, "running")
         task = asyncio.create_task(downloader.run())
@@ -327,7 +369,7 @@ class Manager:
             d = self.store.get(download_id)
         except KeyError:
             return
-        if d.state == "running":  # cancelled before the engine started
+        if d.state in ("running", "processing"):  # cancelled before the engine started
             self.store.set_state(download_id, "paused")
         elif d.state == "error":
             settings = self.store.get_settings()

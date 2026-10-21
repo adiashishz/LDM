@@ -40,3 +40,5 @@ button:disabled { opacity: .5; cursor: default; }
 .filters input { flex: 1; }
 .select-all { display: block; padding: 2px 12px 6px; color: var(--muted); }
 footer { padding: 8px 10px; text-align: right; border-top: 1px solid var(--line); }
+.page-video { padding: 8px 10px 4px; }
+.page-video button { width: 100%; }

@@ -109,3 +109,19 @@ def test_probe_over_dbus(daemon, http_server):
 
     info = asyncio.run(go())
     assert (info["size"], info["resumable"], info["filename"]) == (5000, False, "test.bin")
+
+
+def test_probe_media_over_dbus(daemon, http_server):
+    cfg, url = http_server(data=b"#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1.0,\nseg.ts\n#EXT-X-ENDLIST\n")
+    url = url.replace("test.bin", "list.m3u8")
+
+    async def go():
+        bus, iface = await client(daemon)
+        try:
+            return {k: v.value for k, v in (await iface.call_probe_media(url, {})).items()}
+        finally:
+            bus.disconnect()
+
+    info = asyncio.run(go())
+    assert info["title"] == "list"
+    assert info["choices"][0]["id"].value == "best"  # nested a{sv} entries arrive as Variants

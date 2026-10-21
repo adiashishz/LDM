@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import mimetypes
 import os
 import re
 import subprocess
@@ -29,6 +30,7 @@ class ServerConfig:
     drops: int = 0                  # number of responses to cut short
     drop_after: int = 0             # bytes sent before cutting a response
     redirects: dict[str, str] = field(default_factory=dict)  # path -> Location (302)
+    files: dict[str, bytes] = field(default_factory=dict)    # static files: path -> content (others 404)
     deny: set[str] = field(default_factory=set)              # paths answered with 403
     bytes_sent: int = 0
     active_ranges: int = 0          # bounded range requests being served right now
@@ -60,7 +62,15 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        data, size = cfg.data, len(cfg.data)
+        data = cfg.data
+        if cfg.files:
+            data = cfg.files.get(self.path.split("?")[0])
+            if data is None:
+                self.send_response(404)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+        size = len(data)
         start, end, partial = 0, size - 1, False
         match = re.fullmatch(r"bytes=(\d+)-(\d*)", self.headers.get("Range", ""))
         if_range = self.headers.get("If-Range")
@@ -85,6 +95,9 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         if cfg.disposition:
             self.send_header("Content-Disposition", cfg.disposition)
+        if cfg.files:
+            self.send_header("Content-Type", mimetypes.guess_type(self.path.split("?")[0])[0]
+                             or ("application/vnd.apple.mpegurl" if ".m3u8" in self.path else "application/octet-stream"))
         if cfg.send_length:
             self.send_header("Content-Length", str(length))
         else:

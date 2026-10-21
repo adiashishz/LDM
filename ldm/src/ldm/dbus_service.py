@@ -14,7 +14,8 @@ from .busnames import BUS_NAME, ERROR_PREFIX, INTERFACE, OBJECT_PATH  # noqa: F4
 from .engine import DownloadError
 from .manager import Busy, InvalidArgument, Manager, NotFound, SizeMismatch
 
-ADD_OPTIONS = {"dir", "name", "connections", "headers", "speed_limit", "start"}
+ADD_OPTIONS = {"dir", "name", "connections", "headers", "speed_limit", "start",
+               "kind", "format", "format_label", "subtitles", "title", "page_url"}
 
 
 def to_variant(value: Any) -> Variant:
@@ -28,6 +29,10 @@ def to_variant(value: Any) -> Variant:
         return Variant("s", value)
     if isinstance(value, dict):
         return Variant("a{ss}", {str(k): str(v) for k, v in value.items()})
+    if isinstance(value, list) and all(isinstance(v, dict) for v in value):
+        return Variant("aa{sv}", [to_vardict(v) for v in value])
+    if isinstance(value, list):
+        return Variant("as", [str(v) for v in value])
     raise TypeError(f"cannot send {type(value).__name__} over D-Bus")
 
 
@@ -103,6 +108,11 @@ class ManagerInterface(ServiceInterface):
     async def Probe(self, url: "s", headers: "a{ss}") -> "a{sv}":
         with _errors():
             return to_vardict(await self.manager.probe(url, headers))
+
+    @method()
+    async def ProbeMedia(self, url: "s", headers: "a{ss}") -> "a{sv}":
+        with _errors():
+            return to_vardict(await self.manager.probe_media(url, headers))
 
     @method()
     def SetSpeedLimit(self, download_id: "t", bytes_per_second: "t"):

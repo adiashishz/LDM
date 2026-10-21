@@ -22,6 +22,12 @@ Working name. Design: [../notes/10-linux-design.md](../notes/10-linux-design.md)
   inside Flatpak browsers), which starts the daemon/GUI on demand via D-Bus activation and either
   opens the add dialog prefilled or queues directly.
 
+- **M5:** video streams and sites through yt-dlp (installed with ldm): HLS/DASH playlists (incl.
+  AES-128), YouTube and other sites, quality choice with size estimates, separate audio+video merged
+  by FFmpeg into MP4/MKV, subtitles. `ldm add URL --media --quality 720`; in the extension
+  "Download video from this page". YouTube needs a JavaScript runtime (deno, node or bun; found in
+  `~/.nvm`, `~/.bun`, `~/.deno` too). Keep yt-dlp current: `uv pip install -U yt-dlp`.
+
 ## Browser integration
 
 ```sh

@@ -119,14 +119,14 @@ def headers_for(item: dict) -> dict:
 
 
 def add_direct(item: dict) -> int:
-    options = {"name": item.get("filename"), "headers": headers_for(item)}
+    options = {"name": item.get("filename"), "headers": headers_for(item), "kind": item.get("kind")}
     return _uint64(gdbus(BUS_NAME, OBJECT_PATH, f"{INTERFACE}.Add", gv_str(item["url"]), gv_vardict(options)))
 
 
 def add_dialog(item: dict) -> None:
     gdbus(BUS_NAME, OBJECT_PATH, f"{INTERFACE}.GetSettings")  # starts the daemon first
     request = {"url": item["url"], "filename": item.get("filename"), "headers": headers_for(item),
-               "size": item.get("size"), "page_url": item.get("page_url")}
+               "size": item.get("size"), "page_url": item.get("page_url"), "kind": item.get("kind")}
     gdbus(GUI_NAME, GUI_PATH, "org.gtk.Actions.Activate", gv_str("add-request"),
           f"[<{gv_str(json.dumps(request))}>]", "@a{sv} {}")
 

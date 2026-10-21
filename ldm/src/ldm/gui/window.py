@@ -114,11 +114,12 @@ class MainWindow(Adw.ApplicationWindow):
 
     # --- adding ----------------------------------------------------------------------------
 
-    def open_add_dialog(self, url: str = "", name: str = "", headers: dict[str, str] | None = None) -> None:
+    def open_add_dialog(self, url: str = "", name: str = "", headers: dict[str, str] | None = None,
+                        kind: str = "") -> None:
         if not self.client.connected:
             self.toast("Start the download service first")
             return
-        AddDialog(self.client, url, name=name, headers=headers).present(self)
+        AddDialog(self.client, url, name=name, headers=headers, kind=kind).present(self)
 
     def _on_drop(self, _target, value: str, _x, _y) -> bool:
         url = next((line.strip() for line in value.splitlines() if is_url(line)), "")
