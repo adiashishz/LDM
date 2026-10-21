@@ -7,12 +7,12 @@ from urllib.parse import unquote, urlsplit
 
 from gi.repository import Gio, GObject, Gtk
 
-from ..format import status_text
+from ..format import human, status_text
 
 VIEWS = {
     "all": None,
     "downloading": {"running", "processing", "queued", "paused"},
-    "finished": {"done"},
+    "finished": {"done", "seeding"},
     "problems": {"error", "expired", "changed"},
 }
 
@@ -29,12 +29,17 @@ class DownloadItem(GObject.Object):
     speed = GObject.Property(type=float, default=0.0)
     position = GObject.Property(type=GObject.TYPE_INT64, default=0)
     speed_limit = GObject.Property(type=GObject.TYPE_INT64, default=0)
+    kind = GObject.Property(type=str, default="http")
+    peers = GObject.Property(type=int, default=0)                  # torrents only
+    upload_speed = GObject.Property(type=float, default=0.0)
+    ratio = GObject.Property(type=float, default=0.0)
     # Derived, for binding to widgets:
     title = GObject.Property(type=str, default="")
     fraction = GObject.Property(type=float, default=0.0)
     status = GObject.Property(type=str, default="")
 
-    FIELDS = ("id", "url", "name", "dir", "state", "error", "size", "done", "speed", "position", "speed_limit")
+    FIELDS = ("id", "url", "name", "dir", "state", "error", "size", "done", "speed", "position", "speed_limit",
+              "kind", "peers", "upload_speed", "ratio")
 
     def update(self, values: dict[str, Any]) -> None:
         self.freeze_notify()
@@ -50,12 +55,22 @@ class DownloadItem(GObject.Object):
             self.fraction = self.done / self.size if self.size > 0 else 0.0
             self.status = status_text(self.state, self.done, self.size if self.size >= 0 else None,
                                       self.speed, self.error)
+            if self.kind == "torrent":
+                self.status += torrent_extra(self.state, self.peers, self.upload_speed, self.ratio)
         finally:
             self.thaw_notify()
 
     @property
     def path(self) -> str | None:
         return f"{self.dir}/{self.name}" if self.dir and self.name else None
+
+
+def torrent_extra(state: str, peers: int, upload_speed: float, ratio: float) -> str:
+    if state == "running":
+        return f" · {peers} peer{'s' if peers != 1 else ''}" + (f" · ↑ {human(upload_speed)}/s" if upload_speed else "")
+    if state == "seeding":
+        return f" · ratio {ratio:.2f}" + (f" · ↑ {human(upload_speed)}/s" if upload_speed else "")
+    return ""
 
 
 def _order(a: DownloadItem, b: DownloadItem, *_) -> int:

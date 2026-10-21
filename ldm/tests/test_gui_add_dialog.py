@@ -19,7 +19,10 @@ SETTINGS = {"download_dir": "/tmp/ldm-test-downloads", "default_connections": 8,
 
 class FakeClient:
     def __init__(self):
-        self.probes, self.media_probes, self.added = [], [], []
+        self.probes, self.media_probes, self.torrent_probes, self.added = [], [], [], []
+
+    def probe_torrent(self, source, headers, callback):
+        self.torrent_probes.append((source, headers, callback))
 
     def probe_media(self, url, headers, callback):
         self.media_probes.append((url, headers, callback))
@@ -118,3 +121,45 @@ def test_html_page_switches_to_video_mode():
     client.media_probes[-1][2](None, type("E", (), {"message": "Unsupported URL"})())
     assert not dialog.media_group.get_visible()
     assert dialog.size.get_subtitle() == "No downloadable video found: Unsupported URL"
+
+
+TORRENT = {"name": "Debian ISO", "size": 700_000_000, "num_files": 4, "is_magnet": True, "metadata": b"d4:infoe",
+           "files": [{"index": 0, "path": "Debian ISO/debian.iso", "size": 690_000_000},
+                     {"index": 2, "path": "Debian ISO/SHA256SUMS", "size": 10_000_000}]}
+
+
+def test_magnet_shows_file_list_and_sends_priorities():
+    client = FakeClient()
+    dialog = AddDialog(client, "magnet:?xt=urn:btih:abc&dn=Debian")
+    assert not client.probes and client.torrent_probes  # torrents skip the HTTP check
+    assert dialog.without_list.get_visible()             # magnet: offer to skip the file list
+    client.torrent_probes[-1][2](TORRENT, None)
+    assert dialog.torrent_group.get_visible() and not dialog.parts_row.get_visible()
+    assert dialog.files_row.get_title() == "Files (2 of 2 selected)"
+    dialog.file_checks[1][1].set_active(False)              # skip SHA256SUMS
+    assert dialog.files_row.get_title() == "Files (1 of 2 selected)"
+    dialog.sequential.set_active(True)
+    dialog._submit(start=True)
+    _, options = client.added[0]
+    assert options["kind"] == "torrent" and options["sequential"] is True
+    assert options["priorities"] == [1, 0, 0, 0] and options["metadata"] == b"d4:infoe"
+    assert "connections" not in options and options["name"] is None
+
+
+def test_magnet_without_file_list():
+    client = FakeClient()
+    dialog = AddDialog(client, "magnet:?xt=urn:btih:abc")
+    dialog._on_without_list(None)
+    client.torrent_probes[-1][2](TORRENT, None)   # arrives late: ignored
+    assert not dialog.file_checks
+    dialog._submit(start=True)
+    _, options = client.added[0]
+    assert options["kind"] == "torrent" and "priorities" not in options
+
+
+def test_nothing_selected_disables_start():
+    client = FakeClient()
+    dialog = AddDialog(client, "https://site/files.torrent")
+    client.torrent_probes[-1][2](TORRENT, None)
+    dialog.select_all.set_active(False)
+    assert not dialog.start_button.get_sensitive()

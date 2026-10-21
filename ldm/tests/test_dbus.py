@@ -125,3 +125,27 @@ def test_probe_media_over_dbus(daemon, http_server):
     info = asyncio.run(go())
     assert info["title"] == "list"
     assert info["choices"][0]["id"].value == "best"  # nested a{sv} entries arrive as Variants
+
+
+def test_probe_torrent_over_dbus(daemon, http_server, tmp_path):
+    lt = pytest.importorskip("libtorrent")
+    src = tmp_path / "pack"
+    src.mkdir()
+    (src / "one.txt").write_bytes(b"x" * 50_000)
+    fs = lt.file_storage()
+    lt.add_files(fs, str(src))
+    ct = lt.create_torrent(fs, 16 * 1024)
+    lt.set_piece_hashes(ct, str(tmp_path))
+    data = lt.bencode(ct.generate())
+    cfg, _ = http_server(data=b"", files={"/pack.torrent": data})
+
+    async def go():
+        bus, iface = await client(daemon)
+        try:
+            return {k: v.value for k, v in (await iface.call_probe_torrent(f"{cfg.base}/pack.torrent", {})).items()}
+        finally:
+            bus.disconnect()
+
+    info = asyncio.run(go())
+    assert info["name"] == "pack" and info["size"] == 50_000 and info["metadata"] == data
+    assert [f["path"].value for f in info["files"]] == ["pack/one.txt"]

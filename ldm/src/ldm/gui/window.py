@@ -11,6 +11,7 @@ from .add_dialog import AddDialog
 from .dialogs import ask_text, confirm, is_url, limit_text, read_clipboard_url
 from .model import DownloadItem
 from .row import DownloadRow
+from .torrent_details import TorrentDetailsDialog
 
 if TYPE_CHECKING:
     from .app import Application
@@ -122,7 +123,8 @@ class MainWindow(Adw.ApplicationWindow):
         AddDialog(self.client, url, name=name, headers=headers, kind=kind).present(self)
 
     def _on_drop(self, _target, value: str, _x, _y) -> bool:
-        url = next((line.strip() for line in value.splitlines() if is_url(line)), "")
+        url = next((line.strip() for line in value.splitlines()
+                    if is_url(line) or line.strip().startswith(("magnet:", "file:"))), "")
         if not url:
             return False
         self.open_add_dialog(url)
@@ -186,6 +188,9 @@ class MainWindow(Adw.ApplicationWindow):
             return
         item.speed_limit = rate
         self.client.set_speed_limit(item.id, rate, self._report)
+
+    def show_torrent_details(self, item: DownloadItem) -> None:
+        TorrentDetailsDialog(self.client, item).present(self)
 
     def move_to_top(self, item: DownloadItem) -> None:
         # The daemon sends no signal for position changes, so fetch the row to re-sort it.

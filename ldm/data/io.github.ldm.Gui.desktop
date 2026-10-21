@@ -10,3 +10,4 @@ Categories=Network;FileTransfer;GTK;
 Keywords=download;manager;resume;
 StartupNotify=true
 DBusActivatable=true
+MimeType=x-scheme-handler/magnet;application/x-bittorrent;

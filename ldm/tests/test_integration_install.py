@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,10 @@ EXTENSION = Path(__file__).resolve().parents[2] / "extension"
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
+    # Never touch the real profile: data, config (mimeapps.list) and the bus are all redirected.
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "home/.local/share"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "home/.config"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setattr(integration, "_reload_bus_config", lambda: None)  # don't touch the real bus
     (tmp_path / "home/.var/app/com.brave.Browser").mkdir(parents=True)
     return tmp_path / "home"
@@ -61,3 +65,14 @@ def test_install_and_uninstall(home):
 def test_dry_run_writes_nothing(home):
     integration.install(home, ["firefox"], dry_run=True, log=lambda _: None)
     assert not (home / ".mozilla").exists()
+
+
+def test_desktop_file_registers_torrent_types_and_default(home):
+    integration.install(home, ["firefox"], log=lambda _: None)
+    desktop = (home / ".local/share/applications/io.github.ldm.Gui.desktop").read_text()
+    assert "MimeType=x-scheme-handler/magnet;application/x-bittorrent;" in desktop
+    if shutil.which("xdg-mime"):
+        mimeapps = home / ".config/mimeapps.list"
+        assert "x-scheme-handler/magnet=io.github.ldm.Gui.desktop" in mimeapps.read_text()
+        integration.uninstall(home, log=lambda _: None)
+        assert "io.github.ldm.Gui.desktop" not in mimeapps.read_text()

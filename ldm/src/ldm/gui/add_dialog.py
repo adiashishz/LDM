@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 from gi.repository import Adw, Gio, GLib, Gtk
 
@@ -23,6 +25,13 @@ MAX_PARTS = 32
 PLAYLIST_EXTENSIONS = (".m3u8", ".mpd")
 
 
+def is_torrent_link(text: str) -> bool:
+    parts = urlsplit(text.strip())
+    if parts.scheme == "magnet":
+        return "xt=" in parts.query
+    return parts.scheme in ("http", "https", "file") and parts.path.lower().endswith(".torrent")
+
+
 def duration_text(seconds: float | None) -> str:
     if not seconds:
         return ""
@@ -38,6 +47,8 @@ class AddDialog(Adw.Dialog):
         self.client = client
         self.kind_hint = kind          # "media" when the browser sent a video page or stream
         self.media: dict[str, Any] | None = None  # ProbeMedia result once the link is a video
+        self.torrent: dict[str, Any] | None = None  # ProbeTorrent result (empty dict: no file list)
+        self.file_checks: list[tuple[int, Gtk.CheckButton, int]] = []  # (file index, box, size)
         self.settings: dict[str, Any] = {}
         self.on_added = on_added
         self.download_dir: str | None = None
@@ -84,6 +95,20 @@ class AddDialog(Adw.Dialog):
         for row in (self.media_title, self.quality, self.subtitles):
             self.media_group.add(row)
 
+        # --- torrent (magnets and .torrent files)
+        self.torrent_group = Adw.PreferencesGroup(title="Torrent", visible=False)
+        self.files_row = Adw.ExpanderRow(title="Files")
+        self.select_all = Gtk.CheckButton(active=True, valign=Gtk.Align.CENTER, tooltip_text="Select all")
+        self.select_all.connect("toggled", self._on_select_all)
+        self.files_row.add_suffix(self.select_all)
+        self.sequential = Adw.SwitchRow(title="Download in order",
+                                        subtitle="Lets you play a video while it downloads")
+        self.torrent_group.add(self.files_row)
+        self.torrent_group.add(self.sequential)
+        self.without_list = Gtk.Button(label="Add without file list", visible=False, valign=Gtk.Align.CENTER)
+        self.without_list.connect("clicked", self._on_without_list)
+        self.size.add_suffix(self.without_list)
+
         # --- where
         where = Adw.PreferencesGroup(title="Save in")
         self.folder_row = Adw.ComboRow(title="Folder",
@@ -122,7 +147,7 @@ class AddDialog(Adw.Dialog):
         header_group.add(expander)
 
         page = Adw.PreferencesPage()
-        for group in (file_group, self.media_group, where, options, header_group):
+        for group in (file_group, self.media_group, self.torrent_group, where, options, header_group):
             page.add(group)
         self.toasts = Adw.ToastOverlay(child=page)
         view = Adw.ToolbarView(content=self.toasts)
@@ -145,6 +170,8 @@ class AddDialog(Adw.Dialog):
             return
         self.settings = settings
         self.download_dir = settings["download_dir"]
+        if self.torrent is None:
+            self.sequential.set_active(bool(settings.get("torrent_sequential")))
         if self.parts.get_sensitive():
             self.parts.set_value(settings["default_connections"])
         self._show_folder()
@@ -212,10 +239,14 @@ class AddDialog(Adw.Dialog):
         self._probe_timer = 0
         url = self.url.get_text().strip()
         self._probe_generation += 1
-        if not is_url(url):
+        if not (is_url(url) or is_torrent_link(url)):
             self._show_probe_state(None)
             return GLib.SOURCE_REMOVE
         self._set_media(None)
+        self._set_torrent(None)
+        if self.kind_hint == "torrent" or is_torrent_link(url):
+            self._probe_torrent(url)
+            return GLib.SOURCE_REMOVE
         if self.kind_hint == "media" or url.split("?")[0].lower().endswith(PLAYLIST_EXTENSIONS):
             self._probe_media(url)
             return GLib.SOURCE_REMOVE
@@ -226,6 +257,79 @@ class AddDialog(Adw.Dialog):
         self.client.probe(url, self.headers(),
                           lambda result, error: generation == self._probe_generation and self._on_probe(result, error))
         return GLib.SOURCE_REMOVE
+
+    def _probe_torrent(self, url: str) -> None:
+        generation = self._probe_generation
+        self.spinner.set_visible(True)
+        self.resume.set_label("")
+        magnet = url.startswith("magnet:")
+        self.size.set_subtitle("Getting the file list from peers…" if magnet else "Reading the torrent…")
+        self.without_list.set_visible(magnet)
+        self.client.probe_torrent(url, self.headers(),
+                                  lambda result, error: generation == self._probe_generation
+                                  and self._on_torrent(result, error))
+
+    def _on_torrent(self, result: dict[str, Any] | None, error) -> None:
+        self.spinner.set_visible(False)
+        self.without_list.set_visible(False)
+        if error:
+            self._show_probe_state(None)
+            self.size.set_subtitle(f"Could not read the torrent: {error.message}")
+            return
+        self._set_torrent(result)
+
+    def _on_without_list(self, _button) -> None:
+        self._probe_generation += 1  # ignore the file list if it still arrives
+        self.spinner.set_visible(False)
+        self.without_list.set_visible(False)
+        self._set_torrent({})
+
+    def _set_torrent(self, info: dict[str, Any] | None) -> None:
+        self.torrent = info
+        self.torrent_group.set_visible(info is not None)
+        self.parts_row.set_visible(info is None)
+        if info is None:
+            return
+        for css in ("success", "warning"):
+            self.resume.remove_css_class(css)
+        self.resume.add_css_class("accent")
+        self.resume.set_label("Torrent")
+        for row in getattr(self, "_file_rows", []):
+            self.files_row.remove(row)
+        self._file_rows, self.file_checks = [], []
+        for f in info.get("files") or []:
+            check = Gtk.CheckButton(active=True, valign=Gtk.Align.CENTER)
+            check.connect("toggled", lambda *_: self._update_selected())
+            row = Adw.ActionRow(title=GLib.markup_escape_text(Path(f["path"]).name),
+                                subtitle=GLib.markup_escape_text(str(Path(f["path"]).parent)), activatable_widget=check)
+            row.add_prefix(check)
+            size = Gtk.Label(label=human(f["size"]), valign=Gtk.Align.CENTER)
+            size.add_css_class("dim-label")
+            row.add_suffix(size)
+            self.files_row.add_row(row)
+            self._file_rows.append(row)
+            self.file_checks.append((f["index"], check, f["size"]))
+        self.files_row.set_visible(bool(self.file_checks))
+        self.files_row.set_expanded(1 < len(self.file_checks) <= 20)
+        if self._auto_name and info.get("name"):
+            self.name.set_text(info["name"])
+            self._auto_name = True
+        self._update_selected()
+
+    def _on_select_all(self, check: Gtk.CheckButton) -> None:
+        for _, box, _ in self.file_checks:
+            box.set_active(check.get_active())
+
+    def _update_selected(self) -> None:
+        if not self.torrent:
+            self.size.set_subtitle("Size known once peers send the file list")
+            return
+        chosen = [size for _, box, size in self.file_checks if box.get_active()]
+        total = sum(size for _, _, size in self.file_checks)
+        self.files_row.set_title(f"Files ({len(chosen)} of {len(self.file_checks)} selected)")
+        self.size.set_subtitle(f"{human(sum(chosen))} of {human(total)}" if len(chosen) < len(self.file_checks)
+                               else f"{human(total)} ({total:,} bytes)")
+        self._validate()
 
     def _probe_media(self, url: str) -> None:
         generation = self._probe_generation
@@ -345,7 +449,9 @@ class AddDialog(Adw.Dialog):
     # --- submitting ----------------------------------------------------------------------------
 
     def _validate(self, *_) -> bool:
-        url_ok = is_url(self.url.get_text())
+        url_ok = is_url(self.url.get_text()) or is_torrent_link(self.url.get_text())
+        if self.file_checks and not any(box.get_active() for _, box, _ in self.file_checks):
+            url_ok = False  # nothing selected
         limit_ok = parse_limit(self.limit.get_text()) is not None
         for row, ok in ((self.url, url_ok or not self.url.get_text()), (self.limit, limit_ok)):
             (row.remove_css_class if ok else row.add_css_class)("error")
@@ -362,6 +468,15 @@ class AddDialog(Adw.Dialog):
             "headers": self.headers() or None,
             "start": start,
         }
+        if self.torrent is not None:
+            options.update(kind="torrent", sequential=self.sequential.get_active(), name=None)
+            if self.torrent:
+                priorities = [0] * self.torrent.get("num_files", len(self.file_checks))
+                for index, box, _ in self.file_checks:
+                    priorities[index] = 1 if box.get_active() else 0
+                options.update(priorities=priorities, metadata=self.torrent.get("metadata"))
+            options.pop("connections", None)
+            return options
         choice = self._choice()
         if self.media and choice:
             options.update(kind="media", format=choice["selector"], format_label=choice["label"],

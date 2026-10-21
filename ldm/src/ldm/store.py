@@ -64,6 +64,18 @@ CREATE TABLE host_rules (
     """
 ALTER TABLE downloads ADD COLUMN options_json TEXT NOT NULL DEFAULT '{}';
 """,
+    """
+CREATE TABLE torrents (
+    download_id     INTEGER PRIMARY KEY REFERENCES downloads(id) ON DELETE CASCADE,
+    info_hash       TEXT,
+    metadata        BLOB,
+    resume_data     BLOB,
+    priorities      TEXT NOT NULL DEFAULT '[]',
+    sequential      INTEGER NOT NULL DEFAULT 0,
+    uploaded        INTEGER NOT NULL DEFAULT 0,
+    seeding_seconds INTEGER NOT NULL DEFAULT 0
+);
+""",
 ]
 
 
@@ -88,6 +100,23 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "media_container": "mp4",  # container for merged audio+video: "mp4" or "mkv"
     "subtitles": "",          # subtitle languages to save next to videos, e.g. "en,hi"; "" = none
     "js_runtime": "",         # path to deno/node/bun for YouTube; "" = find automatically
+    "torrent_listen_port": 0,          # 0 = random
+    "torrent_dht": True,
+    "torrent_lsd": True,               # local peer discovery
+    "torrent_pex": True,               # peer exchange
+    "torrent_upnp": True,              # UPnP and NAT-PMP port forwarding
+    "torrent_utp": True,
+    "torrent_encryption": "prefer",    # prefer / require / off
+    "torrent_max_peers": 50,           # per torrent
+    "torrent_max_connections": 200,    # all torrents together
+    "torrent_upload_limit": 0,         # bytes/s, 0 = unlimited
+    "torrent_seed": False,             # keep seeding after finishing
+    "torrent_seed_ratio": 1.0,         # stop seeding at this upload/download ratio (0 = no limit)
+    "torrent_seed_minutes": 0,         # stop seeding after this long (0 = no limit)
+    "torrent_fetch_metadata": True,    # get a magnet's file list before adding it
+    "torrent_trackers": "",            # extra trackers for every torrent, one per line
+    "torrent_ip_filter": "",           # path to a P2P/DAT block list, "" = none
+    "torrent_sequential": False,       # default for "download in order"
 }
 
 
@@ -202,6 +231,25 @@ class Store:
     def list_host_rules(self) -> list[HostRule]:
         return [_to_rule(r) for r in self.db.execute("SELECT * FROM host_rules ORDER BY host")]
 
+    def get_torrent(self, download_id: int) -> TorrentRow | None:
+        r = self.db.execute("SELECT * FROM torrents WHERE download_id = ?", (download_id,)).fetchone()
+        if r is None:
+            return None
+        return TorrentRow(r["download_id"], r["info_hash"], r["metadata"], r["resume_data"],
+                          json.loads(r["priorities"]), bool(r["sequential"]), r["uploaded"], r["seeding_seconds"])
+
+    def save_torrent(self, download_id: int, **fields) -> None:
+        """Insert or update the torrent row; `priorities` is a list, the rest are column values."""
+        if "priorities" in fields:
+            fields["priorities"] = json.dumps(fields["priorities"])
+        if "sequential" in fields:
+            fields["sequential"] = int(fields["sequential"])
+        with self.db:
+            self.db.execute("INSERT OR IGNORE INTO torrents (download_id) VALUES (?)", (download_id,))
+            if fields:
+                cols = ", ".join(f"{k} = ?" for k in fields)
+                self.db.execute(f"UPDATE torrents SET {cols} WHERE download_id = ?", (*fields.values(), download_id))
+
     def host_rule_for(self, host: str) -> HostRule | None:
         """Exact host first, then parent domains whose rule includes subdomains."""
         labels = host.lower().split(".")
@@ -250,6 +298,18 @@ class Store:
             (download_id,),
         )
         return [Part(r["first_byte"], r["last_byte"], r["done"]) for r in rows]
+
+
+@dataclass
+class TorrentRow:
+    download_id: int
+    info_hash: str | None
+    metadata: bytes | None
+    resume_data: bytes | None
+    priorities: list[int]
+    sequential: bool
+    uploaded: int
+    seeding_seconds: int
 
 
 def _to_row(r: sqlite3.Row) -> DownloadRow:

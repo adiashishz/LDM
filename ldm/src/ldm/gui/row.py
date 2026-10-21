@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from gi.repository import Gio, GObject, Gtk, Pango
+from gi.repository import Gio, GLib, GObject, Gtk, Pango
 
 from .model import DownloadItem
 
@@ -23,6 +23,7 @@ GENERIC_FILE = ("text-x-generic-symbolic", "document-symbolic", "folder-download
 PRIMARY = {
     "running": (PAUSE, "Pause", "pause"),
     "processing": (PAUSE, "Pause", "pause"),
+    "seeding": (PAUSE, "Stop seeding", "pause"),
     "queued": (PAUSE, "Pause", "pause"),
     "paused": (START, "Resume", "resume"),
     "error": (RETRY, "Retry", "resume"),
@@ -33,8 +34,9 @@ PRIMARY = {
 
 # Menu actions: name -> (label, handler, states where enabled; None = always)
 ACTIONS = {
-    "open": ("Open", "open_file", {"done"}),
-    "open-folder": ("Open Folder", "open_folder", {"done"}),
+    "open": ("Open", "open_file", {"done", "seeding"}),
+    "open-folder": ("Open Folder", "open_folder", {"done", "seeding"}),
+    "details": ("Torrent Details…", "show_torrent_details", None),
     "copy-link": ("Copy Link", "copy_link", None),
     "set-url": ("Set New Link…", "ask_new_url", {"paused", "error", "expired", "changed", "queued"}),
     "limit": ("Speed Limit…", "ask_speed_limit", {"queued", "running", "paused", "error"}),
@@ -84,7 +86,10 @@ class DownloadRow(Gtk.Box):
         menu = Gio.Menu()
         main, removal = Gio.Menu(), Gio.Menu()
         for name, (label, _, _) in ACTIONS.items():
-            (removal if name in ("remove", "delete") else main).append(label, f"dl.{name}")
+            entry = Gio.MenuItem.new(label, f"dl.{name}")
+            if name == "details":  # only torrents have it
+                entry.set_attribute_value("hidden-when", GLib.Variant("s", "action-disabled"))
+            (removal if name in ("remove", "delete") else main).append_item(entry)
         menu.append_section(None, main)
         menu.append_section(None, removal)
         more = Gtk.MenuButton(icon_name="view-more-symbolic", menu_model=menu, valign=Gtk.Align.CENTER,
@@ -122,7 +127,12 @@ class DownloadRow(Gtk.Box):
             self.status.remove_css_class("error")
             self.status.add_css_class("dim-label")
         for name, (_, _, states) in ACTIONS.items():
-            self.actions.lookup_action(name).set_enabled(states is None or state in states)
+            enabled = states is None or state in states
+            if name == "details":
+                enabled = self.item.kind == "torrent"
+            elif name in ("set-url", "limit") and self.item.kind == "torrent":
+                enabled = enabled and name == "limit"
+            self.actions.lookup_action(name).set_enabled(enabled)
 
     def _sync_icon(self, *_) -> None:
         self.icon.set_from_icon_name(first_icon(self, file_icon_names(self.item.title)))

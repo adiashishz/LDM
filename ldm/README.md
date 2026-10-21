@@ -28,6 +28,12 @@ Working name. Design: [../notes/10-linux-design.md](../notes/10-linux-design.md)
   "Download video from this page". YouTube needs a JavaScript runtime (deno, node or bun; found in
   `~/.nvm`, `~/.bun`, `~/.deno` too). Keep yt-dlp current: `uv pip install -U yt-dlp`.
 
+- **M6:** torrents with libtorrent (`sudo dnf install rb_libtorrent-python3`): magnet links and
+  `.torrent` files/URLs, file selection, download in order, Torrent Details (files, peers,
+  trackers), optional seeding with ratio/time limits, DHT/PEX/LSD/UPnP/µTP/encryption/IP filter
+  settings. ldm becomes the default app for magnet links and .torrent files.
+  `ldm torrent-files SOURCE`, `ldm add MAGNET --files 0,2 --sequential`.
+
 ## Browser integration
 
 ```sh

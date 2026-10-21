@@ -15,10 +15,13 @@ from .engine import DownloadError
 from .manager import Busy, InvalidArgument, Manager, NotFound, SizeMismatch
 
 ADD_OPTIONS = {"dir", "name", "connections", "headers", "speed_limit", "start",
-               "kind", "format", "format_label", "subtitles", "title", "page_url"}
+               "kind", "format", "format_label", "subtitles", "title", "page_url",
+               "priorities", "sequential", "metadata", "peers"}
 
 
 def to_variant(value: Any) -> Variant:
+    if isinstance(value, (bytes, bytearray)):
+        return Variant("ay", bytes(value))
     if isinstance(value, bool):
         return Variant("b", value)
     if isinstance(value, int):
@@ -29,8 +32,10 @@ def to_variant(value: Any) -> Variant:
         return Variant("s", value)
     if isinstance(value, dict):
         return Variant("a{ss}", {str(k): str(v) for k, v in value.items()})
-    if isinstance(value, list) and all(isinstance(v, dict) for v in value):
+    if isinstance(value, list) and value and all(isinstance(v, dict) for v in value):
         return Variant("aa{sv}", [to_vardict(v) for v in value])
+    if isinstance(value, list) and value and all(isinstance(v, int) and not isinstance(v, bool) for v in value):
+        return Variant("ax", value)
     if isinstance(value, list):
         return Variant("as", [str(v) for v in value])
     raise TypeError(f"cannot send {type(value).__name__} over D-Bus")
@@ -113,6 +118,16 @@ class ManagerInterface(ServiceInterface):
     async def ProbeMedia(self, url: "s", headers: "a{ss}") -> "a{sv}":
         with _errors():
             return to_vardict(await self.manager.probe_media(url, headers))
+
+    @method()
+    async def ProbeTorrent(self, source: "s", headers: "a{ss}") -> "a{sv}":
+        with _errors():
+            return to_vardict(await self.manager.probe_torrent(source, headers))
+
+    @method()
+    def TorrentDetails(self, download_id: "t") -> "a{sv}":
+        with _errors():
+            return to_vardict(self.manager.torrent_details(download_id))
 
     @method()
     def SetSpeedLimit(self, download_id: "t", bytes_per_second: "t"):

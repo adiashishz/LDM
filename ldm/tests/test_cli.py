@@ -2,7 +2,7 @@ import random
 
 import pytest
 
-from ldm.cli import main, parse_rate
+from ldm.cli import file_priorities, main, parse_rate
 
 
 def test_get_then_resume_finished_download_is_a_no_op(tmp_path, http_server, capsys):
@@ -24,3 +24,8 @@ def test_get_then_resume_finished_download_is_a_no_op(tmp_path, http_server, cap
                                            ("2M", 2 * 1024 ** 2), ("1.5MiB/s", 1_572_864)])
 def test_parse_rate(text, expected):
     assert parse_rate(text) == expected
+
+
+def test_file_priorities():
+    assert file_priorities("0,2") == [1, 0, 1]
+    assert file_priorities("3") == [0, 0, 0, 1]

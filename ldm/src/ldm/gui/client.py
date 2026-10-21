@@ -34,6 +34,10 @@ def _error_from_glib(error: GLib.Error) -> DaemonError:
 
 
 def to_variant(value: Any) -> GLib.Variant:
+    if isinstance(value, (bytes, bytearray)):
+        return GLib.Variant("ay", bytes(value))
+    if isinstance(value, list) and all(isinstance(v, int) and not isinstance(v, bool) for v in value):
+        return GLib.Variant("ax", value)
     if isinstance(value, bool):
         return GLib.Variant("b", value)
     if isinstance(value, int):
@@ -146,6 +150,12 @@ class DaemonClient(GObject.Object):
 
     def set_url(self, download_id: int, url: str, callback: Callback | None = None) -> None:
         self._call("SetUrl", "ts", (download_id, url), callback)
+
+    def probe_torrent(self, source: str, headers: dict[str, str], callback: Callback) -> None:
+        self._call("ProbeTorrent", "sa{ss}", (source, headers), callback)
+
+    def torrent_details(self, download_id: int, callback: Callback) -> None:
+        self._call("TorrentDetails", "t", (download_id,), callback)
 
     def probe_media(self, url: str, headers: dict[str, str], callback: Callback) -> None:
         self._call("ProbeMedia", "sa{ss}", (url, headers), callback)

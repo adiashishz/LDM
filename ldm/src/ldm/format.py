@@ -8,6 +8,7 @@ STATE_LABELS = {
     "queued": "Queued",
     "running": "Downloading",
     "processing": "Processing",
+    "seeding": "Seeding",
     "paused": "Paused",
     "done": "Finished",
     "error": "Failed",
@@ -61,6 +62,8 @@ def status_text(state: str, done: int, size: int | None, speed: float = 0.0, err
         return " · ".join(p for p in parts if p)
     if state == "processing":
         return f"{error}…" if error else "Processing…"  # detail such as "Merging audio and video"
+    if state == "seeding":
+        return "Seeding"
     if state == "done":
         return f"Finished — {human(size or done)}"
     if state in ("queued", "paused"):

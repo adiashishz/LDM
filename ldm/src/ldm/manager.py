@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import shutil
 from collections import Counter
@@ -17,9 +18,10 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from . import media
+from . import media, torrent
 from .engine import DownloadError, Downloader, new_client, probe
 from .media import MediaDownloader
+from .torrent import TorrentDownloader, TorrentSession
 from .ratelimit import TokenBucket
 from .store import DEFAULT_SETTINGS, DownloadRow, HostRule, Store
 
@@ -27,6 +29,8 @@ RESUMABLE_STATES = {"paused", "error", "expired", "changed"}
 MAX_CONNECTIONS = 32
 MEDIA_EXTENSIONS = (".m3u8", ".mpd")  # stream playlists always go through yt-dlp
 MEDIA_OPTIONS = {"format", "format_label", "subtitles", "title", "page_url"}
+TORRENT_OPTIONS = {"priorities", "sequential", "metadata", "peers"}
+SCHEMES = {"http": ("http", "https"), "media": ("http", "https"), "torrent": ("http", "https", "magnet", "file")}
 
 log = logging.getLogger(__name__)
 
@@ -54,9 +58,13 @@ class Busy(ManagerError):
 class Manager:
     def __init__(self, store: Store, *, downloader_factory: Callable[..., Downloader] = Downloader,
                  media_factory: Callable[..., MediaDownloader] = MediaDownloader,
-                 downloader_options: dict[str, Any] | None = None, progress_interval: float = 0.5):
+                 downloader_options: dict[str, Any] | None = None, progress_interval: float = 0.5,
+                 torrent_listen_host: str = "0.0.0.0"):
         self.store = store
-        self._factories = {"http": downloader_factory, "media": media_factory}
+        self._factories = {"http": downloader_factory, "media": media_factory,
+                           "torrent": partial(TorrentDownloader, session=self._torrent_session)}
+        self._torrent: TorrentSession | None = None
+        self._torrent_listen_host = torrent_listen_host
         self._options = downloader_options or {}
         self._progress_interval = progress_interval
         self._tasks: dict[int, asyncio.Task] = {}
@@ -80,7 +88,27 @@ class Manager:
         self.store.requeue_interrupted()
         self._global.set_rate(self.store.get_settings()["speed_limit"])
         self._progress_task = asyncio.create_task(self._progress_loop())
+        for d in self.store.list():
+            if d.state == "seeding":
+                self._resume_seeding(d)
         self._schedule()
+
+    def _torrent_session(self) -> TorrentSession:
+        if self._torrent is None:
+            self._torrent = TorrentSession(self.store.get_settings(), self._torrent_listen_host)
+            self._torrent.start()
+        return self._torrent
+
+    def _resume_seeding(self, d: DownloadRow) -> None:
+        row = self.store.get_torrent(d.id)
+        if not torrent.available() or not row or not row.resume_data:
+            self.store.set_state(d.id, "done")
+            return
+        try:
+            self._torrent_session().seed(d.id, row.resume_data, str(d.dir))
+        except Exception as e:  # damaged resume data: just stop seeding
+            log.warning("cannot seed download %s again: %s", d.id, e)
+            self.store.set_state(d.id, "done")
 
     async def shutdown(self) -> None:
         """Stop all transfers; downloads that were running are queued again for the next start."""
@@ -97,6 +125,14 @@ class Manager:
         await asyncio.gather(*tasks, return_exceptions=True)
         for download_id in running:
             self.store.set_state(download_id, "queued")
+        if self._torrent is not None:  # seeding torrents stay "seeding" and restart next time
+            for download_id in list(self._torrent.seeding):
+                handle = self._torrent.handles.get(download_id)
+                if handle is not None:
+                    data = await self._torrent.save_resume(handle)
+                    if data:
+                        self.store.save_torrent(download_id, resume_data=data)
+            await self._torrent.close()
 
     # --- commands --------------------------------------------------------------------------
 
@@ -105,13 +141,20 @@ class Manager:
             speed_limit: int = 0, start: bool = True, kind: str | None = None, **media_options) -> int:
         """`kind`: "http" (ldm's engine) or "media" (yt-dlp); default: media for .m3u8/.mpd links.
         Media options: format (yt-dlp selector), format_label, subtitles ("en,hi"), title, page_url."""
-        if urlsplit(url).scheme not in ("http", "https"):
-            raise InvalidArgument(f"unsupported URL: {url}")
-        if set(media_options) - MEDIA_OPTIONS:
-            raise InvalidArgument(f"unknown options: {', '.join(sorted(set(media_options) - MEDIA_OPTIONS))}")
-        kind = kind or ("media" if urlsplit(url).path.lower().endswith(MEDIA_EXTENSIONS) else "http")
+        unknown = set(media_options) - MEDIA_OPTIONS - TORRENT_OPTIONS
+        if unknown:
+            raise InvalidArgument(f"unknown options: {', '.join(sorted(unknown))}")
+        if not kind:
+            path = urlsplit(url).path.lower()
+            kind = ("torrent" if torrent.is_torrent_source(url) else
+                    "media" if path.endswith(MEDIA_EXTENSIONS) else "http")
         if kind not in self._factories:
             raise InvalidArgument(f"unknown download kind: {kind}")
+        if urlsplit(url).scheme not in SCHEMES[kind]:
+            raise InvalidArgument(f"unsupported URL: {url}")
+        if kind == "torrent" and not torrent.available():
+            raise InvalidArgument(torrent.INSTALL_HINT)
+        torrent_options = {k: media_options.pop(k) for k in list(media_options) if k in TORRENT_OPTIONS}
         settings = self.store.get_settings()
         connections = connections or settings["default_connections"]
         if not 1 <= connections <= MAX_CONNECTIONS:
@@ -120,9 +163,19 @@ class Manager:
         if kind == "media":
             options["custom_name"] = bool(name)
             name = name or options.get("title")
+        if torrent_options.get("peers"):
+            options["peers"] = list(torrent_options["peers"])
         download_id = self.store.add(url, dir or settings["download_dir"], name=name, headers=headers,
                                      connections=connections, state="queued" if start else "paused",
                                      kind=kind, options=options)
+        if kind == "torrent":
+            priorities = torrent_options.get("priorities") or []
+            if isinstance(priorities, str):
+                priorities = json.loads(priorities)
+            self.store.save_torrent(download_id, metadata=torrent_options.get("metadata") or None,
+                                    priorities=[int(p) for p in priorities],
+                                    sequential=bool(torrent_options.get("sequential",
+                                                                        settings["torrent_sequential"])))
         if speed_limit:
             self.store.update(download_id, speed_limit=speed_limit)
         self._emit(self.on_added, download_id)
@@ -133,6 +186,9 @@ class Manager:
     def pause(self, download_id: int) -> None:
         d = self._get(download_id)
         self._cancel_retry(download_id)
+        if d.state == "seeding":  # pausing a seeding torrent stops seeding
+            self._stop_seeding(download_id)
+            return
         if self._active(download_id):
             self._tasks[download_id].cancel()  # the engine saves progress and marks it paused
         elif d.state in ("queued", "error"):
@@ -154,6 +210,8 @@ class Manager:
     async def remove(self, download_id: int, delete_files: bool = False) -> None:
         d = self._get(download_id)
         self._cancel_retry(download_id)
+        if self._torrent is not None:
+            self._torrent.remove(download_id)
         task = self._tasks.pop(download_id, None)
         if task:
             task.cancel()
@@ -162,7 +220,10 @@ class Manager:
             self._forget(download_id)
         self.store.delete(download_id)
         if delete_files:
-            if d.kind == "media":
+            if d.kind == "torrent" and d.name:
+                target = d.dir / d.name
+                shutil.rmtree(target, ignore_errors=True) if target.is_dir() else target.unlink(missing_ok=True)
+            elif d.kind == "media":
                 shutil.rmtree(media.media_temp_dir(d), ignore_errors=True)
             elif d.name:
                 d.temp_path.unlink(missing_ok=True)
@@ -210,6 +271,49 @@ class Manager:
         return {"final_url": p.final_url, "size": p.size, "resumable": p.resumable,
                 "filename": p.filename, "content_type": p.content_type}
 
+    async def probe_torrent(self, source: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+        """Name, size and file list of a magnet, .torrent URL or local .torrent file."""
+        if not torrent.available():
+            raise InvalidArgument(torrent.INSTALL_HINT)
+        if urlsplit(source).scheme == "magnet":
+            params = torrent.lt.parse_magnet_uri(source)
+            result = {"name": params.name or "", "size": None, "files": [], "is_magnet": True,
+                      "info_hash": str(params.info_hashes.get_best()), "trackers": list(params.trackers)}
+            if self.store.get_settings()["torrent_fetch_metadata"]:
+                info = await self._torrent_session().fetch_metadata(source)
+                result.update(torrent.describe_info(info), metadata=torrent.metadata_bytes(info))
+            return result
+        try:
+            data = await torrent.read_source(source, headers)
+            info = torrent.lt.torrent_info(torrent.lt.bdecode(data))
+        except (OSError, httpx.HTTPError) as e:
+            raise DownloadError(f"could not read the torrent: {e}") from e
+        except RuntimeError as e:
+            raise DownloadError(f"not a valid .torrent file: {e}") from e
+        return {**torrent.describe_info(info), "metadata": data, "is_magnet": False}
+
+    def torrent_details(self, download_id: int) -> dict[str, Any]:
+        d = self._get(download_id)
+        live = self._torrent.details(download_id) if self._torrent else None
+        if live is not None:
+            return live
+        row = self.store.get_torrent(download_id)
+        info = {"peers": 0, "seeds": 0, "download_speed": 0, "upload_speed": 0, "seeding": False,
+                "uploaded": row.uploaded if row else 0, "peer_list": [], "trackers": []}
+        if row and row.metadata and torrent.available():
+            described = torrent.describe_info(torrent.lt.torrent_info(torrent.lt.bdecode(row.metadata)))
+            info["files"] = [{**f, "done": f["size"] if d.state == "done" else 0,
+                              "wanted": not row.priorities or row.priorities[f["index"]] > 0}
+                             for f in described["files"]]
+            info["trackers"] = [{"url": t, "message": ""} for t in described["trackers"]]
+        return info
+
+    def _stop_seeding(self, download_id: int) -> None:
+        if self._torrent is not None:
+            self._torrent.remove(download_id)
+        self.store.set_state(download_id, "done")
+        self._emit_state(download_id)
+
     async def probe_media(self, url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
         """Title, qualities and subtitles yt-dlp can get from a page or stream playlist."""
         if urlsplit(url).scheme not in ("http", "https"):
@@ -230,32 +334,48 @@ class Manager:
 
     def update_settings(self, values: dict[str, Any]) -> None:
         for key, value in values.items():
-            if key not in DEFAULT_SETTINGS:
-                raise InvalidArgument(f"unknown setting: {key}")
-            if key == "download_dir":
-                if not isinstance(value, str) or not value:
-                    raise InvalidArgument("download_dir must be a path")
-            elif key == "media_quality":
-                if not (value in ("best", "audio") or (isinstance(value, int) and value > 0)
-                        or (isinstance(value, str) and value.isdigit())):
-                    raise InvalidArgument("media_quality must be best, audio or a height such as 1080")
-            elif key == "media_container":
-                if value not in ("mp4", "mkv"):
-                    raise InvalidArgument("media_container must be mp4 or mkv")
-            elif key in ("subtitles", "js_runtime"):
-                if not isinstance(value, str):
-                    raise InvalidArgument(f"{key} must be text")
-            elif not isinstance(value, int) or isinstance(value, bool) or value < 0:
-                raise InvalidArgument(f"{key} must be a non-negative integer")
-            elif key == "max_parallel" and value < 1:
-                raise InvalidArgument("max_parallel must be at least 1")
-            elif key == "default_connections" and not 1 <= value <= MAX_CONNECTIONS:
-                raise InvalidArgument(f"default_connections must be 1-{MAX_CONNECTIONS}")
+            self._check_setting(key, value)
         for key, value in values.items():
             self.store.set_setting(key, value)
         if "speed_limit" in values:
             self._global.set_rate(values["speed_limit"])
+        if self._torrent is not None and any(k.startswith("torrent_") for k in values):
+            self._torrent.apply(self.store.get_settings())
         self._schedule()
+
+    @staticmethod
+    def _check_setting(key: str, value: Any) -> None:
+        """Values must match the type of the default; a few settings have narrower rules."""
+        if key not in DEFAULT_SETTINGS:
+            raise InvalidArgument(f"unknown setting: {key}")
+        choices = {"media_container": ("mp4", "mkv"), "torrent_encryption": ("prefer", "require", "off")}
+        if key in choices:
+            if value not in choices[key]:
+                raise InvalidArgument(f"{key} must be one of: {', '.join(choices[key])}")
+        elif key == "media_quality":
+            if not (value in ("best", "audio") or (isinstance(value, int) and not isinstance(value, bool)
+                                                  and value > 0) or (isinstance(value, str) and value.isdigit())):
+                raise InvalidArgument("media_quality must be best, audio or a height such as 1080")
+        elif key == "download_dir":
+            if not isinstance(value, str) or not value:
+                raise InvalidArgument("download_dir must be a path")
+        else:
+            default = DEFAULT_SETTINGS[key]
+            if isinstance(default, bool):
+                ok = isinstance(value, bool)
+            elif isinstance(default, int):
+                ok = isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            elif isinstance(default, float):
+                ok = isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0
+            else:
+                ok = isinstance(value, str)
+            if not ok:
+                raise InvalidArgument(f"{key} must be {type(default).__name__}"
+                                      + (" ≥ 0" if isinstance(default, (int, float)) and not isinstance(default, bool) else ""))
+        if key == "max_parallel" and value < 1:
+            raise InvalidArgument("max_parallel must be at least 1")
+        if key == "default_connections" and not 1 <= value <= MAX_CONNECTIONS:
+            raise InvalidArgument(f"default_connections must be 1-{MAX_CONNECTIONS}")
 
     def set_host_rule(self, host: str, max_connections: int = 0, max_downloads: int = 0,
                       include_subdomains: bool = True) -> None:
@@ -283,7 +403,13 @@ class Manager:
         else:
             done = d.size if d.state == "done" else sum(p.done for p in self.store.load_parts(download_id))
             speed = 0.0
+        extra = {}
+        if d.kind == "torrent" and self._torrent is not None:
+            live = self._torrent.details(download_id)
+            if live:
+                extra = {k: live[k] for k in ("peers", "seeds", "upload_speed", "ratio")}
         return {
+            **extra,
             "id": d.id, "url": d.url, "kind": d.kind, "quality": d.options.get("format_label"),
             "name": d.name, "dir": str(d.dir), "state": d.state,
             "error": d.error, "size": d.size, "done": done or 0, "speed": speed,
@@ -405,6 +531,9 @@ class Manager:
     async def _progress_loop(self) -> None:
         while True:
             await asyncio.sleep(self._progress_interval)
+            if self._torrent is not None and self._torrent.seeding:
+                for download_id in self._torrent.finished_seeding(self.store.get_settings()):
+                    self._stop_seeding(download_id)
             if self._progress and self.on_progress_batch:
                 batch = [(i, done, size if size is not None else -1, speed)
                          for i, (done, size, speed) in self._progress.items()]

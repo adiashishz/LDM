@@ -14,6 +14,26 @@ QUALITIES = [("best", "Best available"), (2160, "2160p (4K)"), (1440, "1440p"), 
              (480, "480p"), (360, "360p"), ("audio", "Audio only")]
 CONTAINERS = [("mp4", "MP4 (plays everywhere)"), ("mkv", "MKV (keeps every codec)")]
 
+ENCRYPTION = [("prefer", "Prefer encrypted connections"), ("require", "Encrypted connections only"),
+              ("off", "No encryption")]
+TORRENT_SWITCHES = {
+    "torrent_dht": ("DHT", "Find peers without trackers"),
+    "torrent_pex": ("Peer exchange", "Learn about peers from other peers"),
+    "torrent_lsd": ("Local peer discovery", "Find peers on your local network"),
+    "torrent_upnp": ("Port forwarding", "Open the port on your router with UPnP / NAT-PMP"),
+    "torrent_utp": ("µTP", "Low-latency transport that yields to other traffic"),
+    "torrent_fetch_metadata": ("Get file list before adding", "For magnet links"),
+    "torrent_sequential": ("Download in order by default", "Lets you play videos while they download"),
+    "torrent_seed": ("Seed after finishing", "Keep uploading to other peers"),
+}
+TORRENT_SPINS = {  # key -> (title, subtitle, min, max, step, digits)
+    "torrent_listen_port": ("Listening port", "0 picks a random port", 0, 65535, 1, 0),
+    "torrent_max_peers": ("Peers per torrent", "", 1, 500, 1, 0),
+    "torrent_max_connections": ("Connections in total", "", 1, 2000, 1, 0),
+    "torrent_seed_ratio": ("Stop seeding at ratio", "0 means no limit", 0, 100, 0.1, 1),
+    "torrent_seed_minutes": ("Stop seeding after (minutes)", "0 means no limit", 0, 100000, 10, 0),
+}
+
 # setting key -> (title, subtitle, minimum, maximum)
 SPIN_SETTINGS = {
     "max_parallel": ("Parallel downloads", "How many files download at the same time", 1, 20),
@@ -79,7 +99,44 @@ class PreferencesDialog(Adw.PreferencesDialog):
         hosts.add(self.rules)
         self.rule_rows: list[Gtk.Widget] = []
 
+        torrents = Adw.PreferencesPage(title="Torrents", icon_name="network-workgroup-symbolic")
+        network_group = Adw.PreferencesGroup(title="Network")
+        seeding_group = Adw.PreferencesGroup(title="Seeding")
+        behaviour = Adw.PreferencesGroup(title="Adding torrents")
+        self.torrent_rows: dict[str, Gtk.Widget] = {}
+        for key, (title, subtitle) in TORRENT_SWITCHES.items():
+            row = Adw.SwitchRow(title=title, subtitle=subtitle, sensitive=False)
+            group = (seeding_group if key == "torrent_seed" else
+                     behaviour if key in ("torrent_fetch_metadata", "torrent_sequential") else network_group)
+            group.add(row)
+            self.torrent_rows[key] = row
+        for key, (title, subtitle, low, high, step, digits) in TORRENT_SPINS.items():
+            row = Adw.SpinRow.new_with_range(low, high, step)
+            row.set_digits(digits)
+            row.set_title(title)
+            row.set_subtitle(subtitle)
+            row.set_sensitive(False)
+            (seeding_group if "seed" in key else network_group).add(row)
+            self.torrent_rows[key] = row
+        self.encryption = Adw.ComboRow(title="Encryption", sensitive=False,
+                                       model=Gtk.StringList.new([label for _, label in ENCRYPTION]))
+        network_group.add(self.encryption)
+        self.upload = Adw.EntryRow(title="Upload speed limit (e.g. 500K, 0 = unlimited)", show_apply_button=True)
+        self.upload.connect("apply", self._apply_upload)
+        seeding_group.add(self.upload)
+        self.trackers = Adw.EntryRow(title="Extra trackers for every torrent (separate with spaces)",
+                                     show_apply_button=True)
+        self.trackers.connect("apply", lambda row: self._save(
+            {"torrent_trackers": "\n".join(row.get_text().split())}))
+        self.ip_filter = Adw.EntryRow(title="IP block list file (P2P or DAT, empty = none)", show_apply_button=True)
+        self.ip_filter.connect("apply", lambda row: self._save({"torrent_ip_filter": row.get_text().strip()}))
+        behaviour.add(self.trackers)
+        network_group.add(self.ip_filter)
+        for group in (behaviour, network_group, seeding_group):
+            torrents.add(group)
+
         self.add(general)
+        self.add(torrents)
         self.add(hosts)
         client.get_settings(self._loaded)
         self._reload_rules()
@@ -108,10 +165,38 @@ class PreferencesDialog(Adw.PreferencesDialog):
                                         or "None found — YouTube needs deno, node or bun")
         for row in (self.quality, self.container, self.subtitles, self.runtime, self.runtime_found):
             row.set_sensitive(True)
+        self._load_torrent_settings(settings)
         self.quality.connect("notify::selected",
                              lambda r, _p: self._save({"media_quality": QUALITIES[r.get_selected()][0]}))
         self.container.connect("notify::selected",
                                lambda r, _p: self._save({"media_container": CONTAINERS[r.get_selected()][0]}))
+
+    def _load_torrent_settings(self, settings: dict[str, Any]) -> None:
+        for key, row in self.torrent_rows.items():
+            if isinstance(row, Adw.SwitchRow):
+                row.set_active(settings[key])
+                row.connect("notify::active", lambda r, _p, k=key: self._save({k: r.get_active()}))
+            else:
+                row.set_value(settings[key])
+                is_float = isinstance(settings[key], float)
+                row.connect("notify::value", lambda r, _p, k=key, f=is_float:
+                            self._save({k: float(r.get_value()) if f else int(r.get_value())}))
+            row.set_sensitive(True)
+        self.encryption.set_selected(next((i for i, (v, _) in enumerate(ENCRYPTION)
+                                           if v == settings["torrent_encryption"]), 0))
+        self.encryption.set_sensitive(True)
+        self.encryption.connect("notify::selected", lambda r, _p: self._save(
+            {"torrent_encryption": ENCRYPTION[r.get_selected()][0]}))
+        self.upload.set_text(limit_text(settings["torrent_upload_limit"]))
+        self.trackers.set_text(" ".join(settings["torrent_trackers"].split()))
+        self.ip_filter.set_text(settings["torrent_ip_filter"])
+
+    def _apply_upload(self, row: Adw.EntryRow) -> None:
+        try:
+            self._save({"torrent_upload_limit": parse_rate(row.get_text() or "0")})
+            row.remove_css_class("error")
+        except ValueError:
+            row.add_css_class("error")
 
     def _save(self, values: dict[str, Any]) -> None:
         self.client.set_settings(values, self._report)

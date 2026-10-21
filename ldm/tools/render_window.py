@@ -60,6 +60,23 @@ def steps(app: Application):
     window.filters.set_active_name("finished")
     yield 0.5
     save(window, "5-finished")
+    torrent_url = os.environ.get("RENDER_TORRENT_URL")
+    if torrent_url:
+        window.filters.set_active_name("all")
+        window.open_add_dialog(torrent_url, kind="torrent")
+        yield 2.0
+        save(window, "6-torrent-add")
+        close_dialog(window)
+        store = app.downloads.store
+        item = next((store.get_item(i) for i in range(store.get_n_items())
+                     if store.get_item(i).kind == "torrent"), None)
+        if item is not None:
+            window.show_torrent_details(item)
+            yield 2.5
+            save(window, "7-torrent-details")
+            close_dialog(window)
+            yield 0.3
+            save(window, "8-list-with-torrent")
     app.quit()
 
 

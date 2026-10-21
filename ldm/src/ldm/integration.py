@@ -20,6 +20,7 @@ FIREFOX_EXTENSION_ID = "ldm@ldm.local"
 CHROME_EXTENSION_ID = "nfmeebgoiidgaakcafhniggapnipjhgp"  # derived from "key" in extension/manifest.base.json
 GUI_ID = "io.github.ldm.Gui"
 BRAVE_FLATPAK = "com.brave.Browser"
+TORRENT_TYPES = ["x-scheme-handler/magnet", "application/x-bittorrent"]
 FLATPAK_TALK = [f"--talk-name={BUS_NAME}", f"--talk-name={GUI_ID}"]
 
 
@@ -78,7 +79,8 @@ def activation_files(data: Path) -> dict[Path, str]:
         data / "applications" / f"{GUI_ID}.desktop": (
             "[Desktop Entry]\nType=Application\nName=Downloads (ldm)\nGenericName=Download Manager\n"
             f"Comment=Multi-part download manager\nExec={gui} %U\nIcon=folder-download\nTerminal=false\n"
-            "Categories=Network;FileTransfer;GTK;\nStartupNotify=true\nDBusActivatable=true\n"),
+            "Categories=Network;FileTransfer;GTK;\nStartupNotify=true\nDBusActivatable=true\n"
+            f"MimeType={';'.join(TORRENT_TYPES)};\n"),
     }
 
 
@@ -110,6 +112,7 @@ def install(home: Path, selected: list[str] | None = None, dry_run: bool = False
             path.write_text(content)
     if not dry_run:
         _reload_bus_config()
+        _set_default_handler(home, log)
     for browser in chosen:
         if browser.flatpak:
             command = ["flatpak", "override", "--user", *FLATPAK_TALK, browser.flatpak]
@@ -130,10 +133,42 @@ def uninstall(home: Path, selected: list[str] | None = None, log: Callable[[str]
             path.unlink()
             log(f"removed {path}")
     _reload_bus_config()
+    _remove_default_handler(home, log)
     for browser in chosen:
         if browser.flatpak:
             no_talk = [arg.replace("--talk-name", "--no-talk-name") for arg in FLATPAK_TALK]
             log(f"to revoke {browser.name}'s D-Bus access: flatpak override --user {' '.join(no_talk)} {browser.flatpak}")
+
+
+def _set_default_handler(home: Path, log: Callable[[str], None]) -> None:
+    """Make ldm open magnet: links and .torrent files (user decision for M6)."""
+    data = Path(os.environ.get("XDG_DATA_HOME") or home / ".local/share")
+    if shutil.which("update-desktop-database"):
+        subprocess.run(["update-desktop-database", str(data / "applications")], capture_output=True, timeout=30)
+    if not shutil.which("xdg-mime"):
+        log("xdg-mime not found: set ldm as the magnet/.torrent handler in your desktop settings")
+        return
+    # xdg-mime reports success even when it can't create mimeapps.list in a missing folder.
+    (Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")).mkdir(parents=True, exist_ok=True)
+    subprocess.run(["xdg-mime", "default", f"{GUI_ID}.desktop", *TORRENT_TYPES], capture_output=True, timeout=30)
+    set_ok = [t for t in TORRENT_TYPES if subprocess.run(["xdg-mime", "query", "default", t], capture_output=True,
+                                                          text=True, timeout=30).stdout.strip() == f"{GUI_ID}.desktop"]
+    if set_ok:
+        log(f"ldm now opens: {', '.join(set_ok)}")
+    if len(set_ok) < len(TORRENT_TYPES):
+        log(f"could not make ldm the default for: {', '.join(t for t in TORRENT_TYPES if t not in set_ok)}")
+
+
+def _remove_default_handler(home: Path, log: Callable[[str], None]) -> None:
+    """Drop ldm from mimeapps.list defaults (xdg-mime has no 'unset')."""
+    config = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config") / "mimeapps.list"
+    if not config.exists():
+        return
+    lines = config.read_text().splitlines()
+    kept = [line for line in lines if not (line.split("=")[0] in TORRENT_TYPES and f"{GUI_ID}.desktop" in line)]
+    if kept != lines:
+        config.write_text("\n".join(kept) + "\n")
+        log(f"removed ldm as default for: {', '.join(TORRENT_TYPES)}")
 
 
 def _reload_bus_config() -> None:

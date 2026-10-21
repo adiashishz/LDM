@@ -155,7 +155,9 @@ async def client(args) -> int:
                        "start": Variant("b", not args.paused),
                        "kind": Variant("s", "media") if args.media or args.quality else None,
                        "format": Variant("s", media_selector(args.quality)) if args.quality else None,
-                       "format_label": Variant("s", args.quality) if args.quality else None}
+                       "format_label": Variant("s", args.quality) if args.quality else None,
+                       "sequential": Variant("b", True) if args.sequential else None,
+                       "priorities": Variant("ax", file_priorities(args.files)) if args.files else None}
             download_id = await iface.call_add(args.url, {k: v for k, v in options.items() if v is not None})
             print(f"download {download_id} added")
             if args.wait:
@@ -198,11 +200,25 @@ async def client(args) -> int:
             for r in map(values, await iface.call_list_host_rules()):
                 scope = "" if r["include_subdomains"] else " (exact)"
                 print(f"{r['host']}{scope}: max_connections={r['max_connections']} max_downloads={r['max_downloads']}")
+        elif args.command == "torrent-files":
+            source = args.source if "://" in args.source or args.source.startswith("magnet:") \
+                else Path(args.source).resolve().as_uri()
+            info = values(await iface.call_probe_torrent(source, {}))
+            print(f"{info.get('name', '')}  ({human(info['size']) if 'size' in info else 'size unknown'})")
+            for f in info.get("files", []):
+                f = values(f)
+                print(f"{f['index']:>5}  {human(f['size']):>10}  {f['path']}")
         elif args.command == "watch":
             await watch(iface)
     finally:
         bus.disconnect()
     return 0
+
+
+def file_priorities(text: str) -> list[int]:
+    """'0,2' -> priorities for files 0..max: chosen ones 1, others 0 (the daemon pads the rest)."""
+    chosen = {int(i) for i in text.split(",") if i.strip()}
+    return [1 if i in chosen else 0 for i in range(max(chosen) + 1)]
 
 
 def media_selector(quality: str) -> str:
@@ -258,6 +274,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--media", action="store_true",
                    help="download a video/stream page with yt-dlp (YouTube, HLS/DASH playlists, …)")
     p.add_argument("--quality", help="media quality: best, audio, or a maximum height such as 720")
+    p.add_argument("--files", help="torrent: only these file indexes, e.g. 0,2 (see `ldm torrent-files`)")
+    p.add_argument("--sequential", action="store_true", help="torrent: download pieces in order")
     p.add_argument("--wait", action="store_true", help="show progress until it finishes")
 
     sub.add_parser("list", help="list downloads")
@@ -285,6 +303,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--exact", action="store_true", help="do not apply to subdomains")
     p.add_argument("--remove", action="store_true")
     sub.add_parser("host-rules", help="list host rules")
+    p = sub.add_parser("torrent-files", help="list the files in a magnet link or .torrent (index, size, path)")
+    p.add_argument("source")
     sub.add_parser("watch", help="show live progress")
     sub.add_parser("daemon", help="run the download service")
     p = sub.add_parser("install-browser-integration",

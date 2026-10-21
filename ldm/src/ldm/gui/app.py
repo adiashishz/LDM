@@ -55,15 +55,19 @@ class Application(Adw.Application):
                 self.set_accels_for_action(f"app.{name}", accels)
         self.set_accels_for_action("window.close", ["<Control>w"])
         self._on_connection()
+        GLib.timeout_add_seconds(2, self._refresh_torrents)
 
     def do_activate(self) -> None:
         self.window().present()
 
     def do_open(self, files, n_files, hint) -> None:
+        """Links and files handed over by the desktop: http(s) URLs, magnet: links, .torrent files."""
         window = self.window()
         window.present()
         for file in files:
-            window.open_add_dialog(file.get_uri())
+            uri = file.get_uri()
+            torrent = uri.startswith("magnet:") or uri.lower().endswith(".torrent")
+            window.open_add_dialog(uri, kind="torrent" if torrent else "")
 
     def window(self) -> MainWindow:
         return self.get_active_window() or MainWindow(self)
@@ -99,6 +103,16 @@ class Application(Adw.Application):
             self._pending_requests.remove(request)
             self.window().toast("Could not reach the download service for the browser's download")
         return GLib.SOURCE_REMOVE
+
+    def _refresh_torrents(self) -> bool:
+        """Peers / upload speed / ratio for active torrent rows (not part of the Progress signal)."""
+        if self.client.connected:
+            store = self.downloads.store
+            for i in range(store.get_n_items()):
+                item = store.get_item(i)
+                if item.kind == "torrent" and item.state in ("running", "seeding"):
+                    self.refresh(item.id)
+        return GLib.SOURCE_CONTINUE
 
     def refresh(self, download_id: int) -> None:
         self.client.get(download_id, lambda row, error: row is not None and self.downloads.upsert(row))
