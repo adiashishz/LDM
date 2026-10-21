@@ -84,7 +84,7 @@ cd ldm
 
 %files -f %{pyproject_files}
 %license LICENSE
-%doc README.md ldm/README.md
+%doc README.md
 %{_bindir}/ldm
 %{_bindir}/ldm-gui
 %{_datadir}/applications/io.github.adiashishz.LDM.desktop
