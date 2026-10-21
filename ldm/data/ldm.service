@@ -1,0 +1,13 @@
+# systemd user unit. Install to ~/.config/systemd/user/ (adjust ExecStart), then:
+#   systemctl --user daemon-reload && systemctl --user enable --now ldm.service
+[Unit]
+Description=ldm download manager
+
+[Service]
+Type=dbus
+BusName=io.github.ldm
+ExecStart=/usr/bin/ldm daemon
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

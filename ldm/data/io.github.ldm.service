@@ -1,0 +1,6 @@
+# D-Bus activation: lets clients start the daemon on demand.
+# Install to ~/.local/share/dbus-1/services/ (adjust Exec to where `ldm` is installed).
+[D-BUS Service]
+Name=io.github.ldm
+Exec=/usr/bin/ldm daemon
+SystemdService=ldm.service

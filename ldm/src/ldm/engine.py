@@ -16,11 +16,12 @@ import time
 from dataclasses import dataclass
 from email.message import Message
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Sequence
 from urllib.parse import unquote, urlsplit
 
 import httpx
 
+from .ratelimit import TokenBucket
 from .segments import Part, split_even, steal
 from .store import DownloadRow, Store
 
@@ -85,6 +86,16 @@ def unique_path(path: Path) -> Path:
     return candidate
 
 
+def new_client(headers: dict[str, str] | None = None, max_connections: int = 2) -> httpx.AsyncClient:
+    """HTTP client with ldm's defaults; `headers` (Referer, Cookie, …) override them."""
+    return httpx.AsyncClient(
+        follow_redirects=True,
+        headers={"User-Agent": DEFAULT_USER_AGENT, "Accept-Encoding": "identity", **(headers or {})},
+        timeout=httpx.Timeout(30.0, connect=15.0),
+        limits=httpx.Limits(max_connections=max_connections),
+    )
+
+
 def _check_status(r: httpx.Response) -> None:
     if r.status_code in (401, 403, 404, 410):
         raise LinkExpired(f"HTTP {r.status_code}")
@@ -116,27 +127,32 @@ class Downloader:
 
     def __init__(self, store: Store, download_id: int, *, min_part: int = 1 << 20,
                  chunk_size: int = 1 << 16, persist_interval: float = 2.0, max_retries: int = 5,
-                 retry_base_delay: float = 0.5, on_progress: ProgressCallback | None = None):
+                 retry_base_delay: float = 0.5, on_progress: ProgressCallback | None = None,
+                 limiters: Sequence[TokenBucket] = (), connections: int | None = None,
+                 progress_interval: float = 0.5):
+        """`limiters` throttle every received chunk; `connections` caps the download's own setting."""
         self.store = store
         self.id = download_id
+        self.limiters = limiters
+        self.max_connections = connections
         self.min_part = min_part
         self.chunk_size = chunk_size
         self.persist_interval = persist_interval
         self.max_retries = max_retries
         self.retry_base_delay = retry_base_delay
         self.on_progress = on_progress
+        self.progress_interval = progress_interval
         self.parts: list[Part] = []
+        self._refresh_lock = asyncio.Lock()
+
+    def _connections(self, d: DownloadRow) -> int:
+        return min(d.connections, self.max_connections or d.connections)
 
     async def run(self) -> Path:
         d = self.store.get(self.id)
         self.store.set_state(self.id, "running")
-        headers = {"User-Agent": DEFAULT_USER_AGENT, "Accept-Encoding": "identity", **d.headers}
         try:
-            async with httpx.AsyncClient(
-                follow_redirects=True, headers=headers,
-                timeout=httpx.Timeout(30.0, connect=15.0),
-                limits=httpx.Limits(max_connections=d.connections + 1),
-            ) as client:
+            async with new_client(d.headers, self._connections(d) + 1) as client:
                 self.client = client
                 return await self._run(d)
         except asyncio.CancelledError:
@@ -194,11 +210,11 @@ class Downloader:
         if d.size is None:
             return [Part(0, UNKNOWN_LAST)]
         if d.resumable:
-            return split_even(d.size, d.connections, self.min_part)
+            return split_even(d.size, self._connections(d), self.min_part)
         return [Part(0, d.size - 1)]
 
     async def _transfer(self) -> None:
-        workers = self.d.connections if self.d.resumable else 1
+        workers = self._connections(self.d) if self.d.resumable else 1
         background = [asyncio.create_task(self._persist_loop())]
         if self.on_progress:
             background.append(asyncio.create_task(self._progress_loop()))
@@ -232,10 +248,19 @@ class Downloader:
 
     async def _fetch(self, part: Part) -> None:
         attempt = 0
+        refreshed = False
         while not part.complete:
             before = part.done
+            url = self.d.final_url
             try:
                 await self._stream(part)
+            except LinkExpired:
+                # The stored redirect target (often a signed CDN URL) may have expired while the
+                # original URL is still valid: resolve it again once.
+                if refreshed or not url or url == self.d.url:
+                    raise
+                refreshed = True
+                await self._refresh_final_url(url)
             except (httpx.TransportError, _Retryable) as e:
                 attempt = 1 if part.done > before else attempt + 1
                 if attempt > self.max_retries:
@@ -270,10 +295,21 @@ class Downloader:
                 part.done += len(data)
                 if len(data) < len(chunk):
                     return
+                for limiter in self.limiters:
+                    await limiter.consume(len(data))
         if part.last == UNKNOWN_LAST:
             part.last = part.pos - 1  # unknown size: EOF is the end
         elif not part.complete:
             raise _Retryable("connection closed before the range was complete")
+
+    async def _refresh_final_url(self, failed_url: str) -> None:
+        async with self._refresh_lock:
+            if self.d.final_url != failed_url:
+                return  # another connection already refreshed it
+            p = await self._retrying(lambda: probe(self.client, self.d.url))
+            if p.size != self.d.size:
+                raise LinkExpired("the original URL now points to a different file")
+            self.d = self.store.update(self.id, final_url=p.final_url)
 
     def _validator(self) -> str | None:
         """If-Range needs a strong ETag; fall back to Last-Modified."""
@@ -308,7 +344,7 @@ class Downloader:
     async def _progress_loop(self) -> None:
         last_done, last_time = self.done, time.monotonic()
         while True:
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(self.progress_interval)
             now, done = time.monotonic(), self.done
             self.on_progress(done, self.d.size, (done - last_done) / (now - last_time))
             last_done, last_time = done, now

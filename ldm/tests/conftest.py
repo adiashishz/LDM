@@ -25,7 +25,11 @@ class ServerConfig:
     slow_delay: float = 0.0         # ... sleep this much extra per chunk
     drops: int = 0                  # number of responses to cut short
     drop_after: int = 0             # bytes sent before cutting a response
+    redirects: dict[str, str] = field(default_factory=dict)  # path -> Location (302)
+    deny: set[str] = field(default_factory=set)              # paths answered with 403
     bytes_sent: int = 0
+    active_ranges: int = 0          # bounded range requests being served right now
+    max_active_ranges: int = 0
     requests: list[dict[str, str]] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -40,8 +44,15 @@ class _Handler(BaseHTTPRequestHandler):
         cfg: ServerConfig = self.server.cfg
         with cfg.lock:
             cfg.requests.append(dict(self.headers))
-        if cfg.status is not None:
-            self.send_response(cfg.status)
+        if self.path in cfg.redirects:
+            self.send_response(302)
+            self.send_header("Location", cfg.redirects[self.path])
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        status = 403 if self.path in cfg.deny else cfg.status
+        if status is not None:
+            self.send_response(status)
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
@@ -79,10 +90,22 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         cut = None
+        bounded = bool(match and match.group(2))  # part request, not the open-ended probe
         with cfg.lock:
             if cfg.drops > 0 and length > cfg.drop_after:
                 cfg.drops -= 1
                 cut = cfg.drop_after
+            if bounded:
+                cfg.active_ranges += 1
+                cfg.max_active_ranges = max(cfg.max_active_ranges, cfg.active_ranges)
+        try:
+            self._send_body(cfg, data, start, length, cut)
+        finally:
+            if bounded:
+                with cfg.lock:
+                    cfg.active_ranges -= 1
+
+    def _send_body(self, cfg: ServerConfig, data: bytes, start: int, length: int, cut: int | None) -> None:
         sent = 0
         try:
             while sent < length:
@@ -118,7 +141,8 @@ def http_server():
         server.cfg = cfg
         threading.Thread(target=server.serve_forever, daemon=True).start()
         servers.append(server)
-        return cfg, f"http://127.0.0.1:{server.server_port}/files/test.bin"
+        cfg.base = f"http://127.0.0.1:{server.server_port}"
+        return cfg, f"{cfg.base}/files/test.bin"
 
     yield start
     for server in servers:

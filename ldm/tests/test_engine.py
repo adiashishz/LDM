@@ -1,9 +1,11 @@
 import asyncio
 import random
+import time
 
 import pytest
 
 from ldm.engine import Downloader, LinkExpired, RemoteChanged
+from ldm.ratelimit import TokenBucket
 from ldm.store import Store
 
 KIB = 1024
@@ -134,3 +136,36 @@ def test_content_disposition_name_and_no_overwrite(tmp_path, http_server):
     path = download(store, did)
     assert path.name == "report (1).pdf"
     assert (tmp_path / "dl" / "report.pdf").read_bytes() == b"existing"
+
+
+def test_speed_limit(tmp_path, http_server):
+    data = payload(1_000_000)
+    cfg, url = http_server(data=data)
+    store, did = new_download(tmp_path, url)
+    start = time.monotonic()
+    path = download(store, did, limiters=[TokenBucket(2_000_000)])
+    assert time.monotonic() - start >= 0.4
+    assert path.read_bytes() == data
+
+
+def test_connections_cap(tmp_path, http_server):
+    data = payload(1_000_000)
+    cfg, url = http_server(data=data, delay=0.002)
+    store, did = new_download(tmp_path, url, connections=8)
+    assert download(store, did, connections=2).read_bytes() == data
+    assert cfg.max_active_ranges <= 2
+
+
+def test_expired_redirect_target_is_resolved_again(tmp_path, http_server):
+    data = payload(2_000_000)
+    cfg, _ = http_server(data=data, delay=0.01)
+    cfg.redirects["/start"] = "/files/test.bin?token=1"
+    store, did = new_download(tmp_path, f"{cfg.base}/start")
+    pause_after(store, did, 0.15)
+    assert store.get(did).final_url.endswith("token=1")
+
+    cfg.delay = 0.0
+    cfg.deny.add("/files/test.bin?token=1")  # signed link expired
+    cfg.redirects["/start"] = "/files/test.bin?token=2"
+    assert download(store, did).read_bytes() == data
+    assert store.get(did).final_url.endswith("token=2")

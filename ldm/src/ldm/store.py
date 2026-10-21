@@ -6,14 +6,19 @@ The schema is meant to stay stable across the Python v1 and the planned Rust v2.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
 
 from .segments import Part
 
-SCHEMA = """
+# Applied in order; PRAGMA user_version records how many have run.
+MIGRATIONS = [
+    """
 CREATE TABLE IF NOT EXISTS downloads (
     id            INTEGER PRIMARY KEY,
     url           TEXT    NOT NULL,
@@ -40,8 +45,43 @@ CREATE TABLE IF NOT EXISTS parts (
     done        INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (download_id, idx)
 );
-PRAGMA user_version = 1;
-"""
+""",
+    """
+ALTER TABLE downloads ADD COLUMN position INTEGER;
+ALTER TABLE downloads ADD COLUMN speed_limit INTEGER NOT NULL DEFAULT 0;
+UPDATE downloads SET position = id;
+CREATE TABLE settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+CREATE TABLE host_rules (
+    host               TEXT PRIMARY KEY,
+    max_connections    INTEGER NOT NULL DEFAULT 0,
+    max_downloads      INTEGER NOT NULL DEFAULT 0,
+    include_subdomains INTEGER NOT NULL DEFAULT 1
+);
+""",
+]
+
+
+def default_download_dir() -> str:
+    return os.environ.get("XDG_DOWNLOAD_DIR") or str(Path.home() / "Downloads")
+
+
+def default_db_path(name: str = "ldm.db") -> Path:
+    data_home = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share"
+    return Path(data_home) / "ldm" / name
+
+
+# Values stored as JSON in `settings`; missing keys fall back to these.
+DEFAULT_SETTINGS: dict[str, Any] = {
+    "max_parallel": 3,
+    "default_connections": 8,
+    "speed_limit": 0,        # bytes/s for all downloads together, 0 = unlimited
+    "retry_count": 3,        # automatic re-queues after an error
+    "retry_interval": 30,    # seconds before an automatic re-queue
+    "download_dir": None,    # None = XDG download dir
+}
 
 
 @dataclass
@@ -62,6 +102,12 @@ class DownloadRow:
     added_at: float
     finished_at: float | None
     error: str | None
+    position: int
+    speed_limit: int
+
+    @property
+    def host(self) -> str:
+        return (urlsplit(self.url).hostname or "").lower()
 
     @property
     def dest(self) -> Path:
@@ -80,18 +126,83 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA foreign_keys=ON")
-        self.db.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        version = self.db.execute("PRAGMA user_version").fetchone()[0]
+        for number, script in enumerate(MIGRATIONS[version:], start=version + 1):
+            self.db.executescript(f"BEGIN;\n{script}\nPRAGMA user_version = {number};\nCOMMIT;")
 
     def add(self, url: str, dir: Path | str, *, name: str | None = None,
-            headers: dict[str, str] | None = None, connections: int = 8) -> int:
+            headers: dict[str, str] | None = None, connections: int = 8,
+            state: str = "queued") -> int:
         with self.db:
             cur = self.db.execute(
                 "INSERT INTO downloads (url, state, dir, name, connections, headers_json, added_at)"
-                " VALUES (?, 'queued', ?, ?, ?, ?, ?)",
-                (url, str(Path(dir).expanduser().resolve()), name, connections,
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (url, state, str(Path(dir).expanduser().resolve()), name, connections,
                  json.dumps(headers or {}), time.time()),
             )
+            self.db.execute("UPDATE downloads SET position = id WHERE id = ?", (cur.lastrowid,))
         return cur.lastrowid
+
+    def delete(self, download_id: int) -> None:
+        with self.db:
+            self.db.execute("DELETE FROM downloads WHERE id = ?", (download_id,))
+
+    def move(self, download_id: int, position: int) -> None:
+        self.update(download_id, position=position)
+
+    def queued(self) -> list[DownloadRow]:
+        rows = self.db.execute("SELECT * FROM downloads WHERE state = 'queued' ORDER BY position, id")
+        return [_to_row(r) for r in rows]
+
+    def requeue_interrupted(self) -> list[int]:
+        """Downloads left `running` by a crash or kill go back to the queue."""
+        ids = [r[0] for r in self.db.execute("SELECT id FROM downloads WHERE state = 'running'")]
+        with self.db:
+            self.db.execute("UPDATE downloads SET state = 'queued' WHERE state = 'running'")
+        return ids
+
+    def get_settings(self) -> dict[str, Any]:
+        settings = dict(DEFAULT_SETTINGS)
+        settings.update((k, json.loads(v)) for k, v in self.db.execute("SELECT key, value FROM settings"))
+        if settings["download_dir"] is None:
+            settings["download_dir"] = default_download_dir()
+        return settings
+
+    def set_setting(self, key: str, value: Any) -> None:
+        if key not in DEFAULT_SETTINGS:
+            raise KeyError(key)
+        with self.db:
+            self.db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                            (key, json.dumps(value)))
+
+    def set_host_rule(self, host: str, *, max_connections: int = 0, max_downloads: int = 0,
+                      include_subdomains: bool = True) -> None:
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO host_rules (host, max_connections, max_downloads, include_subdomains)"
+                " VALUES (?, ?, ?, ?)",
+                (host.lower(), max_connections, max_downloads, int(include_subdomains)),
+            )
+
+    def remove_host_rule(self, host: str) -> None:
+        with self.db:
+            self.db.execute("DELETE FROM host_rules WHERE host = ?", (host.lower(),))
+
+    def list_host_rules(self) -> list[HostRule]:
+        return [_to_rule(r) for r in self.db.execute("SELECT * FROM host_rules ORDER BY host")]
+
+    def host_rule_for(self, host: str) -> HostRule | None:
+        """Exact host first, then parent domains whose rule includes subdomains."""
+        labels = host.lower().split(".")
+        for i in range(len(labels)):
+            candidate = ".".join(labels[i:])
+            row = self.db.execute("SELECT * FROM host_rules WHERE host = ?", (candidate,)).fetchone()
+            if row and (i == 0 or row["include_subdomains"]):
+                return _to_rule(row)
+        return None
 
     def get(self, download_id: int) -> DownloadRow:
         row = self.db.execute("SELECT * FROM downloads WHERE id = ?", (download_id,)).fetchone()
@@ -139,5 +250,17 @@ def _to_row(r: sqlite3.Row) -> DownloadRow:
         dir=Path(r["dir"]), name=r["name"], size=r["size"], resumable=bool(r["resumable"]),
         connections=r["connections"], headers=json.loads(r["headers_json"]), etag=r["etag"],
         last_modified=r["last_modified"], added_at=r["added_at"], finished_at=r["finished_at"],
-        error=r["error"],
+        error=r["error"], position=r["position"], speed_limit=r["speed_limit"],
     )
+
+
+@dataclass
+class HostRule:
+    host: str
+    max_connections: int  # 0 = no limit
+    max_downloads: int    # 0 = no limit
+    include_subdomains: bool
+
+
+def _to_rule(r: sqlite3.Row) -> HostRule:
+    return HostRule(r["host"], r["max_connections"], r["max_downloads"], bool(r["include_subdomains"]))
