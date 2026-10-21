@@ -5,9 +5,8 @@ Name:           ldm
 Version:        0.1.0
 Release:        1%{?dist}
 Summary:        Download manager for files, videos and torrents
-# TODO(owner): choose a license, then set it here and add <project_license> to the metainfo.
-License:        LicenseRef-Not-Yet-Chosen
-# TODO(owner): add URL: once the project has a public home.
+License:        MIT
+URL:            https://github.com/adiashishz/LDM
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      noarch
 
@@ -79,7 +78,8 @@ cd ldm
 %systemd_user_preun ldm.service
 
 %files -f %{pyproject_files}
-%doc ldm/README.md
+%license LICENSE
+%doc README.md ldm/README.md
 %{_bindir}/ldm
 %{_bindir}/ldm-gui
 %{_datadir}/applications/io.github.adiashishz.LDM.desktop

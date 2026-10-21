@@ -1,6 +1,7 @@
 # LDM — Linux download manager (v1, Python)
 
-Command `ldm`, app ID `io.github.adiashishz.LDM`. Design: [../notes/10-linux-design.md](../notes/10-linux-design.md).
+Command `ldm`, app ID `io.github.adiashishz.LDM`. Overview and installation: [../README.md](../README.md).
+This file lists what each milestone added and the command-line examples.
 
 - **M1:** engine — multi-part HTTP(S) into one pre-allocated file, dynamic segmentation, fsync-safe
   resume state in SQLite, retries, changed-file and expired-link detection.

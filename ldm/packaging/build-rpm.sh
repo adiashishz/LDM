@@ -7,8 +7,9 @@ SPEC=$REPO/ldm/packaging/ldm.spec
 VERSION=$(awk '/^Version:/ {print $2}' "$SPEC")
 TOP=${RPM_TOPDIR:-$HOME/rpmbuild}
 mkdir -p "$TOP"/{SOURCES,SPECS,SRPMS,RPMS,BUILD}
-# Only what the package needs: the Python project and the extension (not apk/, notes/, tools/).
-git -C "$REPO" archive --format=tar.gz --prefix="ldm-$VERSION/" -o "$TOP/SOURCES/ldm-$VERSION.tar.gz" HEAD ldm extension
+# The Python project, the extension and the license.
+git -C "$REPO" archive --format=tar.gz --prefix="ldm-$VERSION/" -o "$TOP/SOURCES/ldm-$VERSION.tar.gz" HEAD \
+    ldm extension LICENSE README.md
 cp "$SPEC" "$TOP/SPECS/"
 # Build dependencies are generated from pyproject.toml; rpmbuild lists any that are missing.
 rpmbuild --define "_topdir $TOP" -ba "$TOP/SPECS/ldm.spec"

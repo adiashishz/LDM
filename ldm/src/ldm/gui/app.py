@@ -158,9 +158,12 @@ class Application(Adw.Application):
         dialog.present(self.window())
 
     def _about(self, *_) -> None:
-        Adw.AboutDialog(application_name="LDM", application_icon=APP_ID,
+        Adw.AboutDialog(application_name="LDM", application_icon=APP_ID, developer_name="Aditya Ashish",
                         version=__version__, comments="Download manager for Linux: files, videos and torrents",
-                        developers=["LDM contributors"]).present(self.window())
+                        website="https://github.com/adiashishz/LDM",
+                        issue_url="https://github.com/adiashishz/LDM/issues",
+                        license_type=Gtk.License.MIT_X11,
+                        developers=["Aditya Ashish"]).present(self.window())
 
 
 def main() -> int:

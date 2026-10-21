@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "LDM — Download with LDM",
   "short_name": "LDM",
+  "homepage_url": "https://github.com/adiashishz/LDM",
   "version": "0.1.0",
   "description": "Send downloads, videos and links from the browser to the LDM download manager.",
   "permissions": [
