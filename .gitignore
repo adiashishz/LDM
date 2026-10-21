@@ -1,0 +1,13 @@
+# Analysed APKs: large, untrusted binaries
+apk/
+# Downloaded tooling (JADX MCP JAR)
+tools/
+
+# Python
+ldm/.venv/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+
+# In-progress downloads
+*.part
