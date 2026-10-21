@@ -60,6 +60,8 @@ def test_install_and_uninstall(home):
     assert integration.SYSTEMCTL_CALLS == [("daemon-reload",), ("enable", "ldm.service")]
     assert "--gapplication-service" in (services / "io.github.adiashishz.LDM.service").read_text()
     assert (home / ".local/share/icons/hicolor/scalable/apps/io.github.adiashishz.LDM.svg").read_text().startswith("<svg")
+    assert "currentColor" in (home / ".local/share/icons/hicolor/symbolic/apps/io.github.adiashishz.LDM-symbolic.svg"
+                              ).read_text()
     assert "DBusActivatable=true" in (home / ".local/share/applications/io.github.adiashishz.LDM.desktop").read_text()
     assert any("flatpak override --user --talk-name=io.github.adiashishz.LDM.Service --talk-name=io.github.adiashishz.LDM com.brave.Browser"
                in line for line in lines)

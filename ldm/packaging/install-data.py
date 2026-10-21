@@ -17,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
 ICON = ROOT / "src/ldm/resources/io.github.adiashishz.LDM.svg"  # in the package: the per-user installer needs it
+SYMBOLIC_ICON = ROOT / "src/ldm/resources/io.github.adiashishz.LDM-symbolic.svg"
 sys.path.insert(0, str(ROOT / "src"))
 from ldm.integration import CHROME_EXTENSION_ID, FIREFOX_EXTENSION_ID, HOST_NAME  # noqa: E402
 
@@ -50,6 +51,7 @@ def main() -> None:
     install(DATA / "io.github.adiashishz.LDM.desktop", share / "applications/io.github.adiashishz.LDM.desktop")
     install(DATA / "io.github.adiashishz.LDM.metainfo.xml", share / "metainfo/io.github.adiashishz.LDM.metainfo.xml")
     install(ICON, share / "icons/hicolor/scalable/apps/io.github.adiashishz.LDM.svg")
+    install(SYMBOLIC_ICON, share / "icons/hicolor/symbolic/apps/io.github.adiashishz.LDM-symbolic.svg")
     install(None, share / "dbus-1/services/io.github.adiashishz.LDM.Service.service", with_prefix("io.github.adiashishz.LDM.Service.service"))
     install(None, share / "dbus-1/services/io.github.adiashishz.LDM.service", with_prefix("io.github.adiashishz.LDM.service"))
     install(None, prefix / "lib/systemd/user/ldm.service", with_prefix("ldm.service"))

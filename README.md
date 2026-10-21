@@ -1,3 +1,5 @@
+<p align="center"><img src="ldm/src/ldm/resources/io.github.adiashishz.LDM.svg" width="128" alt="LDM icon"></p>
+
 # LDM
 
 A download manager for Linux: fast multi-part downloads that survive restarts, videos and streams,

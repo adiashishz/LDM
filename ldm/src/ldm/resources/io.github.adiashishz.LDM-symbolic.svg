@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- Monochrome icon for trays and small UI: GTK recolors it, Plasma uses ColorScheme-Text. -->
+  <style id="current-color-scheme">.ColorScheme-Text { color: #2e3436; }</style>
+  <g class="ColorScheme-Text" fill="currentColor">
+    <path d="M8 1a1 1 0 0 1 1 1v6.59l2.3-2.3a1 1 0 1 1 1.4 1.42l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.42L7 8.6V2a1 1 0 0 1 1-1z"/>
+    <rect x="2" y="13" width="12" height="2" rx="1"/>
+  </g>
+</svg>

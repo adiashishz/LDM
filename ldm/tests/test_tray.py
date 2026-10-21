@@ -58,7 +58,7 @@ def test_tray_registers_shows_progress_and_runs_menu_items(bus_address):
             return (await call(ITEM_PATH, "org.freedesktop.DBus.Properties", "Get", "ss",
                                ["org.kde.StatusNotifierItem", name]))[0].value
 
-        assert await prop("Status") == "Passive" and await prop("IconName") == "io.github.adiashishz.LDM"
+        assert await prop("Status") == "Passive" and await prop("IconName") == "io.github.adiashishz.LDM-symbolic"
         progress[0] = (2, 300, 1000, 1024.0)
         tray.update()
         assert await prop("Status") == "Active"

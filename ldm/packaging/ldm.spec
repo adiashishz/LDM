@@ -92,6 +92,7 @@ cd ldm
 %{_datadir}/applications/io.github.adiashishz.LDM.desktop
 %{_metainfodir}/io.github.adiashishz.LDM.metainfo.xml
 %{_datadir}/icons/hicolor/scalable/apps/io.github.adiashishz.LDM.svg
+%{_datadir}/icons/hicolor/symbolic/apps/io.github.adiashishz.LDM-symbolic.svg
 %{_datadir}/dbus-1/services/io.github.adiashishz.LDM.Service.service
 %{_datadir}/dbus-1/services/io.github.adiashishz.LDM.service
 %{_userunitdir}/ldm.service
