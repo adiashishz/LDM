@@ -25,13 +25,26 @@ Downloads run in a small background service, so closing the window never stops t
   copied-link prompt, proxy (system, HTTP, SOCKS5) and DNS-over-HTTPS, site logins stored in the
   keyring, encrypted backups.
 
+## Install on Fedora 44 (RPM)
+
+Download `ldm-0.1.0-1.fc44.noarch.rpm` from the [latest release](https://github.com/adiashishz/LDM/releases/latest)
+and install it; dnf fetches the dependencies from Fedora:
+
+```sh
+sudo dnf install ./ldm-0.1.0-1.fc44.noarch.rpm
+ldm install-browser-integration   # once: magnet/.torrent links, Flatpak browsers such as Brave
+```
+
+Open **LDM** from the app menu, then add the browser extension (below). The package also ships the
+extension builds in `/usr/share/ldm/extension/`. A COPR repository with automatic updates is planned.
+
 ## Install from source (Fedora)
 
 LDM uses the distribution's GTK, so the virtual environment is built on the system Python:
 
 ```sh
-sudo dnf install python3-gobject gtk4 libadwaita ffmpeg-free python3-dbus-fast python3-dns \
-                 python3-socksio python3-secretstorage python3-cryptography
+sudo dnf install python3-gobject gobject-introspection gtk4 libadwaita ffmpeg-free python3-dbus-fast \
+                 python3-dns python3-socksio python3-secretstorage python3-cryptography
 sudo dnf install rb_libtorrent-python3   # for torrents (optional)
 
 git clone https://github.com/adiashishz/LDM.git && cd LDM/ldm
@@ -46,12 +59,16 @@ YouTube also needs a JavaScript runtime for yt-dlp (Node.js, Deno or Bun).
 
 ### Browser extension
 
+From a source checkout, build it first (with the RPM, use the zips in `/usr/share/ldm/extension/`):
+
 ```sh
 cd extension && python3 build.py            # dist/firefox and dist/chromium
 ```
 
 - **Firefox:** `about:debugging` → This Firefox → Load Temporary Add-on → `dist/firefox/manifest.json`
+  (or the `ldm-firefox-0.1.0.zip`). A signed version for permanent installs is planned.
 - **Chrome / Brave:** the extensions page → Developer mode → Load unpacked → `dist/chromium`
+  (or a folder with `ldm-chromium-0.1.0.zip` unzipped into it).
 - Brave as a Flatpak also needs D-Bus access (the installer prints the `flatpak override` command).
 
 ## Use
@@ -70,7 +87,8 @@ More commands are in [`ldm/README.md`](ldm/README.md).
 
 ## Packaging
 
-- `ldm/packaging/ldm.spec` and `build-rpm.sh`: RPM for Fedora (COPR steps in `COPR.md`).
+- `ldm/packaging/ldm.spec` and `build-rpm.sh`: RPM for Fedora (COPR steps in `COPR.md`); release builds
+  are attached to the [GitHub releases](https://github.com/adiashishz/LDM/releases).
 - `ldm/packaging/io.github.adiashishz.LDM.yml`: Flatpak manifest (not built yet).
 - `extension/sign-firefox.sh`: signs the Firefox add-on for permanent installs.
 
