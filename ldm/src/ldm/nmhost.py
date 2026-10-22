@@ -110,8 +110,15 @@ def has_owner(name: str) -> bool:
     return reply.startswith("(true")
 
 
+def header_name(name: str) -> str:
+    """"accept-language" -> "Accept-Language"."""
+    return "-".join(part.capitalize() for part in name.split("-"))
+
+
 def headers_for(item: dict) -> dict:
-    headers = {}
+    # Everything the browser sent for a grabbed file (signed stream links can check User-Agent, Accept-Language…),
+    # then the item's own fields.
+    headers = {header_name(k): v for k, v in (item.get("headers") or {}).items() if v}
     for key, header in (("referer", "Referer"), ("origin", "Origin"), ("cookies", "Cookie"),
                         ("user_agent", "User-Agent")):
         if item.get(key):

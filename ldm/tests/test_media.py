@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from ldm.engine import LinkExpired
 from ldm.manager import Manager
 from ldm.media import MediaDownloader, build_choices, find_js_runtime
 from ldm.store import Store
@@ -102,6 +103,24 @@ def test_aes128_hls_is_decrypted(tmp_path, http_server, streams):
     assert b"METHOD=AES-128" in streams["/aes/index.m3u8"]
     result = probe(run_download(store, did))
     assert result["streams"] == ["audio", "video"] and 3.5 < result["duration"] < 4.6
+
+
+def test_signed_stream_gets_the_browser_headers_on_every_request(tmp_path, http_server, streams):
+    """A host that answers 403 unless User-Agent and Accept-Language match the browser's (issue #8)."""
+    browser = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Chrome/155.0.0.0 Safari/537.36",
+               "Accept-Language": "en-US,en;q=0.8", "Accept": "*/*", "Sec-Fetch-Mode": "cors"}
+    cfg, _ = http_server(data=b"", files=streams, require={k: browser[k] for k in ("User-Agent", "Accept-Language")})
+    store = new_store(tmp_path)
+    did = store.add(f"{cfg.base}/hls/master.m3u8", tmp_path / "out", kind="media", headers=browser,
+                    options={"format": "worst"})
+    assert probe(run_download(store, did))["streams"] == ["audio", "video"]
+    # playlists and every segment carried them, replacing yt-dlp's own defaults
+    assert len(cfg.requests) > 3
+    assert all({k: r.get(k) for k in browser} == browser for r in cfg.requests)
+
+    refused = store.add(f"{cfg.base}/hls/master.m3u8", tmp_path / "out2", kind="media", options={"format": "worst"})
+    with pytest.raises(LinkExpired, match="403"):  # yt-dlp's own User-Agent and Accept-Language
+        run_download(store, refused)
 
 
 def test_dash_separate_audio_and_video_are_merged(tmp_path, http_server, streams):
