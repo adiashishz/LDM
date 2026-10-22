@@ -42,6 +42,7 @@ class ServerConfig:
     redirects: dict[str, str] = field(default_factory=dict)  # path -> Location (302)
     files: dict[str, bytes] = field(default_factory=dict)    # static files: path -> content (others 404)
     deny: set[str] = field(default_factory=set)              # paths answered with 403
+    require: dict[str, str] = field(default_factory=dict)    # headers that must match exactly, else 403
     bytes_sent: int = 0
     active_ranges: int = 0          # bounded range requests being served right now
     max_active_ranges: int = 0
@@ -77,7 +78,8 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        status = 403 if self.path in cfg.deny else cfg.status
+        refused = self.path in cfg.deny or any(self.headers.get(k) != v for k, v in cfg.require.items())
+        status = 403 if refused else cfg.status
         if status is not None:
             self.send_response(status)
             self.send_header("Content-Length", "0")

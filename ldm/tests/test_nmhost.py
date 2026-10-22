@@ -186,3 +186,12 @@ def test_headers_for_maps_browser_fields():
                         "url": "x"}) == {"Referer": "https://site/", "Origin": "https://site", "Cookie": "a=1",
                                          "User-Agent": "UA"}
     assert headers_for({"origin": ""}) == {}
+
+
+def test_headers_for_keeps_what_the_browser_sent():
+    from ldm.nmhost import headers_for
+    item = {"headers": {"user-agent": "Brave UA", "accept-language": "en-US,en;q=0.8", "accept": "*/*",
+                        "sec-fetch-mode": "cors", "referer": "https://site/"},
+            "referer": "https://site/", "user_agent": "Brave UA", "cookies": "a=1"}
+    assert headers_for(item) == {"User-Agent": "Brave UA", "Accept-Language": "en-US,en;q=0.8", "Accept": "*/*",
+                                 "Sec-Fetch-Mode": "cors", "Referer": "https://site/", "Cookie": "a=1"}

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { bySize, classify, extensionOf, isSubtitleSegment, pageMedia, sniff } from "../src/lib/classify.js";
 import {
-  cookieHeader, filenameFromDisposition, filenameFromUrl, filterLinks, humanSize, linksBySize, shouldIntercept,
+  browserHeaders, cookieHeader, filenameFromDisposition, filenameFromUrl, filterLinks, humanSize, linksBySize, shouldIntercept,
   sizeHint,
 } from "../src/lib/names.js";
 
@@ -117,4 +117,18 @@ test("the Links tab lists the largest files first", () => {
   const links = [{ url: "a", text: "240p (69.7 MB)" }, { url: "b", text: "picture" },
     { url: "c", text: "1080p (1.2 GB)" }, { url: "d", text: "360p (170.54 MB)" }, { url: "e" }];
   assert.deepEqual(linksBySize(links).map((l) => l.url), ["c", "d", "a", "b", "e"]);
+});
+
+test("browser headers kept for grabbed files: who is asking, not transport", () => {
+  const sent = [
+    { name: "User-Agent", value: "Brave UA" }, { name: "Accept-Language", value: "en-US,en;q=0.8" },
+    { name: "Accept", value: "*/*" }, { name: "Origin", value: "https://site" }, { name: "Referer", value: "https://site/" },
+    { name: "Cookie", value: "a=1" }, { name: "sec-ch-ua-platform", value: '"Linux"' }, { name: "Sec-Fetch-Mode", value: "cors" },
+    { name: "Range", value: "bytes=0-" }, { name: "Accept-Encoding", value: "gzip, br" }, { name: "Connection", value: "keep-alive" },
+  ];
+  assert.deepEqual(browserHeaders(sent), {
+    "user-agent": "Brave UA", "accept-language": "en-US,en;q=0.8", accept: "*/*", origin: "https://site",
+    referer: "https://site/", cookie: "a=1", "sec-ch-ua-platform": '"Linux"', "sec-fetch-mode": "cors",
+  });
+  assert.deepEqual(browserHeaders(undefined), {});
 });

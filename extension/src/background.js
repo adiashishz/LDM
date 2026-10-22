@@ -4,7 +4,7 @@ import { api, getSettings } from "./lib/api.js";
 import { addCapture, clearCaptures, listCaptures } from "./lib/capture.js";
 import { pageMedia, sniff, STREAM_KINDS } from "./lib/classify.js";
 import { HostError, request } from "./lib/host.js";
-import { cookieHeader, filenameFromDisposition, filenameFromUrl, shouldIntercept } from "./lib/names.js";
+import { browserHeaders, cookieHeader, filenameFromDisposition, filenameFromUrl, shouldIntercept } from "./lib/names.js";
 
 // --- hand-off ------------------------------------------------------------------------------
 
@@ -27,10 +27,11 @@ async function itemFor({ url, filename = "", referer = "", size = null, pageUrl 
     kind: kind || undefined,      // "media": a video page or stream playlist for yt-dlp
     filename: filename || "",
     // `headers`: what the browser itself sent for a grabbed file — signed stream links often need them.
+    headers: Object.keys(headers).length ? headers : undefined,
     referer: headers.referer || referer || pageUrl || "",
     origin: headers.origin || "",
     cookies: headers.cookie || await cookiesFor(url),
-    user_agent: navigator.userAgent,
+    user_agent: headers["user-agent"] || navigator.userAgent,
     size,
     page_url: pageUrl || "",
   };
@@ -124,7 +125,8 @@ api.contextMenus.onClicked.addListener((info, tab) => {
 
 // --- media sniffer -------------------------------------------------------------------------
 
-// Request headers the browser sent (Origin, Referer, Cookie), kept until the response arrives.
+// Request headers the browser sent (User-Agent, Accept-Language, Origin, Referer, Cookie, …), kept until the
+// response arrives.
 const sentHeaders = new Map();
 const SNIFF_FILTER = { urls: ["<all_urls>"], types: ["media", "xmlhttprequest", "object", "other"] };
 const extraHeaders = api.webRequest.OnSendHeadersOptions?.EXTRA_HEADERS; // Chromium hides some without it
@@ -132,12 +134,7 @@ const extraHeaders = api.webRequest.OnSendHeadersOptions?.EXTRA_HEADERS; // Chro
 api.webRequest.onSendHeaders.addListener(
   (details) => {
     if (details.tabId < 0) return;
-    const kept = {};
-    for (const h of details.requestHeaders || []) {
-      const name = h.name.toLowerCase();
-      if (name === "origin" || name === "referer" || name === "cookie") kept[name] = h.value || "";
-    }
-    sentHeaders.set(details.requestId, kept);
+    sentHeaders.set(details.requestId, browserHeaders(details.requestHeaders));
     if (sentHeaders.size > 500) sentHeaders.delete(sentHeaders.keys().next().value);
   },
   SNIFF_FILTER,

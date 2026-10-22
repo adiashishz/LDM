@@ -34,6 +34,24 @@ export function cookieHeader(cookies) {
   return cookies.map((c) => `${c.name}=${c.value}`).join("; ");
 }
 
+// Request headers that say who is asking. Signed stream links can be bound to them (one host answers 403
+// unless User-Agent and Accept-Language match the browser's), so LDM replays them as the browser sent them.
+// Transport headers (Range, Accept-Encoding, Connection, Host) are left to LDM.
+const BROWSER_HEADERS = new Set([
+  "accept", "accept-language", "cookie", "origin", "referer", "user-agent",
+  "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site",
+]);
+
+/** Lower-case name -> value for the identifying headers of a webRequest `requestHeaders` list. */
+export function browserHeaders(requestHeaders) {
+  const kept = {};
+  for (const h of requestHeaders || []) {
+    const name = h.name.toLowerCase();
+    if (BROWSER_HEADERS.has(name)) kept[name] = h.value || "";
+  }
+  return kept;
+}
+
 export function humanSize(bytes) {
   if (bytes === null || bytes === undefined || bytes < 0) return "";
   const units = ["B", "KiB", "MiB", "GiB", "TiB"];

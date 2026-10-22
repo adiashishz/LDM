@@ -248,7 +248,8 @@ def test_login_redirect_is_explained():
 
 def test_media_found_on_the_page_when_yt_dlp_cannot():
     captures = [{"url": "https://cdn.host/v/master.m3u8", "kind": "hls", "size": None, "referer": "https://host/v/1",
-                 "headers": {"origin": "https://host", "referer": "https://host/", "cookie": "cdn=1"}},
+                 "headers": {"origin": "https://host", "referer": "https://host/", "cookie": "cdn=1",
+                             "user-agent": "Brave UA", "accept-language": "en-US,en;q=0.8"}},
                 {"url": "https://cdn.host/v/clip.mp4", "kind": "video", "size": 64 * 1024 * 1024,
                  "filename": "clip.mp4", "referer": "https://host/v/1"}]
     client = FakeClient()
@@ -265,6 +266,10 @@ def test_media_found_on_the_page_when_yt_dlp_cannot():
     dialog._use_capture(captures[0])  # a stream: yt-dlp downloads the playlist
     dialog._probe()
     assert client.media_probes[-1][0] == "https://cdn.host/v/master.m3u8"
-    # the headers the browser sent for it (signed stream links check Origin/Referer/cookies)
-    assert client.media_probes[-1][1] == {"Referer": "https://host/", "Origin": "https://host", "Cookie": "cdn=1"}
+    # the headers the browser sent for it (signed stream links check them, e.g. User-Agent and Accept-Language)
+    assert client.media_probes[-1][1] == {"Referer": "https://host/", "Origin": "https://host", "Cookie": "cdn=1",
+                                          "User-Agent": "Brave UA", "Accept-Language": "en-US,en;q=0.8"}
+    assert dialog.other_headers_row.get_subtitle() == "Accept-Language"
+    sent = AddDialog(FakeClient(), "https://cdn.host/v.m3u8", headers={"Referer": "https://host/", "Sec-Fetch-Mode": "cors"})
+    assert sent.headers() == {"Referer": "https://host/", "Sec-Fetch-Mode": "cors"}  # extension's extra headers kept
     assert AddDialog(FakeClient(), "https://x/y").found_group.get_visible() is False

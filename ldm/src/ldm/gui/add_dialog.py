@@ -11,6 +11,7 @@ from gi.repository import Adw, Gio, GLib, Gtk
 
 from ..format import STATE_LABELS, human
 from ..hlskey import aes_hex
+from ..nmhost import header_name
 from .client import DaemonClient
 from .schedule_rows import ScheduleEditor
 from .dialogs import is_url, parse_limit, read_clipboard_url, short_path
@@ -25,6 +26,7 @@ FOLDERS = [
 ]
 OTHER_FOLDER = "Other folder…"
 MAX_PARTS = 32
+EDITABLE_HEADERS = ("Referer", "Origin", "Cookie", "User-Agent")
 PLAYLIST_EXTENSIONS = (".m3u8", ".mpd")
 
 
@@ -180,6 +182,11 @@ class AddDialog(Adw.Dialog):
         for row in (self.referer, self.origin, self.cookie, self.user_agent):
             expander.add_row(row)
             row.connect("changed", self._schedule_probe)
+        # The rest of what the browser sent (Accept-Language, Sec-Fetch-…): kept as is, signed links check them.
+        self.other_headers_row = Adw.ActionRow(title="Other browser headers")
+        self.other_headers_row.add_css_class("property")
+        expander.add_row(self.other_headers_row)
+        self._set_other_headers({k: v for k, v in headers.items() if k not in EDITABLE_HEADERS})
         expander.set_expanded(bool(headers))
         header_group.add(expander)
 
@@ -282,10 +289,16 @@ class AddDialog(Adw.Dialog):
             self._auto_name = False
 
     def headers(self) -> dict[str, str]:
-        return {k: row.get_text().strip() for k, row in
-                (("Referer", self.referer), ("Origin", self.origin), ("Cookie", self.cookie),
-                 ("User-Agent", self.user_agent))
-                if row.get_text().strip()}
+        edited = {k: row.get_text().strip() for k, row in
+                  (("Referer", self.referer), ("Origin", self.origin), ("Cookie", self.cookie),
+                   ("User-Agent", self.user_agent))
+                  if row.get_text().strip()}
+        return {**self.other_headers, **edited}
+
+    def _set_other_headers(self, headers: dict[str, str]) -> None:
+        self.other_headers = headers
+        self.other_headers_row.set_subtitle(", ".join(headers))
+        self.other_headers_row.set_visible(bool(headers))
 
     def _schedule_probe(self, *_) -> None:
         self._cancel_timer()
@@ -474,6 +487,10 @@ class AddDialog(Adw.Dialog):
         self.origin.set_text(sent.get("origin", ""))
         if "cookie" in sent:
             self.cookie.set_text(sent["cookie"])
+        if "user-agent" in sent:
+            self.user_agent.set_text(sent["user-agent"])
+        self._set_other_headers({header_name(k): v for k, v in sent.items()
+                                 if header_name(k) not in EDITABLE_HEADERS})
         if capture.get("filename") and self._auto_name:
             self.name.set_text(capture["filename"])
         self.found_row.set_expanded(False)
