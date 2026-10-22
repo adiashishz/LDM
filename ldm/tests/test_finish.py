@@ -77,6 +77,7 @@ def test_countdown_suspends_unless_cancelled(bus_address):
         assert notifications.shown[0][2:5] == ("All downloads finished", "Suspending in 0 seconds", ["cancel", "Cancel"])
         await until(lambda: logind.calls)
         assert logind.calls == [("Suspend", False)]
+        await until(lambda: finisher._pending is None)  # its cleanup still runs after logind got the call
 
         finisher.run("poweroff")
         await until(lambda: len(notifications.shown) == 2)
