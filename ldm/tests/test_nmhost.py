@@ -89,7 +89,7 @@ def test_ping_and_direct_add(daemon, http_server, tmp_path):
     data = random.Random(11).randbytes(200_000)
     cfg, url = http_server(data=data)
     host = Host()
-    assert host.request(cmd="ping") == {"id": 1, "ok": True, "daemon": True, "gui": False, "host_version": "0.1.0"}
+    assert host.request(cmd="ping") == {"id": 1, "ok": True, "daemon": True, "gui": False, "host_version": "0.2.0"}
     reply = host.request(cmd="add", mode="direct", url=url, filename="from-browser.bin",
                          referer="https://example.com/page", cookies="session=abc", user_agent="TestBrowser/1")
     assert reply["ok"] and reply["download_id"] == 1

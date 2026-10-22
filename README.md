@@ -29,11 +29,11 @@ Downloads run in a small background service, so closing the window never stops t
 
 ## Install on Fedora 44 (RPM)
 
-Download `ldm-0.1.0-1.fc44.noarch.rpm` from the [latest release](https://github.com/adiashishz/LDM/releases/latest)
+Download `ldm-0.2.0-1.fc44.noarch.rpm` from the [latest release](https://github.com/adiashishz/LDM/releases/latest)
 and install it; dnf fetches the dependencies from Fedora:
 
 ```sh
-sudo dnf install ./ldm-0.1.0-1.fc44.noarch.rpm
+sudo dnf install ./ldm-0.2.0-1.fc44.noarch.rpm
 ldm install-browser-integration   # once: magnet/.torrent links, Flatpak browsers such as Brave
 ```
 
@@ -68,9 +68,9 @@ cd extension && python3 build.py            # dist/firefox and dist/chromium
 ```
 
 - **Firefox:** `about:debugging` → This Firefox → Load Temporary Add-on → `dist/firefox/manifest.json`
-  (or the `ldm-firefox-0.1.0.zip`). A signed version for permanent installs is planned.
+  (or the `ldm-firefox-0.2.0.zip`). A signed version for permanent installs is planned.
 - **Chrome / Brave:** the extensions page → Developer mode → Load unpacked → `dist/chromium`
-  (or a folder with `ldm-chromium-0.1.0.zip` unzipped into it).
+  (or a folder with `ldm-chromium-0.2.0.zip` unzipped into it).
 - Brave as a Flatpak also needs D-Bus access (the installer prints the `flatpak override` command).
 
 ## Use
