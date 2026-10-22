@@ -2,7 +2,7 @@
 %bcond check 1
 
 Name:           ldm
-Version:        0.1.0
+Version:        0.2.0
 Release:        1%{?dist}
 Summary:        Download manager for files, videos and torrents
 License:        MIT
@@ -111,5 +111,10 @@ cd ldm
 %{_datadir}/ldm/
 
 %changelog
+* Thu Oct 22 2026 Aditya Ashish <adiashishz@gmail.com> - 0.2.0-1
+- Selection mode: pause, resume, remove or delete several downloads at once
+- Signed video streams: send the browser's request headers (fixes HTTP 403)
+- Close button on the copied-link banner; monochrome tray icon
+
 * Wed Oct 21 2026 Aditya Ashish <adiashishz@gmail.com> - 0.1.0-1
 - First package: downloads, videos, torrents, scheduler, browser integration

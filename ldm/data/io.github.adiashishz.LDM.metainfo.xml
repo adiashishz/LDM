@@ -41,6 +41,13 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.0" date="2026-10-22">
+      <description>
+        <p>Select several downloads to pause, resume, remove or delete them at once. Video streams with signed
+          links now download: LDM sends the same request headers as the browser. The copied-link banner can be
+          dismissed, and the tray icon is monochrome.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-10-21">
       <description>
         <p>First release: multi-part downloads, video and torrent support, scheduler, browser extension.</p>

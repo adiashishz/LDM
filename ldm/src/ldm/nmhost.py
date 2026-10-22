@@ -14,7 +14,7 @@ import struct
 import subprocess
 import sys
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 # Keep in sync with ldm/busnames.py (checked by tests/test_nmhost.py).
 BUS_NAME = "io.github.adiashishz.LDM.Service"
 OBJECT_PATH = "/io/github/adiashishz/LDM/Manager1"
