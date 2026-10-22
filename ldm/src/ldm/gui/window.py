@@ -6,7 +6,7 @@ import json
 from typing import TYPE_CHECKING, Callable
 from urllib.parse import urlsplit
 
-from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango
 
 from ..batch import parse_link_list
 from ..clipboard import Offer
@@ -15,8 +15,9 @@ from ..format import parse_rate
 from .add_dialog import AddDialog
 from .dialogs import ask_text, confirm, is_url, limit_text, read_clipboard_url, short_path
 from .model import FINISH_ACTIONS, SORTS, DownloadItem
-from .row import DownloadRow
+from .row import DownloadRow, first_icon
 from .schedule_rows import ask_schedule
+from .selection import PAUSABLE, RESUMABLE, Selection
 from .tools import BatchDialog, ChecksumDialog, ImportLinksDialog, LogDialog, PartsDialog, ask_login
 from .torrent_details import TorrentDetailsDialog
 
@@ -30,6 +31,44 @@ EMPTY = {
     "finished": ("No Finished Downloads", "Completed files appear here"),
     "problems": ("No Problems", "Failed downloads and expired links appear here"),
 }
+# Like Adw.Banner, which has no close button.
+OFFER_CSS = ".offer-bar { background-color: alpha(currentColor, 0.1); padding: 6px 6px 6px 18px; }"
+
+
+class OfferBar(Gtk.Revealer):
+    """A banner with a button and a close button, for the copied-link offer."""
+
+    __gsignals__ = {"button-clicked": (GObject.SignalFlags.RUN_FIRST, None, ())}
+
+    def __init__(self, button_label: str):
+        super().__init__(transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN)
+        self.label = Gtk.Label(hexpand=True, ellipsize=Pango.EllipsizeMode.END)
+        self.label.add_css_class("heading")
+        button = Gtk.Button(label=button_label, valign=Gtk.Align.CENTER)
+        button.add_css_class("pill")
+        button.connect("clicked", lambda _b: self.emit("button-clicked"))
+        close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Dismiss", valign=Gtk.Align.CENTER)
+        close.add_css_class("flat")
+        close.add_css_class("circular")
+        close.connect("clicked", lambda _b: self.set_revealed(False))
+        box = Gtk.Box(spacing=12)
+        box.add_css_class("offer-bar")
+        for widget in (self.label, button, close):
+            box.append(widget)
+        self.set_child(box)
+
+    def set_title(self, title: str) -> None:
+        self.label.set_text(title)
+        self.label.set_tooltip_text(title)
+
+    def get_title(self) -> str:
+        return self.label.get_text()
+
+    def set_revealed(self, revealed: bool) -> None:
+        self.set_reveal_child(revealed)
+
+    def get_revealed(self) -> bool:
+        return self.get_reveal_child()
 
 
 class MainWindow(Adw.ApplicationWindow):
@@ -38,6 +77,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.app = app
         self.client = app.client
         self.views = {name: app.downloads.view(name) for name, _ in VIEW_LABELS}
+        self.selection = Selection()
+        css = Gtk.CssProvider()
+        css.load_from_string(OFFER_CSS)
+        Gtk.StyleContext.add_provider_for_display(self.get_display(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
         header = Adw.HeaderBar()
         add = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add Download", action_name="app.add")
@@ -83,6 +126,11 @@ class MainWindow(Adw.ApplicationWindow):
             self.add_action(action)
         header.pack_end(Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, primary=True,
                                        tooltip_text="Main Menu"))
+        self.select_button = Gtk.ToggleButton(tooltip_text="Select")
+        self.select_button.set_icon_name(first_icon(self, ("selection-mode-symbolic", "object-select-symbolic")))
+        self.select_button.bind_property("active", self.selection, "active",
+                                         GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE)
+        header.pack_end(self.select_button)
         self.filters = Adw.ToggleGroup()
         for name, label in VIEW_LABELS:
             self.filters.add(Adw.Toggle(name=name, label=label))
@@ -96,13 +144,16 @@ class MainWindow(Adw.ApplicationWindow):
                                   GObject.BindingFlags.SYNC_CREATE | GObject.BindingFlags.INVERT_BOOLEAN)
         # 1DM's clipboard monitor: offer a copied link when the window gets focus.
         self.offer, self.offered = Offer(), ""
-        self.clipboard_banner = Adw.Banner(button_label="Download")
+        self.clipboard_banner = OfferBar("Download")
         self.clipboard_banner.connect("button-clicked", self._download_offered)
         self.connect("notify::is-active", self._on_focus)
 
         self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, valign=Gtk.Align.START,
                                 margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
         self.list.add_css_class("boxed-list")
+        self.list.connect("row-activated", self._on_row_activated)
+        self.selection.connect("changed", self._on_selection_changed)
+        self.selection.connect("notify::active", self._on_selection_changed)
         scrolled = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
                                       child=Adw.Clamp(maximum_size=900, child=self.list))
         self.empty = Adw.StatusPage(icon_name="folder-download-symbolic")
@@ -116,7 +167,13 @@ class MainWindow(Adw.ApplicationWindow):
         view.add_top_bar(self.search_bar)
         view.add_top_bar(self.banner)
         view.add_top_bar(self.clipboard_banner)
+        view.add_bottom_bar(self._build_selection_bar())
         self.set_content(view)
+        shortcuts = Gtk.ShortcutController()
+        for trigger, callback in (("Escape", self._leave_selection), ("<Control>a", self._select_all_shortcut)):
+            shortcuts.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string(trigger),
+                                                    Gtk.CallbackAction.new(callback)))
+        self.add_controller(shortcuts)
 
         drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.COPY)
         drop.connect("drop", self._on_drop)
@@ -189,6 +246,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _show_view(self, *_) -> None:
         name = self.filters.get_active_name() or "all"
+        self.selection.set_view(self.views[name])
         self.list.bind_model(self.views[name], lambda item: DownloadRow(item, self))
         self._sync_empty()
 
@@ -200,6 +258,109 @@ class MainWindow(Adw.ApplicationWindow):
         self.empty.set_title(title)
         self.empty.set_description(description)
         self.stack.set_visible_child_name("list" if self.views[name].get_n_items() else "empty")
+
+    # --- selection mode -------------------------------------------------------------------
+
+    def _build_selection_bar(self) -> Gtk.ActionBar:
+        bar = Gtk.ActionBar()
+        self.selection.bind_property("active", bar, "revealed", GObject.BindingFlags.SYNC_CREATE)
+        self.select_all_button = Gtk.Button(label="Select All")
+        self.select_all_button.connect("clicked", lambda _b: self.selection.clear() if self.selection.all_selected()
+                                       else self.selection.select_all())
+        bar.pack_start(self.select_all_button)
+        self.selection_label = Gtk.Label(margin_start=6)
+        bar.pack_start(self.selection_label)
+        self.selection_buttons = []
+        for label, handler, style in (("Delete Files…", self._delete_selected, "destructive-action"),
+                                      ("Remove…", self._remove_selected, None),
+                                      ("Resume", self._resume_selected, None),
+                                      ("Pause", self._pause_selected, None)):
+            button = Gtk.Button(label=label)
+            if style:
+                button.add_css_class(style)
+            button.connect("clicked", lambda _b, h=handler: h())
+            bar.pack_end(button)
+            self.selection_buttons.append(button)
+        return bar
+
+    def start_selection(self, item: DownloadItem) -> None:
+        """Right-click or long-press on a row: selection mode with that download ticked."""
+        self.selection.active = True
+        self.selection.set_selected(item.id, True)
+
+    def _leave_selection(self, *_) -> bool:
+        if not self.selection.active:
+            return False
+        self.selection.active = False
+        return True
+
+    def _select_all_shortcut(self, *_) -> bool:
+        if not self.selection.active:
+            return False
+        self.selection.select_all()
+        return True
+
+    def _on_row_activated(self, _list, row: Gtk.ListBoxRow) -> None:
+        if self.selection.active:
+            check = row.get_child().check
+            check.set_active(not check.get_active())
+
+    def _on_selection_changed(self, *_) -> None:
+        count = self.selection.count
+        self.selection_label.set_text(f"{count} selected" if count else "Select downloads")
+        self.select_all_button.set_label("Select None" if self.selection.all_selected() else "Select All")
+        for button in self.selection_buttons:
+            button.set_sensitive(count > 0)
+        index = 0
+        while row := self.list.get_row_at_index(index):  # rows of the shown view follow the selection
+            check = row.get_child().check
+            selected = self.selection.is_selected(row.get_child().item.id)
+            if check.get_active() != selected:
+                check.set_active(selected)
+            index += 1
+
+    def _pause_selected(self) -> None:
+        items = [i for i in self.selection.items() if i.state in PAUSABLE]
+        self._for_each(items, self.client.pause, "None of the selected downloads is running or queued")
+
+    def _resume_selected(self) -> None:
+        items = [i for i in self.selection.items() if i.state in RESUMABLE]
+        self._for_each(items, self.client.resume, "None of the selected downloads is paused or failed")
+
+    def _remove_selected(self) -> None:
+        items = self.selection.items()
+        heading = f"Remove {len(items)} Downloads?" if len(items) > 1 else "Remove Download?"
+        confirm(self, heading, "Removed from the list. Downloaded files are kept.", "Remove",
+                lambda: self._remove(items, False))
+
+    def _delete_selected(self) -> None:
+        items = self.selection.items()
+        heading = f"Delete {len(items)} Files?" if len(items) > 1 else "Delete File?"
+        confirm(self, heading, "Removed from the list and deleted from disk, including unfinished data.",
+                "Delete", lambda: self._remove(items, True))
+
+    def _remove(self, items: list[DownloadItem], delete_files: bool) -> None:
+        self.selection.active = False
+        self._for_each(items, lambda download_id, callback: self.client.remove(download_id, delete_files, callback))
+
+    def _for_each(self, items: list[DownloadItem], call: Callable, nothing: str = "") -> None:
+        """Call `call(id, callback)` for each download; one toast for any failures."""
+        if not items:
+            if nothing:
+                self.toast(nothing)
+            return
+        pending, errors = len(items), []
+
+        def done(_result, error) -> None:
+            nonlocal pending
+            pending -= 1
+            if error:
+                errors.append(error.message)
+            if not pending and errors:
+                self.toast(errors[0] if len(errors) == 1 else f"{len(errors)} downloads failed: {errors[0]}")
+
+        for item in items:
+            call(item.id, done)
 
     def toast(self, text: str) -> None:
         self.toasts.add_toast(Adw.Toast(title=GLib.markup_escape_text(text)))
@@ -245,7 +406,7 @@ class MainWindow(Adw.ApplicationWindow):
         if link:
             self.offered = link
             shown = link if len(link) <= 70 else link[:67] + "…"
-            self.clipboard_banner.set_title(f"Download copied link? {GLib.markup_escape_text(shown)}")
+            self.clipboard_banner.set_title(f"Download copied link? {shown}")
             self.clipboard_banner.set_revealed(True)
 
     def _download_offered(self, banner) -> None:
