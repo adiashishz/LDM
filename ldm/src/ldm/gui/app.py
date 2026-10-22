@@ -153,7 +153,9 @@ class Application(Adw.Application):
     def _shortcuts(self, *_) -> None:
         dialog = Adw.AlertDialog(heading="Keyboard Shortcuts",
                                  body="Ctrl+N  Add download\nCtrl+F  Search\nCtrl+,  Preferences\nCtrl+W  Close window\n"
-                                      "Ctrl+Q  Quit (downloads continue in the background)")
+                                      "Ctrl+Q  Quit (downloads continue in the background)\n\n"
+                                      "Right-click a download  Select several\n"
+                                      "Ctrl+A  Select all (while selecting)\nEsc  Stop selecting")
         dialog.add_response("close", "Close")
         dialog.present(self.window())
 

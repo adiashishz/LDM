@@ -69,6 +69,15 @@ class DownloadRow(Gtk.Box):
                          margin_top=10, margin_bottom=10, margin_start=12, margin_end=8)
         self.item = item
         self.window = window
+        selection = window.selection
+        sync = GObject.BindingFlags.SYNC_CREATE
+
+        # Selection mode: a tick box replaces the row's buttons.
+        self.check = Gtk.CheckButton(valign=Gtk.Align.CENTER, active=selection.is_selected(item.id),
+                                     tooltip_text="Select")
+        self.check.connect("toggled", lambda c: selection.set_selected(self.item.id, c.get_active()))
+        selection.bind_property("active", self.check, "visible", sync)
+        self.append(self.check)
 
         self.icon = Gtk.Image(pixel_size=32, valign=Gtk.Align.CENTER)
         self.append(self.icon)
@@ -110,8 +119,17 @@ class DownloadRow(Gtk.Box):
             action.connect("activate", lambda _a, _p, h=handler: getattr(self.window, h)(self.item))
             self.actions.add_action(action)
         self.insert_action_group("dl", self.actions)
+        for button in (self.primary, more):
+            selection.bind_property("active", button, "visible", sync | GObject.BindingFlags.INVERT_BOOLEAN)
 
-        sync = GObject.BindingFlags.SYNC_CREATE
+        # Right-click or long-press starts selection mode with this download ticked.
+        click = Gtk.GestureClick(button=3)
+        click.connect("pressed", lambda *_: window.start_selection(self.item))
+        self.add_controller(click)
+        press = Gtk.GestureLongPress(touch_only=True)
+        press.connect("pressed", lambda *_: window.start_selection(self.item))
+        self.add_controller(press)
+
         item.bind_property("title", self.title, "label", sync)
         item.bind_property("title", self.title, "tooltip-text", sync)
         item.bind_property("status", self.status, "label", sync)
