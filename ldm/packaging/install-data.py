@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Install LDM's non-Python files under DESTDIR (used by the RPM spec and the Flatpak manifest).
 
-    install-data.py DESTDIR [--prefix /usr] [--sysconfdir /etc] [--no-browsers]
+    install-data.py DESTDIR [--prefix /usr] [--sysconfdir /etc] [--libexecdir PREFIX/libexec] [--no-browsers]
 
 Writes the desktop file, AppStream metainfo, icon, D-Bus activation files, the systemd user unit,
 the clipboard watcher's autostart entry, and system-wide native-messaging manifests for Firefox,
@@ -37,6 +37,7 @@ def main() -> None:
     parser.add_argument("destdir", type=Path)
     parser.add_argument("--prefix", default="/usr")
     parser.add_argument("--sysconfdir", default="/etc")
+    parser.add_argument("--libexecdir", help="default PREFIX/libexec; Arch uses PREFIX/lib")
     parser.add_argument("--no-browsers", action="store_true", help="skip native-messaging manifests (Flatpak)")
     args = parser.parse_args()
     root = args.destdir
@@ -59,8 +60,9 @@ def main() -> None:
     if args.no_browsers:
         return
 
-    host = f"{args.prefix}/libexec/ldm/ldm_nmhost.py"
-    install(ROOT / "src/ldm/nmhost.py", prefix / "libexec/ldm/ldm_nmhost.py", mode=0o755)
+    libexecdir = args.libexecdir or f"{args.prefix}/libexec"
+    host = f"{libexecdir}/ldm/ldm_nmhost.py"
+    install(ROOT / "src/ldm/nmhost.py", root / host.lstrip("/"), mode=0o755)
     base = {"name": HOST_NAME, "description": "LDM download manager bridge", "path": host, "type": "stdio"}
     firefox = json.dumps({**base, "allowed_extensions": [FIREFOX_EXTENSION_ID]}, indent=2) + "\n"
     chromium = json.dumps({**base, "allowed_origins": [f"chrome-extension://{CHROME_EXTENSION_ID}/"]}, indent=2) + "\n"

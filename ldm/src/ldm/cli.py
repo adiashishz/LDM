@@ -474,7 +474,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("clipboard-watch", help="offer copied links in a notification (where the desktop allows it)")
     p = sub.add_parser("install-browser-integration",
                        help="install the browser bridge, D-Bus activation and desktop file")
-    p.add_argument("--browser", action="append", choices=["firefox", "chrome", "brave"],
+    p.add_argument("--browser", action="append", choices=["firefox", "chrome", "chromium", "brave", "brave-flatpak"],
                    help="limit to these browsers (default: the ones found)")
     p.add_argument("--uninstall", action="store_true")
     p.add_argument("--dry-run", action="store_true", help="only show what would be written")
