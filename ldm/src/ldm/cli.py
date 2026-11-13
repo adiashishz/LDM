@@ -86,10 +86,13 @@ def cmd_daemon(args) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)  # one INFO line per request otherwise
     try:
-        asyncio.run(serve(db_path=args.db))
+        restart = asyncio.run(serve(db_path=args.db))
     except AlreadyRunning:
         print("the ldm daemon is already running")
         return 1
+    if restart:  # same process id, so systemd keeps tracking it
+        import os
+        os.execv(sys.executable, [sys.executable, "-m", "ldm", *sys.argv[1:]])
     return 0
 
 
@@ -264,6 +267,10 @@ async def client(args) -> int:
             s = values(await iface.call_get_settings())
             limit = f" of {human(s['data_limit'])}" if s["data_limit"] else " (no limit)"
             print(f"used this session: {human(s['data_used'])}{limit}")
+        elif args.command == "update-yt-dlp":
+            print("checking for a newer yt-dlp…")
+            version = await iface.call_update_yt_dlp()
+            print(f"yt-dlp {version} installed for this user" if version else "yt-dlp is up to date")
         elif args.command == "checksum":
             print(await iface.call_checksum(args.id, args.algo))
         elif args.command == "rename":
@@ -450,6 +457,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("resume-all", help="resume paused downloads and retry failed ones")
     p = sub.add_parser("data-usage", help="data downloaded since the service started (data_limit setting)")
     p.add_argument("--reset", action="store_true", help="start a new session: held downloads continue")
+    sub.add_parser("update-yt-dlp", help="fetch the newest yt-dlp for this user (your distribution's may be old)")
     p = sub.add_parser("checksum", help="checksum of a finished file")
     p.add_argument("id", type=int)
     p.add_argument("--algo", choices=("md5", "sha1", "sha256"), default="sha256")

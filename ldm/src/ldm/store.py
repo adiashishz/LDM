@@ -178,6 +178,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "torrent_tracker_list_cache": "",  # … refreshed daily (bookkeeping)
     "torrent_tracker_list_fetched": 0.0,
     "torrent_merge_duplicates": True,  # adding a torrent already in the list adds its trackers to it
+    "ytdlp_auto_update": True,         # fetch newer yt-dlp releases for this user (daily check)
+    "ytdlp_checked": 0.0,              # unix time of the last check (bookkeeping)
 }
 
 

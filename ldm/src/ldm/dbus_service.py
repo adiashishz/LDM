@@ -192,6 +192,12 @@ class ManagerInterface(ServiceInterface):
         return [to_vardict(login) for login in self.manager.list_logins()]
 
     @method()
+    async def UpdateYtDlp(self) -> "s":
+        """Fetch a newer yt-dlp for this user; returns its version, "" when already up to date."""
+        with _errors():
+            return await self.manager.update_ytdlp()
+
+    @method()
     async def Checksum(self, download_id: "t", algorithm: "s") -> "s":
         with _errors():
             return await self.manager.checksum(download_id, algorithm)

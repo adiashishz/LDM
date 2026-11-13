@@ -18,7 +18,7 @@ VERSION = 1
 MAGIC = b"LDMBACKUP1\n"
 SCRYPT = {"n": 2 ** 15, "r": 8, "p": 1}
 PREFIX = "ldm-backup-"
-NOT_RESTORED = {"backup_last", "torrent_tracker_list_cache", "torrent_tracker_list_fetched"}  # bookkeeping
+NOT_RESTORED = {"backup_last", "torrent_tracker_list_cache", "torrent_tracker_list_fetched", "ytdlp_checked"}  # bookkeeping
 
 
 class BackupError(Exception):

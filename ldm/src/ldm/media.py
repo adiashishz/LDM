@@ -21,13 +21,18 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 from urllib.parse import urlsplit
 
-import yt_dlp
-from yt_dlp.utils import DownloadCancelled
-from yt_dlp.utils import DownloadError as YtDlpError
+from . import ytdlp
 
-from .engine import DownloadError, LinkExpired, ProgressCallback
-from .net import DEFAULT_USER_AGENT, NetConfig
-from .ratelimit import TokenBucket
+ytdlp.activate()  # a newer per-user yt-dlp than the system's, if LDM fetched one
+
+import yt_dlp  # noqa: E402
+from yt_dlp.utils import DownloadCancelled  # noqa: E402
+from yt_dlp.utils import DownloadError as YtDlpError  # noqa: E402
+from yt_dlp.version import __version__ as YTDLP_VERSION  # noqa: E402
+
+from .engine import DownloadError, LinkExpired, ProgressCallback  # noqa: E402
+from .net import DEFAULT_USER_AGENT, NetConfig  # noqa: E402
+from .ratelimit import TokenBucket  # noqa: E402
 from .store import DownloadRow, Store
 
 log = logging.getLogger(__name__)
