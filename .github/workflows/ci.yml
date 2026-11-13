@@ -1,0 +1,78 @@
+# Run LDM's tests on each supported distribution, with that distribution's GTK, libadwaita, Python
+# and Python packages. pip only fills in what the distribution lacks or ships too old, and the job lists
+# those packages: they are what the distribution package has to bundle or depend on differently.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Fedora 44,        image: "fedora:44",     family: fedora }
+          - { name: Debian 13,        image: "debian:trixie", family: debian }
+          - { name: Ubuntu 24.04 LTS, image: "ubuntu:24.04",  family: debian }
+          - { name: Ubuntu 26.04 LTS, image: "ubuntu:26.04",  family: debian }
+          - { name: Arch Linux,       image: "archlinux:latest", family: arch }
+    steps:
+      - name: Install dependencies from the distribution
+        run: |
+          # actions/checkout needs git (and tar) inside the container.
+          case ${{ matrix.family }} in
+            fedora) dnf install -y git-core tar ;;
+            debian) apt-get update && apt-get install -y --no-install-recommends git ca-certificates ;;
+            arch)   pacman -Syu --noconfirm --needed git ;;
+          esac
+
+      - uses: actions/checkout@v4
+
+      - name: Install LDM's dependencies
+        run: sh .github/ci/install-deps.sh ${{ matrix.family }}
+
+      - name: Set up a test user and a virtual environment on the system Python
+        run: |
+          useradd -m tester
+          chown -R tester: .
+          runuser -u tester -- python3 -m venv --system-site-packages ldm/.venv
+          runuser -u tester -- ldm/.venv/bin/python -m pip install -q -e './ldm[dev]'
+
+      - name: Versions
+        run: |
+          runuser -u tester -- ldm/.venv/bin/python - <<'EOF'
+          import sys
+          import gi
+          gi.require_version("Gtk", "4.0"); gi.require_version("Adw", "1")
+          from gi.repository import Adw, Gtk
+          print("Python    ", sys.version.split()[0])
+          print("GTK       ", ".".join(map(str, (Gtk.get_major_version(), Gtk.get_minor_version(), Gtk.get_micro_version()))))
+          print("libadwaita", ".".join(map(str, (Adw.get_major_version(), Adw.get_minor_version(), Adw.get_micro_version()))))
+          print("PyGObject ", gi.__version__)
+          EOF
+          echo "Installed by pip because the distribution's is missing or too old:"
+          runuser -u tester -- ldm/.venv/bin/python -m pip list --local --exclude-editable --format=freeze | grep -v '^pip=' || echo "  (none)"
+
+      - name: Tests
+        env:
+          GSK_RENDERER: cairo  # software rendering: the containers have no GL driver for Xvfb
+        run: |
+          cd ldm
+          runuser -u tester -- xvfb-run -a .venv/bin/python -m pytest -q -rs
+
+      - name: Install the data files and validate them
+        run: |
+          runuser -u tester -- ldm/.venv/bin/python ldm/packaging/install-data.py /tmp/root --libexecdir /usr/lib
+          desktop-file-validate /tmp/root/usr/share/applications/io.github.adiashishz.LDM.desktop
+          desktop-file-validate /tmp/root/etc/xdg/autostart/io.github.adiashishz.LDM.ClipboardWatch.desktop
