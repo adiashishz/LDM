@@ -139,6 +139,16 @@ def test_dialog_mode_activates_gui_action(daemon, tmp_path):
         "kind": None, "captures": [capture]}  # media found on the page reaches the add dialog
 
 
+def running(pid: int) -> bool:
+    """Whether a process is alive. An exited process nobody reaped yet (a zombie: the activated daemon is
+    the bus's child and goes to PID 1, which in CI containers never reaps) counts as exited."""
+    try:
+        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+    return state not in ("Z", "X")
+
+
 @needs_dbus
 def test_daemon_is_started_by_dbus_activation(tmp_path, http_server, monkeypatch):
     """No daemon running: the host's add() starts it through an activation file."""
@@ -170,9 +180,7 @@ def test_daemon_is_started_by_dbus_activation(tmp_path, http_server, monkeypatch
         if pid.strip().startswith("(uint32"):
             daemon_pid = int(pid.strip().strip("(),").split()[-1])
             for _ in range(100):  # the daemon exits by itself once its bus is gone
-                try:
-                    os.kill(daemon_pid, 0)
-                except ProcessLookupError:
+                if not running(daemon_pid):
                     break
                 time.sleep(0.05)
             else:
