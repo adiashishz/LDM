@@ -27,11 +27,12 @@ class AlreadyRunning(Exception):
 async def serve(*, bus_address: str | None = None, db_path: Path | None = None,
                 stop: asyncio.Event | None = None, ready: asyncio.Event | None = None,
                 manager_options: dict[str, Any] | None = None, system_bus_address: str | None = None,
-                manage_autostart: bool = True) -> None:
+                manage_autostart: bool = True) -> bool:
     """Run until `stop` is set (default: SIGINT/SIGTERM). Running downloads resume on next start.
 
     `system_bus_address` replaces the system bus (NetworkManager, UPower, logind) — tests use a private one;
-    `manage_autostart` lets the "autostart" setting enable/disable the systemd user unit."""
+    `manage_autostart` lets the "autostart" setting enable/disable the systemd user unit.
+    Returns True when the service should start again (to load a newly fetched yt-dlp)."""
     monitor = SystemMonitor(system_bus_address)
     await monitor.start()
     manager = Manager(Store(db_path or default_db_path()), conditions=monitor, inhibitor=SleepInhibitor(monitor),
@@ -52,6 +53,14 @@ async def serve(*, bus_address: str | None = None, db_path: Path | None = None,
             for signum in (signal.SIGINT, signal.SIGTERM):
                 loop.add_signal_handler(signum, stop.set)
         finisher = Finisher(bus, monitor, stop.set)  # "when all downloads finished"
+        restart = False
+
+        def request_restart() -> None:
+            nonlocal restart
+            restart = True
+            stop.set()
+
+        manager.on_restart = request_restart
 
         def quit_from_tray() -> None:
             manager.pause_all()
@@ -77,6 +86,7 @@ async def serve(*, bus_address: str | None = None, db_path: Path | None = None,
                 task.cancel()
             tray.close()
             await manager.shutdown()
+        return restart
     finally:
         bus.disconnect()
         await monitor.close()

@@ -124,11 +124,20 @@ class PreferencesDialog(Adw.PreferencesDialog):
                                     show_apply_button=True)
         self.runtime.connect("apply", lambda row: self._save({"js_runtime": row.get_text().strip()}))
         self.runtime_found = Adw.ActionRow(title="Runtime in use", subtitle="…")
-        for row in (self.quality, self.container, self.subtitles, self.runtime, self.runtime_found):
+        self.ytdlp_row = Adw.ActionRow(title="yt-dlp", subtitle="…")
+        self.ytdlp_button = Gtk.Button(label="Update", valign=Gtk.Align.CENTER)
+        self.ytdlp_button.connect("clicked", self._update_ytdlp)
+        self.ytdlp_row.add_suffix(self.ytdlp_button)
+        for row in (self.quality, self.container, self.subtitles, self.runtime, self.runtime_found, self.ytdlp_row):
             row.set_sensitive(False)
             video.add(row)
+        ytdlp_auto = Adw.SwitchRow(title="Keep yt-dlp up to date",
+                                   subtitle="Sites change often; checks GitHub for a new release once a day",
+                                   sensitive=False)
+        video.add(ytdlp_auto)
         system = Adw.PreferencesGroup(title="System")
         self.setting_rows: dict[str, Gtk.Widget] = {}  # simple switches and spins, bound in _bind_rows
+        self.setting_rows["ytdlp_auto_update"] = ytdlp_auto
         for key, (title, subtitle) in SYSTEM_SWITCHES.items():
             row = Adw.SwitchRow(title=title, subtitle=subtitle, sensitive=False)
             system.add(row)
@@ -388,7 +397,8 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.runtime.set_text(settings["js_runtime"])
         self.runtime_found.set_subtitle(settings.get("js_runtime_detected")
                                         or "None found — YouTube needs deno, node or bun")
-        for row in (self.quality, self.container, self.subtitles, self.runtime, self.runtime_found):
+        self._show_ytdlp(settings)
+        for row in (self.quality, self.container, self.subtitles, self.runtime, self.runtime_found, self.ytdlp_row):
             row.set_sensitive(True)
         self._load_torrent_settings(settings)
         self._bind_rows(self.setting_rows, settings)
@@ -461,6 +471,25 @@ class PreferencesDialog(Adw.PreferencesDialog):
             row.remove_css_class("error")
         except ValueError:
             row.add_css_class("error")
+
+    def _show_ytdlp(self, settings: dict[str, Any]) -> None:
+        pending = settings.get("ytdlp_pending")
+        self.ytdlp_row.set_subtitle(f"Version {settings.get('ytdlp_version', '?')}"
+                                    + (f" — {pending} is used once current downloads finish" if pending else ""))
+
+    def _update_ytdlp(self, button: Gtk.Button) -> None:
+        button.set_sensitive(False)
+        self.ytdlp_row.set_subtitle("Checking for a new version…")
+
+        def done(version, error) -> None:
+            button.set_sensitive(True)
+            if error:
+                self.add_toast(Adw.Toast(title=GLib.markup_escape_text(error.message)))
+            else:
+                self.add_toast(Adw.Toast(title=f"yt-dlp {version} installed" if version else "yt-dlp is up to date"))
+            self.client.get_settings(lambda s, e: s and self._show_ytdlp(s))
+
+        self.client.update_ytdlp(done)
 
     def _save(self, values: dict[str, Any]) -> None:
         self.client.set_settings(values, self._report)

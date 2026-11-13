@@ -36,8 +36,8 @@ def test_chrome_id_matches_extension_key():
 
 def test_install_and_uninstall(home):
     lines = []
-    chosen = integration.install(home, ["firefox", "chrome", "brave"], log=lines.append)
-    assert [b.name for b in chosen] == ["firefox", "chrome", "brave"]
+    chosen = integration.install(home, ["firefox", "chrome", "brave-flatpak"], log=lines.append)
+    assert [b.name for b in chosen] == ["firefox", "chrome", "brave-flatpak"]
 
     firefox = json.loads((home / ".mozilla/native-messaging-hosts/io.github.adiashishz.ldm.json").read_text())
     chrome = json.loads((home / ".config/google-chrome/NativeMessagingHosts/io.github.adiashishz.ldm.json").read_text())
@@ -72,6 +72,38 @@ def test_install_and_uninstall(home):
     assert integration.SYSTEMCTL_CALLS[2:] == [("disable", "ldm.service"), ("daemon-reload",)]
     assert not (services / "io.github.adiashishz.LDM.Service.service").exists()
     assert not (brave_dir / "data/ldm/ldm_nmhost.py").exists()
+
+
+def test_chromium_and_brave_outside_flatpak(home):
+    integration.install(home, ["chromium", "brave"], log=lambda _: None)
+    for folder in ("chromium", "BraveSoftware/Brave-Browser"):
+        manifest = json.loads((home / ".config" / folder / "NativeMessagingHosts/io.github.adiashishz.ldm.json")
+                              .read_text())
+        assert manifest["allowed_origins"] == [f"chrome-extension://{integration.CHROME_EXTENSION_ID}/"]
+        assert manifest["path"] == str(home / ".local/share/ldm/native-host/ldm_nmhost.py")
+
+
+def test_detection_ignores_snap_chromium_and_explains(home, monkeypatch):
+    (home / ".var/app/com.brave.Browser").rmdir()  # only the browsers set up below
+    monkeypatch.setattr(integration.shutil, "which",
+                        lambda c: f"/snap/bin/{c}" if c in ("chromium", "firefox") else None)
+    (home / "snap/chromium").mkdir(parents=True)
+    (home / "snap/firefox").mkdir(parents=True)
+    known = integration.browsers(home)
+    assert not known["chromium"].installed()  # the bridge can't work from inside the Snap
+    assert known["firefox"].installed()
+    lines = []
+    chosen = integration.install(home, log=lines.append)
+    assert [b.name for b in chosen] == ["firefox"]
+    assert any("Firefox is a Snap" in line for line in lines)
+    assert any("Chromium as a Snap" in line for line in lines)
+
+
+def test_profile_folder_counts_as_installed(home, monkeypatch):
+    (home / ".var/app/com.brave.Browser").rmdir()  # only the browsers set up below
+    monkeypatch.setattr(integration.shutil, "which", lambda c: None)
+    (home / ".config/BraveSoftware/Brave-Browser").mkdir(parents=True)
+    assert [n for n, b in integration.browsers(home).items() if b.installed()] == ["brave"]
 
 
 def test_dry_run_writes_nothing(home):

@@ -22,6 +22,9 @@ def private_folders(tmp_path_factory, monkeypatch):
     folders = tmp_path_factory.mktemp("user-folders")
     monkeypatch.setenv("XDG_DOWNLOAD_DIR", str(folders / "Downloads"))
     monkeypatch.setenv("XDG_DOCUMENTS_DIR", str(folders / "Documents"))
+    # The daily yt-dlp check must not reach GitHub (nothing listens on port 9).
+    monkeypatch.setenv("LDM_YTDLP_RELEASES", "http://127.0.0.1:9/releases")
+    monkeypatch.setattr("ldm.ytdlp.RELEASES", "http://127.0.0.1:9/releases")
     return folders
 
 

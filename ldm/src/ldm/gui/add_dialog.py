@@ -13,6 +13,7 @@ from ..format import STATE_LABELS, human
 from ..hlskey import aes_hex
 from ..nmhost import header_name
 from .client import DaemonClient
+from .compat import spinner
 from .schedule_rows import ScheduleEditor
 from .dialogs import is_url, parse_limit, read_clipboard_url, short_path
 
@@ -106,7 +107,7 @@ class AddDialog(Adw.Dialog):
         self.url = Adw.EntryRow(title="Link", text=url)
         self.resume = Gtk.Label(valign=Gtk.Align.CENTER)
         self.resume.add_css_class("caption-heading")
-        self.spinner = Adw.Spinner(visible=False, valign=Gtk.Align.CENTER)
+        self.spinner = spinner(visible=False, valign=Gtk.Align.CENTER)
         self.url.add_suffix(self.spinner)
         self.url.add_suffix(self.resume)
         self.name = Adw.EntryRow(title="Save as", text=name or "")

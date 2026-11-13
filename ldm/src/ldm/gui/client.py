@@ -243,6 +243,9 @@ class DaemonClient(GObject.Object):
     def import_downloads(self, text: str, callback: Callback | None = None) -> None:
         self._call("ImportDownloads", "s", (text,), callback)
 
+    def update_ytdlp(self, callback: Callback) -> None:
+        self._call("UpdateYtDlp", "", (), callback, NO_TIMEOUT)
+
     def checksum(self, download_id: int, algorithm: str, callback: Callback) -> None:
         self._call("Checksum", "ts", (download_id, algorithm), callback, NO_TIMEOUT)
 

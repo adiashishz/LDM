@@ -22,7 +22,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from . import backup, files, media, torrent, transfer
+from . import backup, files, media, torrent, transfer, ytdlp
 from .engine import DownloadError, Downloader, new_client, probe
 from .hlskey import aes_hex
 from .media import MediaDownloader
@@ -43,6 +43,7 @@ TORRENT_OPTIONS = {"priorities", "sequential", "metadata", "peers"}
 WINDOW_KEYS = ("schedule_start", "schedule_stop", "schedule_days")  # a download's own times override the defaults
 RUN_OPTIONS = {"scheduled", "unmetered_only", *WINDOW_KEYS}  # stored in options_json for every kind
 CONDITION_TICK = 30.0
+YTDLP_FIRST_CHECK = 600  # seconds after the service starts, then daily
 CLEANUP_INTERVAL = 3600.0  # seconds between "remove old entries" checks
 BACKUP_INTERVALS = {"daily": 86400, "weekly": 7 * 86400}
 LOG_LINES = 300  # diagnostics kept per download
@@ -86,8 +87,10 @@ class Manager:
                  downloader_options: dict[str, Any] | None = None, progress_interval: float = 0.5,
                  torrent_listen_host: str = "0.0.0.0", conditions: Conditions | None = None,
                  inhibitor=None, clock: Callable[[], datetime] = datetime.now, passwords=None,
-                 passwords_path: Path | None = None):
+                 passwords_path: Path | None = None, ytdlp_releases: str | None = None):
         self.store = store
+        self._ytdlp_releases = ytdlp_releases or ytdlp.RELEASES
+        self._ytdlp_not_before = time.monotonic() + YTDLP_FIRST_CHECK  # keep logging in quiet
         # Keyring (or file) for proxy and site-login passwords: opened only when one is needed.
         self._passwords = passwords
         self._passwords_path = passwords_path or default_db_path("passwords.json")
@@ -129,6 +132,7 @@ class Manager:
         self.on_autostart: Callable[[bool], None] | None = None
         self.on_all_finished: Callable[[str], None] | None = None  # finish_action, when the queue is empty
         self.on_started: Callable[[int], None] | None = None       # a download started (cancels a countdown)
+        self.on_restart: Callable[[], None] | None = None          # restart the service (new yt-dlp)
 
     # --- lifecycle -------------------------------------------------------------------------
 
@@ -572,6 +576,9 @@ class Manager:
         settings["backup_password_set"] = ("backup", "backup") in self._secrets
         settings["backup_folder"] = str(self._backup_folder(settings))
         settings["passwords_in"] = getattr(self._passwords, "where", "")     # keyring / file / memory
+        settings["ytdlp_version"] = media.YTDLP_VERSION                     # in use by this service
+        waiting = ytdlp.user_version()
+        settings["ytdlp_pending"] = waiting if ytdlp.version_key(waiting) > ytdlp.version_key(media.YTDLP_VERSION) else ""
         return settings
 
     def update_settings(self, values: dict[str, Any]) -> None:
@@ -1025,6 +1032,7 @@ class Manager:
             self._cleanup()
             self._scheduled_backup()
             self._refresh_tracker_list()
+            self._check_ytdlp()
             await asyncio.sleep(CONDITION_TICK)
             self.conditions_changed()
 
@@ -1215,6 +1223,49 @@ class Manager:
                 log.info("automatic backup: %s", path)
             except ManagerError as e:
                 log.warning("automatic backup failed: %s", e)
+
+        self._spawn(run())
+
+    # --- yt-dlp --------------------------------------------------------------------------------
+
+    async def update_ytdlp(self) -> str:
+        """Fetch a newer yt-dlp for this user. Returns its version, "" when already up to date.
+
+        The service imports yt-dlp once, so it restarts itself to use the new one when nothing is
+        downloading; otherwise the new version is used from the next start."""
+        current = max(media.YTDLP_VERSION, ytdlp.user_version() or "", key=ytdlp.version_key)
+        try:
+            async with new_client(net=await self._net().resolve(self._ytdlp_releases)) as client:
+                new = await ytdlp.update(client, current, self._ytdlp_releases)
+        except httpx.HTTPError as e:
+            raise DownloadError(f"could not update yt-dlp: {e}") from e
+        except ValueError as e:
+            raise DownloadError(str(e)) from e
+        if new:
+            log.info("yt-dlp %s downloaded to %s", new, ytdlp.user_copy())
+            self._restart_when_idle()
+        return new or ""
+
+    def _restart_when_idle(self) -> None:
+        if self._tasks or self.on_restart is None:
+            return  # picked up when the service next starts
+        log.info("restarting to use the new yt-dlp")
+        asyncio.get_running_loop().call_later(1, self.on_restart)  # after the D-Bus reply has gone out
+
+    def _check_ytdlp(self) -> None:
+        if time.monotonic() < self._ytdlp_not_before:
+            return
+        settings = self.store.get_settings()
+        now = self._clock().timestamp()
+        if not settings["ytdlp_auto_update"] or now - settings["ytdlp_checked"] < 86400:
+            return
+        self.store.set_setting("ytdlp_checked", now)
+
+        async def run() -> None:
+            try:
+                await self.update_ytdlp()
+            except DownloadError as e:
+                log.warning("%s", e)
 
         self._spawn(run())
 

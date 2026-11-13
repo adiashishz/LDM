@@ -5,7 +5,7 @@ description = "Linux download manager (v1, Python)"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "Aditya Ashish" }]
-dependencies = ["httpx[socks]>=0.27", "dbus-fast>=2.20", "yt-dlp[default]>=2026.1", "dnspython>=2.6",
+dependencies = ["httpx[socks]>=0.26", "dbus-fast>=2.20", "yt-dlp[default]>=2026.1", "dnspython>=2.6",
                 "secretstorage>=3.3", "cryptography>=41"]
 
 [project.urls]
@@ -13,14 +13,14 @@ Homepage = "https://github.com/adiashishz/LDM"
 Issues = "https://github.com/adiashishz/LDM/issues"
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=7.4"]
 gui = ["PyGObject>=3.50"]  # usually the distro package (python3-gobject)
 
 [project.scripts]
 ldm = "ldm.cli:main"
 
 [project.gui-scripts]
-ldm-gui = "ldm.gui.app:main"
+ldm-gui = "ldm.gui:main"
 
 [build-system]
 requires = ["hatchling"]

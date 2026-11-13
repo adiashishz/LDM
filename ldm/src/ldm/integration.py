@@ -35,19 +35,49 @@ class Browser:
     installed: Callable[[], bool]
 
 
+def _native(home: Path, config_dir: str, *commands: str) -> Callable[[], bool]:
+    """Installed outside Snap: one of the commands is on PATH (not /snap/bin), or its profile folder exists."""
+    def check() -> bool:
+        found = (shutil.which(c) for c in commands)
+        return any(f and not f.startswith("/snap/") for f in found) or (home / ".config" / config_dir).exists()
+    return check
+
+
+def snap_installed(home: Path, name: str) -> bool:
+    return Path("/snap/bin", name).exists() or (home / "snap" / name).exists()
+
+
 def browsers(home: Path) -> dict[str, Browser]:
     data = Path(os.environ.get("XDG_DATA_HOME") or home / ".local/share")
     host_dir = data / "ldm" / "native-host"
     brave_app = home / ".var/app" / BRAVE_FLATPAK
+    config = home / ".config"
     return {
+        # Snap Firefox (Ubuntu) also reads ~/.mozilla through the WebExtensions portal.
         "firefox": Browser("firefox", "firefox", home / ".mozilla/native-messaging-hosts", host_dir, None,
                            lambda: bool(shutil.which("firefox")) or (home / ".mozilla").exists()),
-        "chrome": Browser("chrome", "chromium", home / ".config/google-chrome/NativeMessagingHosts", host_dir,
-                          None, lambda: bool(shutil.which("google-chrome")) or (home / ".config/google-chrome").exists()),
-        "brave": Browser("brave", "chromium",
-                         brave_app / "config/BraveSoftware/Brave-Browser/NativeMessagingHosts",
-                         brave_app / "data/ldm", BRAVE_FLATPAK, brave_app.exists),
+        "chrome": Browser("chrome", "chromium", config / "google-chrome/NativeMessagingHosts", host_dir,
+                          None, _native(home, "google-chrome", "google-chrome", "google-chrome-stable")),
+        "chromium": Browser("chromium", "chromium", config / "chromium/NativeMessagingHosts", host_dir, None,
+                            _native(home, "chromium", "chromium", "chromium-browser")),
+        "brave": Browser("brave", "chromium", config / "BraveSoftware/Brave-Browser/NativeMessagingHosts", host_dir,
+                         None, _native(home, "BraveSoftware/Brave-Browser", "brave", "brave-browser")),
+        "brave-flatpak": Browser("brave-flatpak", "chromium",
+                                 brave_app / "config/BraveSoftware/Brave-Browser/NativeMessagingHosts",
+                                 brave_app / "data/ldm", BRAVE_FLATPAK, brave_app.exists),
     }
+
+
+def snap_notes(home: Path, chosen: list[Browser]) -> list[str]:
+    """What to tell Ubuntu users whose browsers are Snaps."""
+    notes = []
+    if snap_installed(home, "firefox") and any(b.name == "firefox" for b in chosen):
+        notes.append("Firefox is a Snap: the first time the extension connects, allow it in the dialog that asks "
+                     "whether Firefox may start programs outside the sandbox")
+    if snap_installed(home, "chromium"):
+        notes.append("Chromium as a Snap can't start programs outside its sandbox, so the extension can't reach "
+                     "LDM there; use Firefox, Google Chrome or Brave (or Chromium from a .deb or Flatpak)")
+    return notes
 
 
 def host_manifest(browser: Browser) -> dict:
@@ -143,6 +173,8 @@ def install(home: Path, selected: list[str] | None = None, dry_run: bool = False
                 log(f"ran: {' '.join(command)}")
             else:
                 log(f"{browser.name} runs in Flatpak; allow it to reach ldm with:\n  {' '.join(command)}")
+    for note in snap_notes(home, chosen):
+        log(note)
     if not chosen:
         log("no supported browser found (use --browser to choose)")
     return chosen
