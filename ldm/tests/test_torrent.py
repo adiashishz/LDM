@@ -33,8 +33,12 @@ class Swarm:
         self.torrent_file.write_bytes(self.data)
         self.session = lt.session({"listen_interfaces": "127.0.0.1:0", "enable_dht": False, "enable_lsd": False,
                                    "enable_upnp": False, "enable_natpmp": False,
-                                   "upload_rate_limit": upload_limit,
-                                   "ignore_limits_on_local_network": False})  # else 127.0.0.1 is unlimited
+                                   "upload_rate_limit": upload_limit})
+        # Rate limits skip local peers (127.0.0.1) unless every address is in the global peer class.
+        # (libtorrent 2.1 removed the old ignore_limits_on_local_network setting; this works on 2.0 and 2.1.)
+        everyone = lt.ip_filter()
+        everyone.add_rule("0.0.0.0", "255.255.255.255", 1 << lt.session.global_peer_class_id)
+        self.session.set_peer_class_filter(everyone)
         params = lt.add_torrent_params()
         params.ti = self.info
         params.save_path = str(self.src.parent)
