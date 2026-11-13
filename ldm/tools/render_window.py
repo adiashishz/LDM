@@ -10,7 +10,7 @@ import os
 import sys
 from pathlib import Path
 
-from ldm.gui.app import Application  # pins Gtk 4 / Adw 1 before gi.repository imports
+from ldm.gui.app import Application  # pins Gtk 4 / Adw 1 before gi.repository imports (via ldm.gui)
 from ldm.gui.preferences import PreferencesDialog
 
 from gi.repository import Gio, GLib, Gtk  # noqa: E402

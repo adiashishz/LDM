@@ -18,7 +18,17 @@ pytestmark = pytest.mark.skipif(not (shutil.which("ffmpeg") and shutil.which("ff
 
 SOURCES = ["-f", "lavfi", "-i", "testsrc=size={w}x{h}:rate=25", "-f", "lavfi", "-i", "sine=frequency=440",
            "-t", "4"]
-VIDEO = ["-c:v", "libopenh264", "-b:v", "200k", "-c:a", "aac", "-b:a", "64k"]
+
+
+def h264_encoder() -> str:
+    """Fedora's ffmpeg-free has libopenh264; Debian, Ubuntu and Arch's ffmpeg have libx264."""
+    if not shutil.which("ffmpeg"):
+        return "libx264"
+    encoders = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, text=True).stdout
+    return next((e for e in ("libx264", "libopenh264") if f" {e} " in encoders), "libx264")
+
+
+VIDEO = ["-c:v", h264_encoder(), "-b:v", "200k", "-c:a", "aac", "-b:a", "64k"]
 
 
 def ffmpeg(*args, cwd):

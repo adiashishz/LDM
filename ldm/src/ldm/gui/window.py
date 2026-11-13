@@ -13,6 +13,7 @@ from ..clipboard import Offer
 from ..filetypes import LABELS as FILE_TYPE_LABELS
 from ..format import parse_rate
 from .add_dialog import AddDialog
+from .compat import toggle_group
 from .dialogs import ask_text, confirm, is_url, limit_text, read_clipboard_url, short_path
 from .model import FINISH_ACTIONS, SORTS, DownloadItem
 from .row import DownloadRow, first_icon
@@ -131,9 +132,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.select_button.bind_property("active", self.selection, "active",
                                          GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE)
         header.pack_end(self.select_button)
-        self.filters = Adw.ToggleGroup()
-        for name, label in VIEW_LABELS:
-            self.filters.add(Adw.Toggle(name=name, label=label))
+        self.filters = toggle_group(VIEW_LABELS)
         self.filters.set_active_name("all")
         self.filters.connect("notify::active-name", self._show_view)
         header.set_title_widget(self.filters)
