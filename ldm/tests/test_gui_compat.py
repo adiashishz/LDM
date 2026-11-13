@@ -1,5 +1,7 @@
 """Fallbacks for libadwaita widgets newer than 1.5, and the toolkit version check."""
 
+from types import SimpleNamespace
+
 import pytest
 
 gi = pytest.importorskip("gi")
@@ -34,8 +36,9 @@ def test_linked_toggles_act_like_a_toggle_group():
 
 
 def test_helpers_pick_the_fallback_on_old_libadwaita(monkeypatch):
-    monkeypatch.delattr(Adw, "ToggleGroup", raising=False)
-    monkeypatch.delattr(Adw, "Spinner", raising=False)
+    # PyGObject resolves Adw attributes lazily from the typelib, so delattr on Adw itself doesn't stick:
+    # give compat an Adw without the 1.6/1.7 widgets instead.
+    monkeypatch.setattr(compat, "Adw", SimpleNamespace())
     assert isinstance(compat.toggle_group(ITEMS), compat.LinkedToggles)
     assert isinstance(compat.spinner(visible=False), Gtk.Spinner)
 
