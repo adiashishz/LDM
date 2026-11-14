@@ -127,7 +127,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: debian/tests
+          sparse-checkout: ldm/packaging
 
       - uses: actions/download-artifact@v4
         with:
@@ -143,4 +143,4 @@ jobs:
       - name: Smoke test as a normal user
         run: |
           useradd -m tester
-          runuser -u tester -- sh debian/tests/smoke
+          runuser -u tester -- sh ldm/packaging/smoke-test.sh
