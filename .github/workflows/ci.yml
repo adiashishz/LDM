@@ -206,3 +206,66 @@ jobs:
         run: |
           useradd -m tester
           runuser -u tester -- sh ldm/packaging/smoke-test.sh
+
+  flatpak:
+    name: Flatpak
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
+      options: --privileged
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the Node.js SDK extension
+        # Installed explicitly: updating the SDK that ships in the image fails on its filesystem.
+        run: flatpak install -y --noninteractive --system flathub org.freedesktop.Sdk.Extension.node24//26.08
+
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: ldm.flatpak
+          manifest-path: ldm/packaging/io.github.adiashishz.LDM.yml
+          # ffmpeg, Boost and libtorrent are rebuilt only when the manifest or the dependencies change.
+          cache-key: flatpak-${{ hashFiles('ldm/packaging/io.github.adiashishz.LDM.yml', 'ldm/packaging/flatpak-*.yml') }}
+          upload-artifact: true
+
+      - name: Lint for Flathub
+        # Screenshots are mirrored by Flathub's own build (and the URLs point at main), so those two
+        # findings can't pass here; any other error fails the job.
+        run: |
+          for target in "manifest ldm/packaging/io.github.adiashishz.LDM.yml" "repo repo"; do
+            flatpak-builder-lint --exceptions $target > lint.json || true
+            cat lint.json
+            python3 -c 'import json, sys
+          known = {"appstream-missing-screenshots", "appstream-screenshots-not-mirrored-in-ostree"}
+          errors = set(json.load(open("lint.json")).get("errors", [])) - known
+          sys.exit(f"Flathub lint errors: {sorted(errors)}" if errors else 0)'
+          done
+
+  flatpak-install:
+    name: Install the Flatpak
+    needs: flatpak
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
+      options: --privileged
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: ldm/packaging
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "*ldm*"
+          merge-multiple: true
+          path: dist/
+
+      - name: Install the bundle
+        run: flatpak install -y --noninteractive --system dist/ldm.flatpak
+
+      - name: Smoke test inside the sandbox
+        # The SDK (--devel) brings dbus-run-session; the app's own files are what's tested.
+        run: |
+          flatpak run --devel --command=sh --filesystem="$PWD/ldm/packaging:ro" \
+            io.github.adiashishz.LDM "$PWD/ldm/packaging/smoke-test.sh"
