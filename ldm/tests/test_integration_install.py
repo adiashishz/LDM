@@ -27,6 +27,8 @@ def home(tmp_path, monkeypatch):
 
 
 def test_chrome_id_matches_extension_key():
+    if not EXTENSION.is_dir():
+        pytest.skip("the extension sources are not next to the tests (distribution package build)")
     manifest = json.loads((EXTENSION / "manifest.base.json").read_text())
     der = base64.b64decode(manifest["chromium"]["key"])
     derived = "".join(chr(ord("a") + int(c, 16)) for c in hashlib.sha256(der).hexdigest()[:32])
@@ -85,8 +87,9 @@ def test_chromium_and_brave_outside_flatpak(home):
 
 def test_detection_ignores_snap_chromium_and_explains(home, monkeypatch):
     (home / ".var/app/com.brave.Browser").rmdir()  # only the browsers set up below
-    monkeypatch.setattr(integration.shutil, "which",
-                        lambda c: f"/snap/bin/{c}" if c in ("chromium", "firefox") else None)
+    snaps = {"chromium": "/snap/bin/chromium", "firefox": "/snap/bin/firefox", "ldm": "/usr/bin/ldm",
+             "ldm-gui": "/usr/bin/ldm-gui"}  # LDM's own commands as installed, wherever the tests run
+    monkeypatch.setattr(integration.shutil, "which", snaps.get)
     (home / "snap/chromium").mkdir(parents=True)
     (home / "snap/firefox").mkdir(parents=True)
     known = integration.browsers(home)
