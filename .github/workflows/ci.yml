@@ -250,7 +250,8 @@ jobs:
             cat lint.json
             python3 -c 'import json, sys
           known = {"appstream-missing-screenshots", "appstream-screenshots-not-mirrored-in-ostree"}
-          errors = set(json.load(open("lint.json")).get("errors", [])) - known
+          text = open("lint.json").read().strip()  # nothing printed: nothing to report
+          errors = set(json.loads(text).get("errors", []) if text else []) - known
           sys.exit(f"Flathub lint errors: {sorted(errors)}" if errors else 0)'
           done
 
