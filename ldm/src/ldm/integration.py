@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import nmhost
+from . import nmhost, sandbox
 from .busnames import BUS_NAME
 
 HOST_NAME = "io.github.adiashishz.ldm"  # native messaging host name used by the extension
@@ -80,9 +80,23 @@ def snap_notes(home: Path, chosen: list[Browser]) -> list[str]:
     return notes
 
 
+# LDM as a Flatpak: browsers on the host can't start a program inside the sandbox, so they start this
+# launcher, which runs the bridge with the host's Python (it needs only the standard library and gdbus,
+# and reaches the sandboxed service over D-Bus) or, failing that, inside the Flatpak.
+FLATPAK_LAUNCHER = f"""#!/bin/sh
+# LDM's browser bridge (LDM runs as a Flatpak). Written by `ldm install-browser-integration`.
+if command -v python3 >/dev/null 2>&1 && command -v gdbus >/dev/null 2>&1; then
+    exec python3 "$(dirname "$0")/ldm_nmhost.py" "$@"
+fi
+exec flatpak run --command=ldm-nmhost {GUI_ID} "$@"
+"""
+LAUNCHER_NAME = "ldm-nmhost"
+
+
 def host_manifest(browser: Browser) -> dict:
+    script = LAUNCHER_NAME if sandbox.flatpak() else "ldm_nmhost.py"
     manifest = {"name": HOST_NAME, "description": "ldm download manager bridge",
-                "path": str(browser.host_dir / "ldm_nmhost.py"), "type": "stdio"}
+                "path": str(browser.host_dir / script), "type": "stdio"}
     if browser.kind == "firefox":
         manifest["allowed_extensions"] = [FIREFOX_EXTENSION_ID]
     else:
@@ -135,13 +149,22 @@ def activation_files(data: Path, config: Path) -> dict[Path, str]:
 def plan(home: Path, selected: list[str] | None = None) -> tuple[dict[Path, str | bytes], list[Browser]]:
     """Files to write (path -> content) for the selected or detected browsers."""
     known = browsers(home)
-    chosen = [known[name] for name in selected] if selected else [b for b in known.values() if b.installed()]
+    if sandbox.flatpak():
+        # The sandbox can't see which browsers are installed: set up all of them (a manifest for a browser
+        # that isn't there does nothing). Flatpak browsers keep their files in their own sandboxes.
+        known = {name: b for name, b in known.items() if not b.flatpak}
+        chosen = [known[name] for name in selected if name in known] if selected else list(known.values())
+    else:
+        chosen = [known[name] for name in selected] if selected else [b for b in known.values() if b.installed()]
     data = Path(os.environ.get("XDG_DATA_HOME") or home / ".local/share")
     config = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
-    files: dict[Path, str | bytes] = dict(activation_files(data, config))
+    # A Flatpak's desktop file, icons and D-Bus activation files are exported by Flatpak itself.
+    files: dict[Path, str | bytes] = {} if sandbox.flatpak() else dict(activation_files(data, config))
     host_source = Path(nmhost.__file__).read_bytes()
     for browser in chosen:
         files[browser.host_dir / "ldm_nmhost.py"] = host_source
+        if sandbox.flatpak():
+            files[browser.host_dir / LAUNCHER_NAME] = FLATPAK_LAUNCHER.encode()
         files[browser.manifest_dir / f"{HOST_NAME}.json"] = json.dumps(host_manifest(browser), indent=2) + "\n"
     return files, chosen
 
@@ -159,7 +182,11 @@ def install(home: Path, selected: list[str] | None = None, dry_run: bool = False
             path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         else:
             path.write_text(content)
-    if not dry_run:
+    if not dry_run and sandbox.flatpak():
+        log("magnet links and .torrent files: choose LDM as the app that opens them in your desktop's settings")
+        if _autostart_wanted() and set_autostart(True):
+            log("the download service now starts at login")
+    elif not dry_run:
         _reload_bus_config()
         _set_default_handler(home, log)
         _systemctl("daemon-reload")
@@ -173,7 +200,7 @@ def install(home: Path, selected: list[str] | None = None, dry_run: bool = False
                 log(f"ran: {' '.join(command)}")
             else:
                 log(f"{browser.name} runs in Flatpak; allow it to reach ldm with:\n  {' '.join(command)}")
-    for note in snap_notes(home, chosen):
+    for note in ([] if sandbox.flatpak() else snap_notes(home, chosen)):
         log(note)
     if not chosen:
         log("no supported browser found (use --browser to choose)")
@@ -228,7 +255,10 @@ def _remove_default_handler(home: Path, log: Callable[[str], None]) -> None:
 
 
 def set_autostart(enabled: bool) -> bool:
-    """Start the daemon at login (systemd user unit), or stop doing so. Returns whether it worked."""
+    """Start the daemon at login (systemd user unit, or the Background portal in a Flatpak), or stop
+    doing so. Returns whether it worked."""
+    if sandbox.flatpak():
+        return sandbox.request_autostart(enabled)
     return _systemctl("enable" if enabled else "disable", SYSTEMD_UNIT)
 
 
