@@ -131,6 +131,8 @@ def test_autostart_goes_through_the_portal_in_a_flatpak(home, flatpak):
 
 
 def test_install_data_for_a_flatpak(tmp_path):
+    if not (ROOT / "packaging/install-data.py").exists():
+        pytest.skip("the packaging scripts are not next to the tests (distribution package build)")
     subprocess.run([sys.executable, str(ROOT / "packaging/install-data.py"), str(tmp_path), "--prefix", "/app",
                     "--flatpak"], check=True, capture_output=True)
     files = sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*") if p.is_file())
