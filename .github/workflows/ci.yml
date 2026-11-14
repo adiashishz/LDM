@@ -232,7 +232,9 @@ jobs:
         # Installed explicitly: updating the SDK that ships in the image fails on its filesystem.
         run: flatpak install -y --noninteractive --system flathub org.freedesktop.Sdk.Extension.node24//26.08
 
-      - uses: actions/cache@v4
+      - name: Restore the build cache
+        id: cache
+        uses: actions/cache/restore@v4
         with:
           path: .flatpak-builder
           # ffmpeg, Boost and libtorrent are rebuilt only when the manifest or the dependencies change.
@@ -247,20 +249,29 @@ jobs:
             --repo=repo build-dir ldm/packaging/io.github.adiashishz.LDM.yml
           flatpak build-bundle repo ldm.flatpak io.github.adiashishz.LDM
 
+      - name: Save the build cache
+        # Right after the build, so a later step failing doesn't throw the compiled modules away.
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .flatpak-builder
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
       - uses: actions/upload-artifact@v4
         with:
           name: flatpak
           path: ldm.flatpak
 
       - name: Lint for Flathub
-        # Screenshots are mirrored by Flathub's own build (and the URLs point at main), so those two
+        # Screenshots are mirrored to Flathub's servers by Flathub's own build, so the screenshot
         # findings can't pass here; any other error fails the job.
         run: |
           for target in "manifest ldm/packaging/io.github.adiashishz.LDM.yml" "repo repo"; do
             flatpak-builder-lint --exceptions $target > lint.json || true
             cat lint.json
             python3 -c 'import json, sys
-          known = {"appstream-missing-screenshots", "appstream-screenshots-not-mirrored-in-ostree"}
+          known = {"appstream-missing-screenshots", "appstream-screenshots-not-mirrored-in-ostree",
+                   "appstream-external-screenshot-url"}
           text = open("lint.json").read().strip()  # nothing printed: nothing to report
           errors = set(json.loads(text).get("errors", []) if text else []) - known
           sys.exit(f"Flathub lint errors: {sorted(errors)}" if errors else 0)'
