@@ -1,0 +1,56 @@
+# Maintainer: Aditya Ashish <adiashishz at gmail dot com>
+# Arch package for LDM releases (AUR: ldm-downloader). The -git variant is in ../ldm-downloader-git.
+
+pkgname=ldm-downloader
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Download manager for files, videos and torrents, with a browser extension (GTK 4)"
+arch=('any')
+url="https://github.com/adiashishz/LDM"
+license=('MIT')
+depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'python-httpx' 'python-socksio' 'python-dbus-fast'
+         'python-dnspython' 'python-secretstorage' 'python-cryptography' 'yt-dlp' 'ffmpeg' 'glib2'
+         'pango' 'python-httpcore' 'hicolor-icon-theme')
+makedepends=('python-build' 'python-installer' 'python-hatchling')
+checkdepends=('python-pytest' 'dbus' 'libtorrent-rasterbar')
+optdepends=('libtorrent-rasterbar: torrents'
+            'nodejs: YouTube (yt-dlp needs a JavaScript runtime)'
+            'deno: YouTube (yt-dlp needs a JavaScript runtime)'
+            'wl-clipboard: copied-link prompt on Wayland'
+            'xclip: copied-link prompt on X11')
+conflicts=('ldm')  # the AUR device mounter also installs /usr/bin/ldm
+backup=('etc/xdg/autostart/io.github.adiashishz.LDM.ClipboardWatch.desktop'
+        'etc/opt/chrome/native-messaging-hosts/io.github.adiashishz.ldm.json'
+        'etc/chromium/native-messaging-hosts/io.github.adiashishz.ldm.json')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')  # set from the release tarball when a release is tagged
+
+build() {
+  cd "LDM-$pkgver/ldm"
+  python -m build --wheel --no-isolation
+  cd ../extension
+  python build.py
+}
+
+check() {
+  cd "LDM-$pkgver/ldm"
+  # Test the built wheel, with its `ldm` command, from a temporary install.
+  local site=$(python -c "import site; print(site.getsitepackages()[0])")
+  rm -rf test-install
+  python -m installer --destdir=test-install dist/*.whl
+  # GUI tests need a display; everything else runs offline against local servers and private buses.
+  PATH="$PWD/test-install/usr/bin:$PATH" PYTHONPATH="$PWD/test-install$site" \
+    python -m pytest -k "not gui" -p no:cacheprovider
+}
+
+package() {
+  cd "LDM-$pkgver"
+  python -m installer --destdir="$pkgdir" ldm/dist/*.whl
+  python ldm/packaging/install-data.py "$pkgdir" --prefix /usr --sysconfdir /etc --libexecdir /usr/lib
+  install -Dm644 -t "$pkgdir/usr/share/ldm/extension" extension/dist/*.zip
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  # Also a standalone script (the per-user installer copies it for browsers), so keep it runnable.
+  local site=$(python -c "import site; print(site.getsitepackages()[0])")
+  chmod 755 "$pkgdir$site/ldm/nmhost.py"
+}

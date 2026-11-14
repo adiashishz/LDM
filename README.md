@@ -47,12 +47,25 @@ Download the `.deb` for your system from the [latest release](https://github.com
 and install it; apt fetches the dependencies:
 
 ```sh
-sudo apt install ./ldm_0.2.0-1~ubuntu24.04_all.deb
+sudo apt install ./ldm-downloader_0.2.0-1~ubuntu24.04_all.deb
 ldm install-browser-integration   # once: magnet/.torrent links, Flatpak browsers such as Brave
 ```
 
 These distributions ship an older yt-dlp than YouTube needs, so the package includes a current one
 and LDM keeps a per-user copy up to date (Preferences → Video → Keep yt-dlp up to date).
+
+## Install on Arch Linux
+
+Build the package from this repository (an AUR package, `ldm-downloader`, is planned):
+
+```sh
+git clone https://github.com/adiashishz/LDM.git && cd LDM/ldm/packaging/arch/ldm-downloader-git
+makepkg -si
+ldm install-browser-integration   # once: magnet/.torrent links, Flatpak browsers such as Brave
+```
+
+The package is named `ldm-downloader`; the command is `ldm`. It conflicts with the AUR package `ldm`
+(a device mounter), which also installs `/usr/bin/ldm`.
 
 ## Install from source (Fedora)
 
@@ -103,10 +116,12 @@ More commands are in [`ldm/README.md`](ldm/README.md).
 
 ## Packaging
 
-- `ldm/packaging/ldm.spec` and `build-rpm.sh`: RPM for Fedora (COPR steps in `COPR.md`); release builds
+- `ldm/packaging/ldm-downloader.spec` and `build-rpm.sh`: RPM for Fedora (COPR steps in `COPR.md`); release builds
   are attached to the [GitHub releases](https://github.com/adiashishz/LDM/releases).
 - `debian/` and `ldm/packaging/build-deb.sh`: .deb for Debian and Ubuntu, with the yt-dlp release pinned in
   `debian/yt-dlp.pin`; CI builds, lints and test-installs it on Debian 13, Ubuntu 24.04 and 26.04.
+- `ldm/packaging/arch/` and `build-arch.sh`: PKGBUILDs for Arch (`ldm-downloader` for releases,
+  `ldm-downloader-git` for the latest commit); CI builds, lints and test-installs both.
 - `ldm/packaging/io.github.adiashishz.LDM.yml`: Flatpak manifest (not built yet).
 - `extension/sign-firefox.sh`: signs the Firefox add-on for permanent installs.
 

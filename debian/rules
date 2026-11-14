@@ -13,7 +13,7 @@ export PYBUILD_TEST_CUSTOM = 1
 export PYBUILD_TEST_ARGS = cd {build_dir} && env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
 	XDG_DATA_DIRS=$(CURDIR)/debian/.ytdlp:/usr/share {interpreter} -m pytest -k "not gui" -p no:cacheprovider
 
-DESTDIR = $(CURDIR)/debian/ldm
+DESTDIR = $(CURDIR)/debian/ldm-downloader
 
 %:
 	dh $@ --buildsystem=pybuild --sourcedirectory=ldm

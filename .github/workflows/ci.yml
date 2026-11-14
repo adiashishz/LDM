@@ -127,7 +127,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: debian/tests
+          sparse-checkout: ldm/packaging
 
       - uses: actions/download-artifact@v4
         with:
@@ -138,9 +138,71 @@ jobs:
         # Without Recommends: no system yt-dlp, so videos rely on the bundled copy.
         run: |
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ./dist/ldm_*.deb dbus-daemon
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ./dist/ldm-downloader_*.deb dbus-daemon
 
       - name: Smoke test as a normal user
         run: |
           useradd -m tester
-          runuser -u tester -- sh debian/tests/smoke
+          runuser -u tester -- sh ldm/packaging/smoke-test.sh
+
+  arch:
+    name: Arch package (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [release, git]
+    steps:
+      - name: Install the packaging tools
+        run: pacman -Syu --noconfirm --needed base-devel git namcap sudo
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # tags, for the -git package's version
+
+      - name: Build and lint (as a normal user, as makepkg requires)
+        run: |
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
+          chown -R builder: .
+          runuser -u builder -- git config --global --add safe.directory "$PWD"
+          runuser -u builder -- env ARCH_OUT=/tmp/archbuild ldm/packaging/build-arch.sh ${{ matrix.variant }}
+          mkdir dist && cp /tmp/archbuild/*/*.pkg.tar.zst dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-${{ matrix.variant }}
+          path: dist/
+
+  arch-install:
+    name: Install the Arch package (${{ matrix.variant }})
+    needs: arch
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [release, git]
+    steps:
+      - name: Install git for the checkout
+        run: pacman -Syu --noconfirm --needed git
+
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: ldm/packaging
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: arch-${{ matrix.variant }}
+          path: dist/
+
+      - name: Install on a clean system
+        run: pacman -U --noconfirm dist/*.pkg.tar.zst
+
+      - name: Smoke test as a normal user
+        run: |
+          useradd -m tester
+          runuser -u tester -- sh ldm/packaging/smoke-test.sh
