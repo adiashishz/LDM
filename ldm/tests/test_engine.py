@@ -30,14 +30,14 @@ def download(store, download_id, **kwargs):
     return asyncio.run(downloader(store, download_id, **kwargs).run())
 
 
-def pause_after_progress(store, download_id, timeout=10.0):
-    """Start the download and pause it as soon as some progress is saved. (Waiting a fixed time instead
-    could pause before anything arrived on a slow CI machine.)"""
+def pause_after_progress(store, download_id, at_least=1, timeout=10.0):
+    """Start the download and pause it once at least `at_least` bytes are saved. (Waiting a fixed time
+    instead could pause before anything arrived on a slow CI machine.)"""
     async def go():
         task = asyncio.create_task(downloader(store, download_id, persist_interval=0.05).run())
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
-        while sum(p.done for p in store.load_parts(download_id)) == 0 and loop.time() < deadline:
+        while sum(p.done for p in store.load_parts(download_id)) < at_least and loop.time() < deadline:
             await asyncio.sleep(0.02)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -84,7 +84,8 @@ def test_pause_and_resume_continues_where_it_stopped(tmp_path, http_server):
     data = payload(2_000_000)
     cfg, url = http_server(data=data, delay=0.01)
     store, did = new_download(tmp_path, url)
-    pause_after_progress(store, did)
+    # Enough saved that resuming clearly fetches less than the whole file (resuming re-requests a little).
+    pause_after_progress(store, did, at_least=len(data) // 4)
 
     assert store.get(did).state == "paused"
     saved = sum(p.done for p in store.load_parts(did))
