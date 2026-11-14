@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LDM — download manager for Linux</title>
+<meta name="description" content="LDM downloads files, videos and torrents on Linux. Pause today, resume after a reboot.">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<meta property="og:title" content="LDM — download manager for Linux">
+<meta property="og:description" content="Download files, videos and torrents. Pause today, resume after a reboot.">
+<meta property="og:image" content="{{SITE}}/screenshot.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cantarell:wght@400;700&amp;family=Source+Code+Pro:wght@400;500&amp;display=swap">
+<style>
+  /* GNOME's own look, so LDM's page feels like the app: Cantarell, warm greys, Adwaita blue. */
+  :root {
+    --bg: #f6f5f4; --card: #ffffff; --fg: #241f31; --fg-2: #3d3846; --dim: #5e5c64;
+    --line: rgba(0, 0, 6, .10); --shadow: 0 0 0 1px rgba(0, 0, 6, .07), 0 1px 3px rgba(0, 0, 6, .06);
+    --accent: #1c71d8; --accent-fg: #ffffff; --link: #1a5fb4;
+    --pill: #e3e1de; --term: #241f31; --term-fg: #f6f5f4; --term-button: #3d3846;
+    --code-bg: #f0eeec; --soon-bg: #fdf0d5; --soon-fg: #8a5100;
+    --sans: Cantarell, "Noto Sans", "Segoe UI", system-ui, sans-serif;
+    --mono: "Source Code Pro", "Noto Sans Mono", ui-monospace, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1e1e20; --card: #2e2e32; --fg: #f6f5f4; --fg-2: #deddda; --dim: #b0afb4;
+      --line: rgba(255, 255, 255, .10); --shadow: 0 0 0 1px rgba(255, 255, 255, .06);
+      --accent: #3584e4; --accent-fg: #ffffff; --link: #99c1f1;
+      --pill: #3a3a3e; --term: #121214; --term-fg: #f6f5f4; --term-button: #3a3a3e;
+      --code-bg: #3a3a3e; --soon-bg: #4d3a12; --soon-fg: #f8e45c;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.55 var(--sans); }
+  a { color: var(--link); }
+  .wrap { max-width: 860px; margin: 0 auto; padding-left: max(16px, 4vw); padding-right: max(16px, 4vw); }
+  h1, h2, h3 { line-height: 1.15; text-wrap: balance; }
+  h2 { margin: 0; font-size: 30px; }
+  code { font-family: var(--mono); font-size: .85em; background: var(--code-bg); padding: 2px 6px; border-radius: 4px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  header { max-width: 1120px; margin: 0 auto; padding: 14px max(16px, 4vw); display: flex; align-items: center;
+           justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--fg); text-decoration: none; font-weight: 700; font-size: 18px; }
+  nav { display: flex; gap: 2px; flex-wrap: wrap; }
+  nav a { padding: 8px 12px; border-radius: 8px; color: var(--fg-2); text-decoration: none; font-weight: 700; font-size: 15px; }
+  nav a:hover { background: var(--pill); }
+
+  .hero { padding-top: 48px; text-align: center; }
+  .hero .wrap { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+  .hero h1 { margin: 0; font-size: 52px; letter-spacing: -.5px; }
+  .hero .tagline { margin: 0; font-size: 24px; color: var(--fg-2); text-wrap: balance; }
+  .hero .meta { margin: 0; font-size: 14px; color: var(--dim); }
+  .hero-icon { width: 128px; height: 128px; filter: drop-shadow(0 6px 14px rgba(26, 95, 180, .25)); }
+  .buttons { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
+  .button { display: inline-flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 28px; border-radius: 999px;
+            font-weight: 700; text-decoration: none; }
+  .button.primary { background: var(--accent); color: var(--accent-fg); }
+  .button.secondary { background: var(--pill); color: var(--fg); }
+  .shot { max-width: 1000px; margin: 48px auto 0; padding: 0 max(16px, 4vw); }
+  .shot img { display: block; width: 100%; height: auto; border-radius: 14px;
+              box-shadow: 0 1px 2px rgba(0, 0, 0, .08), 0 18px 48px rgba(36, 31, 49, .16); }
+
+  section.part { padding-top: 96px; }
+  section.part .wrap { display: flex; flex-direction: column; gap: 20px; }
+
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 28px 44px; margin-top: 8px; }
+  .feature { display: flex; gap: 14px; align-items: flex-start; }
+  .feature svg { flex: none; margin-top: 4px; stroke: var(--accent); }
+  .feature h3 { margin: 0 0 4px; font-size: 19px; }
+  .feature p { margin: 0; color: var(--dim); }
+
+  .tabs { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; background: var(--pill); border-radius: 10px; align-self: flex-start; }
+  .tabs button { min-height: 40px; padding: 0 16px; border: 0; border-radius: 8px; background: transparent; color: var(--fg-2);
+                 font: 700 15px var(--sans); cursor: pointer; }
+  .tabs button[aria-selected="true"] { background: var(--card); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
+  .card { background: var(--card); border-radius: 12px; box-shadow: var(--shadow); }
+  .panel { padding: 22px; display: flex; flex-direction: column; gap: 14px; }
+  .panel h3 { margin: 0; font-size: 18px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .panel p { margin: 0; color: var(--dim); font-size: 15px; }
+  .soon { font-size: 13px; padding: 2px 10px; border-radius: 999px; background: var(--soon-bg); color: var(--soon-fg); }
+  .downloads { display: flex; gap: 10px; flex-wrap: wrap; }
+  .downloads a { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; border-radius: 10px;
+                 background: var(--accent); color: var(--accent-fg); font-weight: 700; text-decoration: none; font-size: 15px; }
+  .terminal { display: flex; align-items: center; gap: 10px; background: var(--term); color: var(--term-fg); border-radius: 8px;
+              padding: 10px 10px 10px 16px; }
+  .terminal code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; background: none; padding: 0; font-size: 14px; }
+  .terminal button { flex: none; min-height: 36px; padding: 0 14px; border: 0; border-radius: 6px; background: var(--term-button);
+                     color: var(--term-fg); font: 700 14px var(--sans); cursor: pointer; }
+
+  .stores { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .stores a { display: flex; flex-direction: column; gap: 2px; padding: 16px 18px; color: var(--fg); text-decoration: none; }
+  .stores span { font-size: 14px; color: var(--dim); }
+
+  .questions { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+  .questions details { padding: 18px 0; border-bottom: 1px solid var(--line); }
+  .questions summary { font-weight: 700; font-size: 18px; cursor: pointer; }
+  .questions p { margin: 10px 0 0; color: var(--dim); }
+
+  footer { max-width: 1120px; margin: 96px auto 0; padding: 28px max(16px, 4vw) 44px; border-top: 1px solid var(--line);
+           display: flex; gap: 8px 24px; flex-wrap: wrap; font-size: 14px; color: var(--dim); }
+
+  @media (max-width: 560px) {
+    .hero h1 { font-size: 40px; }
+    .hero .tagline { font-size: 20px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <a class="brand" href="#top"><img src="icon.svg" alt="" width="32" height="32">LDM</a>
+  <nav aria-label="Sections">
+    <a href="#what">What it does</a>
+    <a href="#install">Install</a>
+    <a href="#extension">Browser extension</a>
+    <a href="#questions">Questions</a>
+    <a href="{{REPO}}">GitHub</a>
+  </nav>
+</header>
+
+<main>
+  <section class="hero" id="top">
+    <div class="wrap">
+      <img class="hero-icon" src="icon.svg" alt="LDM icon" width="128" height="128">
+      <h1>LDM</h1>
+      <p class="tagline">Download files, videos and torrents. Pause today, resume after a reboot.</p>
+      <div class="buttons">
+        <a class="button primary" href="#install">
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/></svg>
+          Install LDM
+        </a>
+        <a class="button secondary" href="{{REPO}}">Source code</a>
+      </div>
+      <p class="meta">Version {{VERSION}} · Fedora, Debian, Ubuntu, Arch and Flatpak · MIT license</p>
+    </div>
+    <div class="shot">
+      <picture>
+        <source srcset="screenshot-dark.png" media="(prefers-color-scheme: dark)">
+        <img src="screenshot.png" width="1000" height="620"
+             alt="LDM's main window: two finished downloads, one paused, one downloading at 3 MiB/s and one whose link expired">
+      </picture>
+    </div>
+  </section>
+
+  <section class="part" id="what">
+    <div class="wrap">
+      <h2>What it does</h2>
+      <div class="features">
+        <div class="feature">
+          <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="4" height="6" rx="1"/><rect x="10" y="9" width="4" height="6" rx="1"/><rect x="17" y="9" width="4" height="6" rx="1"/></svg>
+          <div><h3>Fast and hard to break</h3><p>Up to 32 connections per file, automatic retries, and resume after a restart. An expired link can be swapped without losing progress.</p></div>
+        </div>
+        <div class="feature">
+          <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z"/></svg>
+          <div><h3>Videos from almost anywhere</h3><p>YouTube and the sites yt-dlp supports, HLS and DASH streams including encrypted HLS, with a size estimate for each quality.</p></div>
+        </div>
+        <div class="feature">
+          <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v7a6 6 0 0 0 12 0V3"/><path d="M6 3h3v7a3 3 0 0 0 6 0V3h3"/></svg>
+          <div><h3>Torrents built in</h3><p>Magnet links and .torrent files. Choose the files, download in order, seed if you want to.</p></div>
+        </div>
+        <div class="feature">
+          <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>
+          <div><h3>On your schedule</h3><p>Time windows, unmetered connections only, battery and data limits. Power off or suspend when the queue is done.</p></div>
+        </div>
+        <div class="feature">
+          <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18"/><path d="M12 3a14 14 0 0 0 0 18"/></svg>
+          <div><h3>Works with your browser</h3><p>The extension sends downloads to LDM with their cookies and finds the videos on a page.</p></div>
+        </div>
+        <div class="feature">
+          <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg>
+          <div><h3>Keeps going in the background</h3><p>Closing the window doesn't stop anything. You get a notification when a download finishes.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="part" id="install">
+    <div class="wrap">
+      <h2>Install</h2>
+      <div class="tabs" role="tablist" aria-label="Your system">
+        <button role="tab" id="tab-fedora" aria-controls="panel-fedora" aria-selected="true">Fedora</button>
+        <button role="tab" id="tab-ubuntu" aria-controls="panel-ubuntu" aria-selected="false" tabindex="-1">Ubuntu</button>
+        <button role="tab" id="tab-debian" aria-controls="panel-debian" aria-selected="false" tabindex="-1">Debian</button>
+        <button role="tab" id="tab-arch" aria-controls="panel-arch" aria-selected="false" tabindex="-1">Arch</button>
+        <button role="tab" id="tab-flatpak" aria-controls="panel-flatpak" aria-selected="false" tabindex="-1">Flatpak</button>
+      </div>
+
+      <div class="card">
+        <div class="panel" role="tabpanel" id="panel-fedora" aria-labelledby="tab-fedora">
+          <h3>Fedora 43 and 44</h3>
+          <p>Download the package and install it; dnf fetches the rest. A COPR repository with automatic updates is planned.</p>
+          <div class="downloads"><a href="{{DL}}/ldm-downloader-{{VERSION}}-1.fc44.noarch.rpm">Download .rpm</a></div>
+          <div class="terminal"><code>sudo dnf install ./ldm-downloader-{{VERSION}}-1.fc44.noarch.rpm</code><button type="button">Copy</button></div>
+        </div>
+        <div class="panel" role="tabpanel" id="panel-ubuntu" aria-labelledby="tab-ubuntu" hidden>
+          <h3>Ubuntu 24.04 and newer, Linux Mint 22</h3>
+          <p>Pick the package for your release. It brings a current yt-dlp, so YouTube works from the start.</p>
+          <div class="downloads">
+            <a href="{{DL}}/ldm-downloader_{{VERSION}}-1~ubuntu24.04_all.deb">Ubuntu 24.04 · Mint 22</a>
+            <a href="{{DL}}/ldm-downloader_{{VERSION}}-1~ubuntu26.04_all.deb">Ubuntu 26.04</a>
+          </div>
+          <div class="terminal"><code>sudo apt install ./ldm-downloader_{{VERSION}}-1~ubuntu24.04_all.deb</code><button type="button">Copy</button></div>
+        </div>
+        <div class="panel" role="tabpanel" id="panel-debian" aria-labelledby="tab-debian" hidden>
+          <h3>Debian 13</h3>
+          <p>Download the package and install it; apt fetches the rest. Debian 12 can use the Flatpak.</p>
+          <div class="downloads"><a href="{{DL}}/ldm-downloader_{{VERSION}}-1~deb13_all.deb">Download .deb</a></div>
+          <div class="terminal"><code>sudo apt install ./ldm-downloader_{{VERSION}}-1~deb13_all.deb</code><button type="button">Copy</button></div>
+        </div>
+        <div class="panel" role="tabpanel" id="panel-arch" aria-labelledby="tab-arch" hidden>
+          <h3>Arch Linux, Manjaro, EndeavourOS <span class="soon">AUR coming soon</span></h3>
+          <p>Until it is on the AUR, build the package from the release's PKGBUILD.</p>
+          <div class="terminal"><code>curl -LO {{DL}}/PKGBUILD &amp;&amp; makepkg -si</code><button type="button">Copy</button></div>
+        </div>
+        <div class="panel" role="tabpanel" id="panel-flatpak" aria-labelledby="tab-flatpak" hidden>
+          <h3>Any other distribution <span class="soon">Flathub coming soon</span></h3>
+          <p>The Flatpak saves to your Downloads folder; choosing another folder in LDM gives it access to that one.</p>
+          <div class="downloads"><a href="{{DL}}/ldm-downloader-{{VERSION}}-x86_64.flatpak">Download .flatpak</a></div>
+          <div class="terminal"><code>flatpak install --user ./ldm-downloader-{{VERSION}}-x86_64.flatpak</code><button type="button">Copy</button></div>
+        </div>
+      </div>
+      <p>Then, once: <code>ldm install-browser-integration</code> for magnet links and the browser extension
+        (as a Flatpak: <code>flatpak run --command=ldm io.github.adiashishz.LDM install-browser-integration</code>).
+        Checksums are in <a href="{{DL}}/SHA256SUMS">SHA256SUMS</a>.</p>
+    </div>
+  </section>
+
+  <section class="part" id="extension">
+    <div class="wrap">
+      <h2>Browser extension</h2>
+      <p>Clicks on download links go to LDM with the browser's cookies, so sign-in downloads work. On a video page, it lists the streams it found.</p>
+      <div class="stores">
+        <a class="card" href="{{REPO}}#browser-extension"><strong>Firefox</strong><span>Firefox Add-ons: coming soon</span></a>
+        <a class="card" href="{{REPO}}#browser-extension"><strong>Chrome</strong><span>Chrome Web Store: coming soon</span></a>
+        <a class="card" href="{{REPO}}#browser-extension"><strong>Brave</strong><span>Chrome Web Store: coming soon</span></a>
+      </div>
+    </div>
+  </section>
+
+  <section class="part" id="questions">
+    <div class="wrap">
+      <h2>Questions</h2>
+      <div class="questions">
+        <details><summary>Does it work on KDE, Xfce and other desktops?</summary><p>Yes. It is a GTK 4 app and runs on any desktop. The tray icon appears where the desktop has a tray.</p></details>
+        <details><summary>Why is there a background service?</summary><p>So downloads keep running when the window is closed. The command line, the browser extension and the window all talk to the same service.</p></details>
+        <details><summary>My distribution isn't listed.</summary><p>Use the Flatpak: it runs on any distribution with Flatpak installed.</p></details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <span>LDM {{VERSION}} · MIT license</span>
+  <a href="{{REPO}}">GitHub</a>
+  <a href="{{REPO}}/issues">Report a problem</a>
+  <a href="{{REPO}}/releases">Release notes</a>
+</footer>
+
+<script>
+  // Install tabs (arrow keys move between them) and Copy buttons.
+  const tabs = [...document.querySelectorAll('[role="tab"]')];
+  function select(tab) {
+    for (const t of tabs) {
+      const on = t === tab;
+      t.setAttribute("aria-selected", on);
+      t.tabIndex = on ? 0 : -1;
+      document.getElementById(t.getAttribute("aria-controls")).hidden = !on;
+    }
+  }
+  tabs.forEach((tab, i) => {
+    tab.addEventListener("click", () => select(tab));
+    tab.addEventListener("keydown", (e) => {
+      const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+      if (!step) return;
+      const next = tabs[(i + step + tabs.length) % tabs.length];
+      select(next);
+      next.focus();
+    });
+  });
+  for (const button of document.querySelectorAll(".terminal button")) {
+    button.addEventListener("click", async () => {
+      const code = button.previousElementSibling;
+      try {
+        await navigator.clipboard.writeText(code.textContent);
+        button.textContent = "Copied";
+      } catch {
+        getSelection().selectAllChildren(code);  // no clipboard access: select it for the user
+      }
+      setTimeout(() => (button.textContent = "Copy"), 1500);
+    });
+  }
+</script>
+</body>
+</html>
