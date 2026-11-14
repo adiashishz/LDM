@@ -2,6 +2,7 @@
 """Install LDM's non-Python files under DESTDIR (used by the RPM spec and the Flatpak manifest).
 
     install-data.py DESTDIR [--prefix /usr] [--sysconfdir /etc] [--libexecdir PREFIX/libexec] [--no-browsers]
+                            [--flatpak]
 
 Writes the desktop file, AppStream metainfo, icon, D-Bus activation files, the systemd user unit,
 the clipboard watcher's autostart entry, and system-wide native-messaging manifests for Firefox,
@@ -38,7 +39,11 @@ def main() -> None:
     parser.add_argument("--prefix", default="/usr")
     parser.add_argument("--sysconfdir", default="/etc")
     parser.add_argument("--libexecdir", help="default PREFIX/libexec; Arch uses PREFIX/lib")
-    parser.add_argument("--no-browsers", action="store_true", help="skip native-messaging manifests (Flatpak)")
+    parser.add_argument("--no-browsers", action="store_true", help="skip the native-messaging manifests")
+    parser.add_argument("--flatpak", action="store_true",
+                        help="for a Flatpak: no browser manifests, systemd unit or autostart entry, and D-Bus "
+                             "activation runs the service directly (`ldm install-browser-integration` and the "
+                             "Background portal cover the rest)")
     args = parser.parse_args()
     root = args.destdir
     prefix = root / args.prefix.lstrip("/")
@@ -46,7 +51,10 @@ def main() -> None:
     bindir = f"{args.prefix}/bin"
 
     def with_prefix(name: str) -> str:
-        return (DATA / name).read_text().replace("/usr/bin/", f"{bindir}/")
+        text = (DATA / name).read_text().replace("/usr/bin/", f"{bindir}/")
+        if args.flatpak:  # no systemd units in a sandbox
+            text = "".join(line for line in text.splitlines(keepends=True) if not line.startswith("SystemdService="))
+        return text
 
     share = prefix / "share"
     install(DATA / "io.github.adiashishz.LDM.desktop", share / "applications/io.github.adiashishz.LDM.desktop")
@@ -55,6 +63,8 @@ def main() -> None:
     install(SYMBOLIC_ICON, share / "icons/hicolor/symbolic/apps/io.github.adiashishz.LDM-symbolic.svg")
     install(None, share / "dbus-1/services/io.github.adiashishz.LDM.Service.service", with_prefix("io.github.adiashishz.LDM.Service.service"))
     install(None, share / "dbus-1/services/io.github.adiashishz.LDM.service", with_prefix("io.github.adiashishz.LDM.service"))
+    if args.flatpak:
+        return
     install(None, prefix / "lib/systemd/user/ldm.service", with_prefix("ldm.service"))
     install(DATA / "io.github.adiashishz.LDM.ClipboardWatch.desktop", etc / "xdg/autostart/io.github.adiashishz.LDM.ClipboardWatch.desktop")
     if args.no_browsers:

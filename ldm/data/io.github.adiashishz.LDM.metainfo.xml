@@ -36,9 +36,29 @@
   </keywords>
   <url type="homepage">https://github.com/adiashishz/LDM</url>
   <url type="bugtracker">https://github.com/adiashishz/LDM/issues</url>
+  <url type="vcs-browser">https://github.com/adiashishz/LDM</url>
   <developer id="io.github.adiashishz">
     <name>Aditya Ashish</name>
   </developer>
+  <branding>
+    <color type="primary" scheme_preference="light">#99c1f1</color>
+    <color type="primary" scheme_preference="dark">#1a5fb4</color>
+  </branding>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Downloads: finished, paused, running and one whose link expired</caption>
+      <image>https://raw.githubusercontent.com/adiashishz/LDM/main/ldm/data/screenshots/main.png</image>
+    </screenshot>
+    <screenshot environment="gnome:dark">
+      <caption>The same downloads in dark style</caption>
+      <image>https://raw.githubusercontent.com/adiashishz/LDM/main/ldm/data/screenshots/main-dark.png</image>
+    </screenshot>
+  </screenshots>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
   <content_rating type="oars-1.1"/>
   <releases>
     <release version="0.2.0" date="2026-10-22">
