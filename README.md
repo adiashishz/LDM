@@ -67,6 +67,20 @@ ldm install-browser-integration   # once: magnet/.torrent links, Flatpak browser
 The package is named `ldm-downloader`; the command is `ldm`. It conflicts with the AUR package `ldm`
 (a device mounter), which also installs `/usr/bin/ldm`.
 
+## Install as a Flatpak (any distribution)
+
+Download `ldm.flatpak` from the [latest release](https://github.com/adiashishz/LDM/releases/latest) (Flathub
+is planned) and install it; it uses the GNOME runtime from Flathub:
+
+```sh
+flatpak install --user ./ldm.flatpak
+flatpak run --command=ldm io.github.adiashishz.LDM install-browser-integration   # once, for the extension
+```
+
+As a Flatpak, LDM saves to your Downloads folder; choosing another folder in LDM (Preferences or the Add
+dialog) gives it access to that folder. Start at login goes through your desktop's background apps setting.
+Brave from Flathub can't reach a Flatpak LDM; use Firefox, Chrome, Chromium or Brave from your distribution.
+
 ## Install from source (Fedora)
 
 LDM uses the distribution's GTK, so the virtual environment is built on the system Python:
@@ -122,7 +136,9 @@ More commands are in [`ldm/README.md`](ldm/README.md).
   `debian/yt-dlp.pin`; CI builds, lints and test-installs it on Debian 13, Ubuntu 24.04 and 26.04.
 - `ldm/packaging/arch/` and `build-arch.sh`: PKGBUILDs for Arch (`ldm-downloader` for releases,
   `ldm-downloader-git` for the latest commit); CI builds, lints and test-installs both.
-- `ldm/packaging/io.github.adiashishz.LDM.yml`: Flatpak manifest (not built yet).
+- `ldm/packaging/io.github.adiashishz.LDM.yml`: Flatpak manifest (GNOME 51 runtime; ffmpeg, libtorrent and
+  Node.js built in). Python dependencies are pinned in `flatpak-python-deps.yml` by `flatpak-python-deps.py`;
+  CI builds it, runs `flatpak-builder-lint` and the smoke test inside the sandbox.
 - `extension/sign-firefox.sh`: signs the Firefox add-on for permanent installs.
 
 ## Development
