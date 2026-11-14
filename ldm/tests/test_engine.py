@@ -30,10 +30,15 @@ def download(store, download_id, **kwargs):
     return asyncio.run(downloader(store, download_id, **kwargs).run())
 
 
-def pause_after(store, download_id, seconds):
+def pause_after_progress(store, download_id, timeout=10.0):
+    """Start the download and pause it as soon as some progress is saved. (Waiting a fixed time instead
+    could pause before anything arrived on a slow CI machine.)"""
     async def go():
         task = asyncio.create_task(downloader(store, download_id, persist_interval=0.05).run())
-        await asyncio.sleep(seconds)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while sum(p.done for p in store.load_parts(download_id)) == 0 and loop.time() < deadline:
+            await asyncio.sleep(0.02)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
@@ -79,7 +84,7 @@ def test_pause_and_resume_continues_where_it_stopped(tmp_path, http_server):
     data = payload(2_000_000)
     cfg, url = http_server(data=data, delay=0.01)
     store, did = new_download(tmp_path, url)
-    pause_after(store, did, 0.15)
+    pause_after_progress(store, did)
 
     assert store.get(did).state == "paused"
     saved = sum(p.done for p in store.load_parts(did))
@@ -111,7 +116,7 @@ def test_changed_remote_file_is_detected_on_resume(tmp_path, http_server):
     data = payload(2_000_000)
     cfg, url = http_server(data=data, delay=0.01)
     store, did = new_download(tmp_path, url)
-    pause_after(store, did, 0.15)
+    pause_after_progress(store, did)
 
     cfg.data, cfg.etag, cfg.delay = payload(2_000_000, seed=2), '"v2"', 0.0
     with pytest.raises(RemoteChanged):
@@ -161,7 +166,7 @@ def test_expired_redirect_target_is_resolved_again(tmp_path, http_server):
     cfg, _ = http_server(data=data, delay=0.01)
     cfg.redirects["/start"] = "/files/test.bin?token=1"
     store, did = new_download(tmp_path, f"{cfg.base}/start")
-    pause_after(store, did, 0.15)
+    pause_after_progress(store, did)
     assert store.get(did).final_url.endswith("token=1")
 
     cfg.delay = 0.0
