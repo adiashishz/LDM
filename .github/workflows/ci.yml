@@ -221,13 +221,25 @@ jobs:
         # Installed explicitly: updating the SDK that ships in the image fails on its filesystem.
         run: flatpak install -y --noninteractive --system flathub org.freedesktop.Sdk.Extension.node24//26.08
 
-      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+      - uses: actions/cache@v4
         with:
-          bundle: ldm.flatpak
-          manifest-path: ldm/packaging/io.github.adiashishz.LDM.yml
+          path: .flatpak-builder
           # ffmpeg, Boost and libtorrent are rebuilt only when the manifest or the dependencies change.
-          cache-key: flatpak-${{ hashFiles('ldm/packaging/io.github.adiashishz.LDM.yml', 'ldm/packaging/flatpak-*.yml') }}
-          upload-artifact: true
+          key: flatpak-${{ hashFiles('ldm/packaging/io.github.adiashishz.LDM.yml', 'ldm/packaging/flatpak-*.yml') }}
+          restore-keys: flatpak-
+
+      - name: Build
+        # flatpak-builder directly: Flathub's action always updates the image's SDK first, which fails
+        # ("Invalid cross-device link") on the image's filesystem.
+        run: |
+          flatpak-builder --state-dir=.flatpak-builder --force-clean --disable-rofiles-fuse \
+            --repo=repo build-dir ldm/packaging/io.github.adiashishz.LDM.yml
+          flatpak build-bundle repo ldm.flatpak io.github.adiashishz.LDM
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak
+          path: ldm.flatpak
 
       - name: Lint for Flathub
         # Screenshots are mirrored by Flathub's own build (and the URLs point at main), so those two
@@ -257,8 +269,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          pattern: "*ldm*"
-          merge-multiple: true
+          name: flatpak
           path: dist/
 
       - name: Install the bundle

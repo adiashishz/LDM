@@ -110,6 +110,10 @@ modules:
         skip:
           - .git
           - .github
+          - .flatpak-builder
+          - build-dir
+          - repo
+          - ldm.flatpak
           - ldm/.venv
           - extension
           - website
