@@ -8,9 +8,12 @@ from urllib.parse import unquote, urlsplit
 from gi.repository import Gio, GObject, Gtk
 
 from ..filetypes import group_of
+from .. import sandbox
 from ..format import human, status_text
 
 FINISH_ACTIONS = [("Do Nothing", "nothing"), ("Quit LDM", "quit"), ("Suspend", "suspend"), ("Power Off", "poweroff")]
+if sandbox.flatpak():  # a Flatpak can't suspend or power off the computer (no portal for it)
+    FINISH_ACTIONS = FINISH_ACTIONS[:2]
 VIEWS = {
     "all": None,
     "downloading": {"running", "processing", "queued", "paused"},

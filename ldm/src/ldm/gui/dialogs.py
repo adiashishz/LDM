@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from gi.repository import Adw, GLib, Gtk
 
 from ..format import human, parse_rate
+from ..sandbox import host_path
 
 
 def is_url(text: str) -> bool:
@@ -74,5 +75,7 @@ def limit_text(rate: int) -> str:
 
 
 def short_path(path: str) -> str:
-    home = str(Path.home())
-    return "~" + path[len(home):] if path.startswith(home) else path
+    """For display: ~ for the home folder, and a folder's real location rather than the document portal's
+    path for it (folders chosen inside a Flatpak)."""
+    path, home = host_path(path), str(Path.home())
+    return "~" + path[len(home):] if path == home or path.startswith(home + "/") else path

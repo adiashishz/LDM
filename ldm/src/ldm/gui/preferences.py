@@ -422,7 +422,8 @@ class PreferencesDialog(Adw.PreferencesDialog):
         if settings.get("backup_password_set"):
             self.backup_password.set_title("Password for automatic backups (saved — type to change)")
         actions = [v for _, v in FINISH_ACTIONS]
-        self.finish.set_selected(actions.index(settings["finish_action"]))
+        self.finish.set_selected(actions.index(settings["finish_action"])
+                                 if settings["finish_action"] in actions else 0)
         self.finish.set_sensitive(True)
         self.finish.connect("notify::selected", lambda r, _p: self._save({"finish_action": actions[r.get_selected()]}))
         self.data_used.set_subtitle(human(settings.get("data_used", 0)))

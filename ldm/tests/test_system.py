@@ -129,3 +129,55 @@ def test_missing_services_mean_unmetered_on_mains(bus_address):
         return state
 
     assert asyncio.run(scenario()) == (False, False, 100.0, None)
+
+
+class FakeInhibitPortal(ServiceInterface):
+    def __init__(self, bus):
+        super().__init__("org.freedesktop.portal.Inhibit")
+        self.bus, self.calls, self.closed = bus, [], []
+
+    @method()
+    def Inhibit(self, window: "s", flags: "u", options: "a{sv}") -> "o":
+        path = f"/org/freedesktop/portal/desktop/request/ldm/{len(self.calls)}"
+        self.calls.append((flags, options["reason"].value))
+        self.bus.export(path, FakeRequest(lambda: self.closed.append(path)))
+        return path
+
+
+class FakeRequest(ServiceInterface):
+    def __init__(self, on_close):
+        super().__init__("org.freedesktop.portal.Request")
+        self.on_close = on_close
+
+    @method()
+    def Close(self):
+        self.on_close()
+
+
+def test_inhibitor_uses_the_portal_in_a_flatpak(bus_address, monkeypatch):
+    monkeypatch.setenv("FLATPAK_ID", "io.github.adiashishz.LDM")
+
+    async def scenario():
+        service = await MessageBus(bus_address=bus_address).connect()
+        portal = FakeInhibitPortal(service)
+        service.export("/org/freedesktop/portal/desktop", portal)
+        await service.request_name("org.freedesktop.portal.Desktop")
+        monitor = SystemMonitor(bus_address)  # no logind here: the portal is used instead
+        inhibitor = SleepInhibitor(monitor, session_bus_address=bus_address)
+        inhibitor.set_active(True)
+        for _ in range(100):
+            if inhibitor.portal_request:
+                break
+            await asyncio.sleep(0.02)
+        assert portal.calls == [(4 | 8, "Downloading files")] and inhibitor.fd is None
+        request = inhibitor.portal_request
+        inhibitor.set_active(False)
+        for _ in range(100):
+            if portal.closed:
+                break
+            await asyncio.sleep(0.02)
+        assert portal.closed == [request] and inhibitor.portal_request is None
+        inhibitor.close()
+        service.disconnect()
+
+    asyncio.run(scenario())

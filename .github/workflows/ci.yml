@@ -6,8 +6,15 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore: ["**/*.md", "website/**", "LICENSE"]
   pull_request:
+    paths-ignore: ["**/*.md", "website/**", "LICENSE"]
   workflow_dispatch:
+
+# A new push to a pull request cancels its run still in progress.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -102,7 +109,8 @@ jobs:
         run: |
           git config --global --add safe.directory "$PWD"
           . /etc/os-release
-          DEB_OUT=/tmp/debbuild INSTALL_BUILD_DEPS=1 DEBIAN_FRONTEND=noninteractive \
+          # The test jobs above already ran the suite on this distribution: don't repeat it in the build.
+          DEB_OUT=/tmp/debbuild INSTALL_BUILD_DEPS=1 DEBIAN_FRONTEND=noninteractive DEB_BUILD_OPTIONS=nocheck \
             ldm/packaging/build-deb.sh "${{ matrix.suffix }}" "$VERSION_CODENAME"
           mkdir dist && cp /tmp/debbuild/*.deb /tmp/debbuild/*.dsc /tmp/debbuild/*.tar.* dist/
 
@@ -168,7 +176,9 @@ jobs:
           echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
           chown -R builder: .
           runuser -u builder -- git config --global --add safe.directory "$PWD"
-          runuser -u builder -- env ARCH_OUT=/tmp/archbuild ldm/packaging/build-arch.sh ${{ matrix.variant }}
+          # The Arch test job already ran the suite: don't repeat it in the package build.
+          runuser -u builder -- env ARCH_OUT=/tmp/archbuild MAKEPKG_FLAGS=--nocheck \
+            ldm/packaging/build-arch.sh ${{ matrix.variant }}
           mkdir dist && cp /tmp/archbuild/*/*.pkg.tar.zst dist/
 
       - uses: actions/upload-artifact@v4
@@ -206,3 +216,78 @@ jobs:
         run: |
           useradd -m tester
           runuser -u tester -- sh ldm/packaging/smoke-test.sh
+
+  flatpak:
+    name: Flatpak
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
+      options: --privileged
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the Node.js SDK extension
+        # Installed explicitly: updating the SDK that ships in the image fails on its filesystem.
+        run: flatpak install -y --noninteractive --system flathub org.freedesktop.Sdk.Extension.node24//26.08
+
+      - uses: actions/cache@v4
+        with:
+          path: .flatpak-builder
+          # ffmpeg, Boost and libtorrent are rebuilt only when the manifest or the dependencies change.
+          key: flatpak-${{ hashFiles('ldm/packaging/io.github.adiashishz.LDM.yml', 'ldm/packaging/flatpak-*.yml') }}
+          restore-keys: flatpak-
+
+      - name: Build
+        # flatpak-builder directly: Flathub's action always updates the image's SDK first, which fails
+        # ("Invalid cross-device link") on the image's filesystem.
+        run: |
+          flatpak-builder --state-dir=.flatpak-builder --force-clean --disable-rofiles-fuse \
+            --repo=repo build-dir ldm/packaging/io.github.adiashishz.LDM.yml
+          flatpak build-bundle repo ldm.flatpak io.github.adiashishz.LDM
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak
+          path: ldm.flatpak
+
+      - name: Lint for Flathub
+        # Screenshots are mirrored by Flathub's own build (and the URLs point at main), so those two
+        # findings can't pass here; any other error fails the job.
+        run: |
+          for target in "manifest ldm/packaging/io.github.adiashishz.LDM.yml" "repo repo"; do
+            flatpak-builder-lint --exceptions $target > lint.json || true
+            cat lint.json
+            python3 -c 'import json, sys
+          known = {"appstream-missing-screenshots", "appstream-screenshots-not-mirrored-in-ostree"}
+          text = open("lint.json").read().strip()  # nothing printed: nothing to report
+          errors = set(json.loads(text).get("errors", []) if text else []) - known
+          sys.exit(f"Flathub lint errors: {sorted(errors)}" if errors else 0)'
+          done
+
+  flatpak-install:
+    name: Install the Flatpak
+    needs: flatpak
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
+      options: --privileged
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: ldm/packaging
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: flatpak
+          path: dist/
+
+      - name: Install the bundle
+        run: flatpak install -y --noninteractive --system dist/ldm.flatpak
+
+      - name: Smoke test inside the sandbox
+        # The SDK (--devel) brings dbus-run-session; the app's own files are what's tested.
+        run: |
+          flatpak run --devel --command=sh --filesystem="$PWD/ldm/packaging:ro" \
+            io.github.adiashishz.LDM "$PWD/ldm/packaging/smoke-test.sh"

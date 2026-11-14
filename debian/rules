@@ -36,12 +36,11 @@ override_dh_auto_clean:
 	dh_auto_clean
 	rm -rf debian/.ytdlp extension/dist
 
+# Cheap and always possible (the tools are build dependencies), so also with DEB_BUILD_OPTIONS=nocheck.
 execute_after_dh_install:
-ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
 	desktop-file-validate $(DESTDIR)/usr/share/applications/io.github.adiashishz.LDM.desktop
 	desktop-file-validate $(DESTDIR)/etc/xdg/autostart/io.github.adiashishz.LDM.ClipboardWatch.desktop
 	appstreamcli validate --no-net $(DESTDIR)/usr/share/metainfo/io.github.adiashishz.LDM.metainfo.xml
-endif
 
 # Requirements come from pyproject.toml, which asks for yt-dlp >= 2026.1: older distributions can't
 # satisfy that, and the bundled copy covers it. The Depends field lists the Debian packages instead.

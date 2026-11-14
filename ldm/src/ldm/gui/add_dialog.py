@@ -12,6 +12,7 @@ from gi.repository import Adw, Gio, GLib, Gtk
 from ..format import STATE_LABELS, human
 from ..hlskey import aes_hex
 from ..nmhost import header_name
+from ..sandbox import folder_problem
 from .client import DaemonClient
 from .compat import spinner
 from .schedule_rows import ScheduleEditor
@@ -84,6 +85,7 @@ class AddDialog(Adw.Dialog):
         self.on_added = on_added
         self.download_dir: str | None = None
         self.custom_folder: str | None = None
+        self.granted_folders: dict[int, str] = {}  # Flatpak: quick choices the user gave access to
         self._folder_index = 0
         self._auto_name = not name     # file name may be replaced by the server's suggestion
         self._probe_generation = 0
@@ -247,6 +249,8 @@ class AddDialog(Adw.Dialog):
     def folder(self) -> str | None:
         index = self.folder_row.get_selected()
         if index < len(FOLDERS):
+            if index in self.granted_folders:
+                return self.granted_folders[index]
             special = FOLDERS[index][1]
             path = GLib.get_user_special_dir(special) if special is not None else None
             return path or self.download_dir
@@ -257,18 +261,29 @@ class AddDialog(Adw.Dialog):
         self.folder_row.set_subtitle(short_path(path) if path else "")
 
     def _on_folder_selected(self, *_) -> None:
-        if self.folder_row.get_selected() < len(FOLDERS):
-            self._folder_index = self.folder_row.get_selected()
-            self._show_folder()
-            return
+        index = self.folder_row.get_selected()
+        initial = self.custom_folder or self.download_dir
+        if index < len(FOLDERS):
+            special = FOLDERS[index][1]
+            path = GLib.get_user_special_dir(special) if special is not None else None
+            if not path or index in self.granted_folders or not folder_problem(path):
+                self._folder_index = index
+                self._show_folder()
+                return
+            initial = path  # a Flatpak without access to it: choosing it in the dialog grants access
         dialog = Gtk.FileDialog(title="Save In")
-        if self.custom_folder or self.download_dir:
-            dialog.set_initial_folder(Gio.File.new_for_path(self.custom_folder or self.download_dir))
+        if initial:
+            dialog.set_initial_folder(Gio.File.new_for_path(initial))
 
         def done(d, result):
             try:
-                self.custom_folder = d.select_folder_finish(result).get_path()
-                self._folder_index = len(FOLDERS)
+                chosen = d.select_folder_finish(result).get_path()
+                if index < len(FOLDERS):
+                    self.granted_folders[index] = chosen
+                    self._folder_index = index
+                else:
+                    self.custom_folder = chosen
+                    self._folder_index = len(FOLDERS)
             except GLib.Error:
                 self.folder_row.set_selected(self._folder_index)  # cancelled: back to the old choice
             self._show_folder()

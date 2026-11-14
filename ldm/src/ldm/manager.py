@@ -22,7 +22,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from . import backup, files, media, torrent, transfer, ytdlp
+from . import backup, files, media, sandbox, torrent, transfer, ytdlp
 from .engine import DownloadError, Downloader, new_client, probe
 from .hlskey import aes_hex
 from .media import MediaDownloader
@@ -331,6 +331,9 @@ class Manager:
             name = name or options.get("title")
         if torrent_options.get("peers"):
             options["peers"] = list(torrent_options["peers"])
+        problem = sandbox.folder_problem(dir or settings["download_dir"])
+        if problem:
+            raise InvalidArgument(problem)
         download_id = self.store.add(url, dir or settings["download_dir"], name=name, headers=headers,
                                      connections=connections, state="queued" if start else "paused",
                                      kind=kind, options=options)
@@ -624,7 +627,11 @@ class Manager:
                    "proxy_mode": ("system", "none", "manual"), "dns_mode": ("system", "doh"),
                    "finish_action": ("nothing", "quit", "suspend", "poweroff"),
                    "backup_schedule": ("off", "daily", "weekly")}
+        if sandbox.flatpak():  # a Flatpak can't suspend or power off the computer
+            choices["finish_action"] = ("nothing", "quit")
         if key in choices:
+            if key == "finish_action" and value in ("suspend", "poweroff") and sandbox.flatpak():
+                raise InvalidArgument("suspend and power off aren't available in the Flatpak version of LDM")
             if value not in choices[key]:
                 raise InvalidArgument(f"{key} must be one of: {', '.join(choices[key])}")
         elif key == "media_quality":
@@ -634,6 +641,8 @@ class Manager:
         elif key == "download_dir":
             if not isinstance(value, str) or not value:
                 raise InvalidArgument("download_dir must be a path")
+            if problem := sandbox.folder_problem(value):
+                raise InvalidArgument(problem)
         elif key in ("schedule_start", "schedule_stop", "schedule_days"):
             try:
                 (parse_days if key == "schedule_days" else parse_time)(value)
@@ -659,6 +668,9 @@ class Manager:
         elif key in ("move_finished_dir", "move_finished_torrent_dir", "backup_dir") and value and not (
                 isinstance(value, str) and Path(value).expanduser().is_absolute()):
             raise InvalidArgument(f"{key} must be an absolute folder path or empty")
+        elif key in ("move_finished_dir", "move_finished_torrent_dir", "backup_dir") and value and (
+                problem := sandbox.folder_problem(value)):
+            raise InvalidArgument(problem)
         else:
             default = DEFAULT_SETTINGS[key]
             if isinstance(default, bool):
@@ -951,8 +963,8 @@ class Manager:
         if self._closing or self._tasks or self._retry_timers:
             return  # still running, or a failed one will be retried
         action = self.store.get_settings()["finish_action"]
-        if action == "nothing":
-            return
+        if action == "nothing" or (action in ("suspend", "poweroff") and sandbox.flatpak()):
+            return  # (a Flatpak can't do those: e.g. a setting restored from a backup)
         if any(d.state in ("queued", "running", "processing") for d in self.store.list()):
             return  # still something to do (also: waiting for the schedule or a condition)
         self._emit(self.on_all_finished, action)
@@ -1056,6 +1068,8 @@ class Manager:
     async def move_to(self, download_id: int, folder: str) -> str:
         if not folder or not Path(folder).expanduser().is_absolute():
             raise InvalidArgument("choose a folder (an absolute path)")
+        if problem := sandbox.folder_problem(folder):
+            raise InvalidArgument(problem)
         return await self._relocate(download_id, folder=Path(folder).expanduser())
 
     async def _relocate(self, download_id: int, *, name: str | None = None, folder: Path | None = None) -> str:

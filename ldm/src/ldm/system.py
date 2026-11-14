@@ -1,8 +1,9 @@
 """Desktop conditions for the scheduler: metered network, battery, and keeping the computer awake.
 
 1DM's "Wi-Fi only" becomes "unmetered connections only" (NetworkManager's Metered property), its
-battery limit uses UPower, and its wake lock becomes a logind sleep inhibitor. Missing services are
-treated as unmetered / on mains power, so LDM keeps working without them.
+battery limit uses UPower, and its wake lock becomes a logind sleep inhibitor (the Inhibit portal in a
+Flatpak, which can't reach logind). Missing services are treated as unmetered / on mains power, so LDM
+keeps working without them.
 """
 
 from __future__ import annotations
@@ -13,13 +14,18 @@ import logging
 import os
 from typing import Any, Callable
 
-from dbus_fast import BusType, Message, MessageType
+from dbus_fast import BusType, Message, MessageType, Variant
 from dbus_fast.aio import MessageBus
+
+from . import sandbox
 
 log = logging.getLogger(__name__)
 
 NM = ("org.freedesktop.NetworkManager", "/org/freedesktop/NetworkManager", "org.freedesktop.NetworkManager")
 UPOWER = ("org.freedesktop.UPower", "/org/freedesktop/UPower", "org.freedesktop.UPower")
+PORTAL_INHIBIT = ("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
+                  "org.freedesktop.portal.Inhibit")
+INHIBIT_SUSPEND_AND_IDLE = 4 | 8  # the portal's flags
 UPOWER_DISPLAY = ("org.freedesktop.UPower", "/org/freedesktop/UPower/devices/DisplayDevice",
                   "org.freedesktop.UPower.Device")
 LOGIND = ("org.freedesktop.login1", "/org/freedesktop/login1", "org.freedesktop.login1.Manager")
@@ -100,11 +106,15 @@ class SystemMonitor(Conditions):
 
 
 class SleepInhibitor:
-    """Keeps the computer from suspending while downloads run (logind inhibitor lock)."""
+    """Keeps the computer from suspending while downloads run: a logind inhibitor lock, or in a Flatpak a
+    request to the Inhibit portal (`session_bus_address` replaces the session bus: tests use a private one)."""
 
-    def __init__(self, monitor: SystemMonitor):
+    def __init__(self, monitor: SystemMonitor, session_bus_address: str | None = None):
         self.monitor = monitor
         self.fd: int | None = None
+        self.portal_request: str | None = None
+        self.session_bus_address = session_bus_address
+        self._session: MessageBus | None = None
         self._wanted = False
         self._busy = asyncio.Lock()
 
@@ -114,6 +124,10 @@ class SleepInhibitor:
             asyncio.get_running_loop().create_task(self._sync())
 
     async def _sync(self) -> None:
+        if sandbox.flatpak():
+            async with self._busy:
+                await self._sync_portal()
+            return
         async with self._busy:
             if self._wanted and self.fd is None and self.monitor.bus is not None:
                 try:
@@ -129,9 +143,33 @@ class SleepInhibitor:
                     os.close(self.fd)
                 self.fd = None
 
+    async def _sync_portal(self) -> None:
+        if self._wanted and self.portal_request is None:
+            try:
+                if self._session is None:
+                    self._session = await MessageBus(bus_address=self.session_bus_address).connect()
+                reply = await self._session.call(Message(
+                    destination=PORTAL_INHIBIT[0], path=PORTAL_INHIBIT[1], interface=PORTAL_INHIBIT[2],
+                    member="Inhibit", signature="sua{sv}",
+                    body=["", INHIBIT_SUSPEND_AND_IDLE, {"reason": Variant("s", "Downloading files")}]))
+                if reply.message_type == MessageType.ERROR:
+                    raise RuntimeError(reply.error_name)
+                self.portal_request = reply.body[0]
+                log.info("preventing sleep while downloading")
+            except Exception as e:
+                log.info("could not prevent sleep: %s", e)
+        elif not self._wanted and self.portal_request is not None:
+            request, self.portal_request = self.portal_request, None
+            with contextlib.suppress(Exception):  # the portal also drops it when LDM disconnects
+                await self._session.call(Message(destination=PORTAL_INHIBIT[0], path=request,
+                                                 interface="org.freedesktop.portal.Request", member="Close"))
+
     def close(self) -> None:
         self._wanted = False
         if self.fd is not None:
             with contextlib.suppress(OSError):
                 os.close(self.fd)
             self.fd = None
+        if self._session is not None:  # disconnecting ends a portal inhibition
+            self._session.disconnect()
+            self._session, self.portal_request = None, None
