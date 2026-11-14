@@ -76,3 +76,71 @@ jobs:
           runuser -u tester -- ldm/.venv/bin/python ldm/packaging/install-data.py /tmp/root --libexecdir /usr/lib
           desktop-file-validate /tmp/root/usr/share/applications/io.github.adiashishz.LDM.desktop
           desktop-file-validate /tmp/root/etc/xdg/autostart/io.github.adiashishz.LDM.ClipboardWatch.desktop
+
+  deb:
+    name: .deb for ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Debian 13,        image: "debian:trixie", id: debian13,    suffix: "~deb13" }
+          - { name: Ubuntu 24.04 LTS, image: "ubuntu:24.04",  id: ubuntu2404,  suffix: "~ubuntu24.04" }
+          - { name: Ubuntu 26.04 LTS, image: "ubuntu:26.04",  id: ubuntu2604,  suffix: "~ubuntu26.04" }
+    steps:
+      - name: Install the packaging tools
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git dpkg-dev lintian curl ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Build and lint
+        run: |
+          git config --global --add safe.directory "$PWD"
+          . /etc/os-release
+          DEB_OUT=/tmp/debbuild INSTALL_BUILD_DEPS=1 DEBIAN_FRONTEND=noninteractive \
+            ldm/packaging/build-deb.sh "${{ matrix.suffix }}" "$VERSION_CODENAME"
+          mkdir dist && cp /tmp/debbuild/*.deb /tmp/debbuild/*.dsc /tmp/debbuild/*.tar.* dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.id }}
+          path: dist/
+
+  deb-install:
+    name: Install the .deb on ${{ matrix.name }}
+    needs: deb
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Debian 13,        image: "debian:trixie", id: debian13 }
+          - { name: Ubuntu 24.04 LTS, image: "ubuntu:24.04",  id: ubuntu2404 }
+          - { name: Ubuntu 26.04 LTS, image: "ubuntu:26.04",  id: ubuntu2604 }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: debian/tests
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: deb-${{ matrix.id }}
+          path: dist/
+
+      - name: Install on a clean system
+        # Without Recommends: no system yt-dlp, so videos rely on the bundled copy.
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ./dist/ldm_*.deb dbus-daemon
+
+      - name: Smoke test as a normal user
+        run: |
+          useradd -m tester
+          runuser -u tester -- sh debian/tests/smoke

@@ -1,0 +1,51 @@
+#!/usr/bin/make -f
+# The Python project is in ldm/; the browser extension in extension/; the bundled yt-dlp
+# (second source tarball, see ldm/packaging/build-deb.sh) in ytdlp/.
+
+export PYBUILD_NAME = ldm
+export PYBUILD_SYSTEM = pyproject
+# GUI tests need a display; everything else runs offline against local servers and private buses.
+# The tests import yt-dlp: they use the bundled copy, the way the installed package does. (A custom
+# command, because debhelper clears XDG_DATA_DIRS from the environment.) pybuild points http_proxy at
+# a dead address to keep builds offline, which yt-dlp also applies to the tests' servers on 127.0.0.1:
+# the tests never use the internet (and build machines have none), so they run without it.
+export PYBUILD_TEST_CUSTOM = 1
+export PYBUILD_TEST_ARGS = cd {build_dir} && env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
+	XDG_DATA_DIRS=$(CURDIR)/debian/.ytdlp:/usr/share {interpreter} -m pytest -k "not gui" -p no:cacheprovider
+
+DESTDIR = $(CURDIR)/debian/ldm
+
+%:
+	dh $@ --buildsystem=pybuild --sourcedirectory=ldm
+
+override_dh_auto_build:
+	dh_auto_build
+	cd extension && python3 build.py
+
+execute_before_dh_auto_test:
+	mkdir -p debian/.ytdlp/ldm/yt-dlp
+	cp ytdlp/yt-dlp debian/.ytdlp/ldm/yt-dlp/yt-dlp
+
+override_dh_auto_install:
+	dh_auto_install
+	python3 ldm/packaging/install-data.py $(DESTDIR) --prefix /usr --sysconfdir /etc
+	install -Dm644 -t $(DESTDIR)/usr/share/ldm/extension extension/dist/*.zip
+	install -Dm644 ytdlp/yt-dlp $(DESTDIR)/usr/share/ldm/yt-dlp/yt-dlp
+
+override_dh_auto_clean:
+	dh_auto_clean
+	rm -rf debian/.ytdlp extension/dist
+
+execute_after_dh_install:
+ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
+	desktop-file-validate $(DESTDIR)/usr/share/applications/io.github.adiashishz.LDM.desktop
+	desktop-file-validate $(DESTDIR)/etc/xdg/autostart/io.github.adiashishz.LDM.ClipboardWatch.desktop
+	appstreamcli validate --no-net $(DESTDIR)/usr/share/metainfo/io.github.adiashishz.LDM.metainfo.xml
+endif
+
+# Requirements come from pyproject.toml, which asks for yt-dlp >= 2026.1: older distributions can't
+# satisfy that, and the bundled copy covers it. The Depends field lists the Debian packages instead.
+override_dh_python3:
+	dh_python3 --no-guessing-deps
+	# Also a standalone script (the per-user installer copies it for browsers), so keep it runnable.
+	chmod 755 $(DESTDIR)/usr/lib/python3/dist-packages/ldm/nmhost.py

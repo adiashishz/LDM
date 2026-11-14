@@ -1,0 +1,5 @@
+# Google Chrome reads system-wide native messaging hosts only from /etc/opt/chrome; without this
+# file the browser extension can't reach LDM in Chrome (Chromium's copy is in /etc/chromium).
+ldm: dir-or-file-in-etc-opt [etc/opt/chrome/*]
+# yt-dlp's zipimport build: LDM puts it on sys.path and imports it, it is never run directly.
+ldm: script-not-executable [usr/share/ldm/yt-dlp/yt-dlp]

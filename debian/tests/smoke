@@ -1,0 +1,30 @@
+#!/bin/sh
+# Smoke test of the installed package (autopkgtest; CI also runs it after installing the .deb):
+# the commands start, the GUI's toolkit is new enough, the bundled yt-dlp is used, and a download
+# through a D-Bus-activated service (the installed activation file) finishes.
+set -eu
+WORK=$(mktemp -d)
+trap 'kill "$SERVER" 2>/dev/null || true; rm -rf "$WORK"' EXIT
+export HOME="$WORK/home" XDG_DOWNLOAD_DIR="$WORK/Downloads"
+mkdir -p "$HOME" "$XDG_DOWNLOAD_DIR" "$WORK/www"
+
+ldm --help >/dev/null
+python3 -c 'from ldm import gui; m = gui.too_old(); assert m is None, m; import ldm.gui.app'
+echo "GUI: GTK and libadwaita are new enough"
+
+python3 - <<'PY'
+from ldm import media, ytdlp
+bundled = ytdlp.zip_version(ytdlp.bundled_copy())
+assert bundled, "no bundled yt-dlp in /usr/share/ldm/yt-dlp"
+used = media.YTDLP_VERSION
+assert ytdlp.version_key(used) >= ytdlp.version_key(bundled), (used, bundled)
+print(f"yt-dlp: {used} in use (bundled {bundled}, system {ytdlp.installed_version()})")
+PY
+
+head -c 3000000 /dev/urandom > "$WORK/www/file.bin"
+python3 -m http.server --bind 127.0.0.1 --directory "$WORK/www" 8765 >/dev/null 2>&1 &
+SERVER=$!
+sleep 1
+dbus-run-session -- sh -c 'ldm add http://127.0.0.1:8765/file.bin --wait >/dev/null && ldm list'
+cmp "$WORK/www/file.bin" "$XDG_DOWNLOAD_DIR/file.bin"
+echo "download: OK"

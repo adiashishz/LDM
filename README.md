@@ -40,6 +40,20 @@ ldm install-browser-integration   # once: magnet/.torrent links, Flatpak browser
 Open **LDM** from the app menu, then add the browser extension (below). The package also ships the
 extension builds in `/usr/share/ldm/extension/`. A COPR repository with automatic updates is planned.
 
+## Install on Debian 13, Ubuntu 24.04 or newer (.deb)
+
+Download the `.deb` for your system from the [latest release](https://github.com/adiashishz/LDM/releases/latest)
+(`~deb13` for Debian 13, `~ubuntu24.04` for Ubuntu 24.04 and Linux Mint 22, `~ubuntu26.04` for Ubuntu 26.04)
+and install it; apt fetches the dependencies:
+
+```sh
+sudo apt install ./ldm_0.2.0-1~ubuntu24.04_all.deb
+ldm install-browser-integration   # once: magnet/.torrent links, Flatpak browsers such as Brave
+```
+
+These distributions ship an older yt-dlp than YouTube needs, so the package includes a current one
+and LDM keeps a per-user copy up to date (Preferences → Video → Keep yt-dlp up to date).
+
 ## Install from source (Fedora)
 
 LDM uses the distribution's GTK, so the virtual environment is built on the system Python:
@@ -91,6 +105,8 @@ More commands are in [`ldm/README.md`](ldm/README.md).
 
 - `ldm/packaging/ldm.spec` and `build-rpm.sh`: RPM for Fedora (COPR steps in `COPR.md`); release builds
   are attached to the [GitHub releases](https://github.com/adiashishz/LDM/releases).
+- `debian/` and `ldm/packaging/build-deb.sh`: .deb for Debian and Ubuntu, with the yt-dlp release pinned in
+  `debian/yt-dlp.pin`; CI builds, lints and test-installs it on Debian 13, Ubuntu 24.04 and 26.04.
 - `ldm/packaging/io.github.adiashishz.LDM.yml`: Flatpak manifest (not built yet).
 - `extension/sign-firefox.sh`: signs the Firefox add-on for permanent installs.
 

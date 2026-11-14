@@ -5,6 +5,10 @@ stop working. LDM can fetch yt-dlp's official zipimport build — pure Python, r
 with the YouTube challenge solver (yt-dlp-ejs) inside — into ~/.local/share/ldm/yt-dlp/ and import it from
 there whenever it is newer than the installed yt-dlp. Optional extras (brotli, websockets, mutagen,
 pycryptodomex) still come from the system.
+
+Packages for distributions with an old yt-dlp (Debian, Ubuntu) also ship the same build in
+/usr/share/ldm/yt-dlp/, so videos work from the first start, offline, or with updates turned off.
+The newest of the three copies (installed, bundled, user) is the one imported.
 """
 
 from __future__ import annotations
@@ -33,6 +37,15 @@ def folder() -> Path:
 
 def user_copy() -> Path:
     return folder() / ASSET
+
+
+def bundled_copy() -> Path | None:
+    """The copy a distribution package ships in <data dir>/ldm/yt-dlp/ (searched in XDG_DATA_DIRS), if any."""
+    for data in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":"):
+        path = Path(data) / "ldm" / "yt-dlp" / ASSET
+        if data and path.is_file():
+            return path
+    return None
 
 
 def version_key(version: str | None) -> tuple[int, ...]:
@@ -64,15 +77,18 @@ def user_version() -> str | None:
 
 
 def activate() -> str | None:
-    """Import yt-dlp from the user's copy when it is newer than the installed one; returns its version.
+    """Import yt-dlp from the user's or the bundled copy when one is newer than the installed yt-dlp;
+    returns the version used, or None for the installed one.
 
     Must run before the first `import yt_dlp`."""
     if "yt_dlp" in sys.modules:
         return None
-    mine = user_version()
-    if mine and version_key(mine) > version_key(installed_version()):
-        sys.path.insert(0, str(user_copy()))
-        return mine
+    bundled = bundled_copy()
+    copies = [(user_version(), user_copy()), (zip_version(bundled) if bundled else None, bundled)]
+    version, path = max(copies, key=lambda c: version_key(c[0]))  # the user's copy wins a tie
+    if version and version_key(version) > version_key(installed_version()):
+        sys.path.insert(0, str(path))
+        return version
     return None
 
 

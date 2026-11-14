@@ -26,11 +26,19 @@ def data_home(tmp_path, monkeypatch):
     return tmp_path / "data"
 
 
-def zipapp(version: str) -> bytes:
+def bundle(tmp_path, version: str) -> Path:
+    """A distribution package's copy, in <data dir>/ldm/yt-dlp/."""
+    target = tmp_path / "system" / "ldm" / "yt-dlp" / "yt-dlp"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(zipapp(version, marker="FROM_BUNDLED_COPY"))
+    return target
+
+
+def zipapp(version: str, marker: str = "FROM_USER_COPY") -> bytes:
     """A stand-in for yt-dlp's zipimport build: shebang line, then a zip with the yt_dlp package."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as z:
-        z.writestr("yt_dlp/__init__.py", "FROM_USER_COPY = True\n")
+        z.writestr("yt_dlp/__init__.py", f"{marker} = True\n")
         z.writestr("yt_dlp/version.py", f"__version__ = '{version}'\n")
         z.writestr("__main__.py", "")
     return b"#!/usr/bin/env python3\n" + buffer.getvalue()
@@ -105,13 +113,18 @@ def test_bad_download_keeps_the_old_copy(releases):
     assert ytdlp.user_version() == "2099.1.2" and not ytdlp.user_copy().with_name("yt-dlp.part").exists()
 
 
-def run_python(code: str) -> str:
+def run_python(code: str, data_dirs: Path | str = "/nonexistent") -> str:
+    """Run code in a fresh interpreter. XDG_DATA_DIRS only there: a bundled copy, or none (GTK in this
+    process needs the real one)."""
     return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True,
-                          env=os.environ).stdout.strip()
+                          env={**os.environ, "XDG_DATA_DIRS": str(data_dirs)}).stdout.strip()
 
 
 ACTIVATE = ("from ldm import ytdlp; v = ytdlp.activate(); import yt_dlp; "
             "print(v, getattr(yt_dlp, 'FROM_USER_COPY', False))")
+WHICH = ("from ldm import ytdlp; v = ytdlp.activate(); import yt_dlp; "
+         "print(v, 'user' if hasattr(yt_dlp, 'FROM_USER_COPY') else 'bundled' if hasattr(yt_dlp, 'FROM_BUNDLED_COPY') "
+         "else 'installed')")
 
 
 def test_newer_user_copy_is_imported_first():
@@ -128,6 +141,35 @@ def test_older_user_copy_is_ignored():
     target.parent.mkdir(parents=True)
     target.write_bytes(zipapp("2001.1.1"))  # the distribution caught up
     assert run_python(ACTIVATE) == "None False"
+
+
+def test_bundled_copy_is_found_in_xdg_data_dirs(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_DATA_DIRS", str(tmp_path / "system"))
+    assert ytdlp.bundled_copy() is None
+    path = bundle(tmp_path, "2099.1.2")
+    monkeypatch.setenv("XDG_DATA_DIRS", f"{tmp_path / 'elsewhere'}::{tmp_path / 'system'}")
+    assert ytdlp.bundled_copy() == path
+
+
+def test_newer_bundled_copy_is_imported_first(tmp_path):
+    bundle(tmp_path, "2099.1.2")
+    assert run_python(WHICH, tmp_path / "system") == "2099.1.2 bundled"
+
+
+def test_newest_of_bundled_and_user_copy_wins(tmp_path):
+    bundle(tmp_path, "2099.1.2")
+    ytdlp.user_copy().parent.mkdir(parents=True)
+    ytdlp.user_copy().write_bytes(zipapp("2099.3.4"))  # updated since the package was built
+    assert run_python(WHICH, tmp_path / "system") == "2099.3.4 user"
+    ytdlp.user_copy().write_bytes(zipapp("2099.1.1"))  # a newer package came after the last update
+    assert run_python(WHICH, tmp_path / "system") == "2099.1.2 bundled"
+
+
+def test_older_bundled_copy_is_ignored(tmp_path):
+    if ytdlp.installed_version() is None:
+        pytest.skip("needs an installed yt-dlp to compare with")
+    bundle(tmp_path, "2001.1.1")
+    assert run_python(WHICH, tmp_path / "system") == "None installed"
 
 
 def test_manager_updates_and_restarts_when_idle(tmp_path, releases):
