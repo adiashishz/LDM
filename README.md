@@ -29,11 +29,11 @@ Downloads run in a small background service, so closing the window never stops t
 
 ## Install on Fedora 44 (RPM)
 
-Download `ldm-0.2.0-1.fc44.noarch.rpm` from the [latest release](https://github.com/adiashishz/LDM/releases/latest)
-and install it; dnf fetches the dependencies from Fedora:
+Download the `.rpm` from the [latest release](https://github.com/adiashishz/LDM/releases/latest) (or from
+https://ldm-downloader.github.io) and install it; dnf fetches the dependencies from Fedora:
 
 ```sh
-sudo dnf install ./ldm-0.2.0-1.fc44.noarch.rpm
+sudo dnf install ./ldm-downloader-*.fc44.noarch.rpm
 ldm install-browser-integration   # once: magnet/.torrent links, Flatpak browsers such as Brave
 ```
 
@@ -47,7 +47,7 @@ Download the `.deb` for your system from the [latest release](https://github.com
 and install it; apt fetches the dependencies:
 
 ```sh
-sudo apt install ./ldm-downloader_0.2.0-1~ubuntu24.04_all.deb
+sudo apt install ./ldm-downloader_*~ubuntu24.04_all.deb
 ldm install-browser-integration   # once: magnet/.torrent links, Flatpak browsers such as Brave
 ```
 
@@ -56,10 +56,11 @@ and LDM keeps a per-user copy up to date (Preferences → Video → Keep yt-dlp 
 
 ## Install on Arch Linux
 
-Build the package from this repository (an AUR package, `ldm-downloader`, is planned):
+Until the AUR package `ldm-downloader` is published, build it from the PKGBUILD attached to the latest
+release (or `ldm/packaging/arch/ldm-downloader-git` in this repository for the newest commit):
 
 ```sh
-git clone https://github.com/adiashishz/LDM.git && cd LDM/ldm/packaging/arch/ldm-downloader-git
+mkdir ldm && cd ldm && curl -LO https://github.com/adiashishz/LDM/releases/latest/download/PKGBUILD
 makepkg -si
 ldm install-browser-integration   # once: magnet/.torrent links, Flatpak browsers such as Brave
 ```
@@ -69,11 +70,11 @@ The package is named `ldm-downloader`; the command is `ldm`. It conflicts with t
 
 ## Install as a Flatpak (any distribution)
 
-Download `ldm.flatpak` from the [latest release](https://github.com/adiashishz/LDM/releases/latest) (Flathub
-is planned) and install it; it uses the GNOME runtime from Flathub:
+Download the `.flatpak` from the [latest release](https://github.com/adiashishz/LDM/releases/latest)
+(Flathub is planned) and install it; it uses the GNOME runtime from Flathub:
 
 ```sh
-flatpak install --user ./ldm.flatpak
+flatpak install --user ./ldm-downloader-*-x86_64.flatpak
 flatpak run --command=ldm io.github.adiashishz.LDM install-browser-integration   # once, for the extension
 ```
 
@@ -140,6 +141,8 @@ More commands are in [`ldm/README.md`](ldm/README.md).
   Node.js built in). Python dependencies are pinned in `flatpak-python-deps.yml` by `flatpak-python-deps.py`;
   CI builds it, runs `flatpak-builder-lint` and the smoke test inside the sandbox.
 - `extension/sign-firefox.sh`: signs the Firefox add-on for permanent installs.
+
+Releases: see [RELEASING.md](RELEASING.md).
 
 ## Development
 

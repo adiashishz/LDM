@@ -10,6 +10,7 @@ on:
   pull_request:
     paths-ignore: ["**/*.md", "website/**", "LICENSE"]
   workflow_dispatch:
+  workflow_call:  # the release workflow runs all of this before publishing
 
 # A new push to a pull request cancels its run still in progress.
 concurrency:
@@ -231,7 +232,9 @@ jobs:
         # Installed explicitly: updating the SDK that ships in the image fails on its filesystem.
         run: flatpak install -y --noninteractive --system flathub org.freedesktop.Sdk.Extension.node24//26.08
 
-      - uses: actions/cache@v4
+      - name: Restore the build cache
+        id: cache
+        uses: actions/cache/restore@v4
         with:
           path: .flatpak-builder
           # ffmpeg, Boost and libtorrent are rebuilt only when the manifest or the dependencies change.
@@ -246,20 +249,29 @@ jobs:
             --repo=repo build-dir ldm/packaging/io.github.adiashishz.LDM.yml
           flatpak build-bundle repo ldm.flatpak io.github.adiashishz.LDM
 
+      - name: Save the build cache
+        # Right after the build, so a later step failing doesn't throw the compiled modules away.
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .flatpak-builder
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
       - uses: actions/upload-artifact@v4
         with:
           name: flatpak
           path: ldm.flatpak
 
       - name: Lint for Flathub
-        # Screenshots are mirrored by Flathub's own build (and the URLs point at main), so those two
+        # Screenshots are mirrored to Flathub's servers by Flathub's own build, so the screenshot
         # findings can't pass here; any other error fails the job.
         run: |
           for target in "manifest ldm/packaging/io.github.adiashishz.LDM.yml" "repo repo"; do
             flatpak-builder-lint --exceptions $target > lint.json || true
             cat lint.json
             python3 -c 'import json, sys
-          known = {"appstream-missing-screenshots", "appstream-screenshots-not-mirrored-in-ostree"}
+          known = {"appstream-missing-screenshots", "appstream-screenshots-not-mirrored-in-ostree",
+                   "appstream-external-screenshot-url"}
           text = open("lint.json").read().strip()  # nothing printed: nothing to report
           errors = set(json.loads(text).get("errors", []) if text else []) - known
           sys.exit(f"Flathub lint errors: {sorted(errors)}" if errors else 0)'
@@ -291,3 +303,61 @@ jobs:
         run: |
           flatpak run --devel --command=sh --filesystem="$PWD/ldm/packaging:ro" \
             io.github.adiashishz.LDM "$PWD/ldm/packaging/smoke-test.sh"
+
+  versions:
+    name: Versions agree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Same version in every file
+        run: python3 ldm/packaging/release.py --check
+
+  rpm:
+    name: RPM for Fedora 44
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 30
+    steps:
+      - name: Install the packaging tools
+        run: dnf install -y git-core rpm-build rpmlint dnf-plugins-core
+
+      - uses: actions/checkout@v4
+
+      - name: Build and lint
+        # The Fedora test job already ran the suite: don't repeat it in the package build.
+        run: |
+          git config --global --add safe.directory "$PWD"
+          RPM_TOPDIR=/tmp/rpmbuild INSTALL_BUILD_DEPS=1 ldm/packaging/build-rpm.sh --without check
+          mkdir dist && cp /tmp/rpmbuild/RPMS/noarch/*.rpm /tmp/rpmbuild/SRPMS/*.src.rpm dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm-fedora44
+          path: dist/
+
+  rpm-install:
+    name: Install the RPM on Fedora 44
+    needs: rpm
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 15
+    steps:
+      - name: Install git for the checkout
+        run: dnf install -y git-core
+
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: ldm/packaging
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: rpm-fedora44
+          path: dist/
+
+      - name: Install on a clean system
+        run: dnf install -y --setopt=install_weak_deps=False $(ls dist/*.noarch.rpm) dbus-daemon util-linux
+
+      - name: Smoke test as a normal user
+        run: |
+          useradd -m tester
+          runuser -u tester -- sh ldm/packaging/smoke-test.sh

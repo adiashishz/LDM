@@ -1,5 +1,7 @@
 #!/bin/bash
 # Build the LDM RPM locally from the committed tree (git HEAD), then lint it.
+#   build-rpm.sh [RPMBUILD OPTIONS]     e.g. build-rpm.sh --without check   (skip the tests)
+# With INSTALL_BUILD_DEPS=1 (as root, as in CI), it installs the build dependencies itself.
 # Needs the build tools plus what LDM's build and tests use:
 #   sudo dnf install rpm-build pyproject-rpm-macros python3-devel rpmlint libappstream-glib \
 #                    python3-hatchling python3-pytest python3-httpx+socks python3-dns yt-dlp+default \
@@ -15,7 +17,15 @@ git -C "$REPO" archive --format=tar.gz --prefix="LDM-$VERSION/" -o "$TOP/SOURCES
 cp "$SPEC" "$TOP/SPECS/"
 cp "$REPO/ldm/packaging/ldm-downloader.rpmlintrc" "$TOP/SOURCES/"
 # Build dependencies are generated from pyproject.toml; rpmbuild lists any that are missing.
-rpmbuild --define "_topdir $TOP" -ba "$TOP/SPECS/ldm-downloader.spec"
+if [ "${INSTALL_BUILD_DEPS:-}" = 1 ]; then
+    dnf builddep -y "$TOP/SPECS/ldm-downloader.spec"
+    # The generated ones come in rounds (the build backend first, then what it reports).
+    for _ in 1 2 3 4; do
+        rpmbuild --define "_topdir $TOP" -br "$@" "$TOP/SPECS/ldm-downloader.spec" >/dev/null 2>&1 && break
+        dnf builddep -y "$TOP"/SRPMS/ldm-downloader-"$VERSION"-*.buildreqs.nosrc.rpm
+    done
+fi
+rpmbuild --define "_topdir $TOP" -ba "$@" "$TOP/SPECS/ldm-downloader.spec"
 echo
 rpmlint -r "$REPO/ldm/packaging/ldm-downloader.rpmlintrc" "$TOP/SPECS/ldm-downloader.spec" "$TOP"/RPMS/noarch/ldm-downloader-"$VERSION"-*.rpm \
     "$TOP"/SRPMS/ldm-downloader-"$VERSION"-*.src.rpm || true
