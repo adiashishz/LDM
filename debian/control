@@ -1,0 +1,60 @@
+Source: ldm
+Section: net
+Priority: optional
+Maintainer: Aditya Ashish <adiashishz@gmail.com>
+Build-Depends: debhelper-compat (= 13),
+               dh-sequence-python3,
+               pybuild-plugin-pyproject,
+               python3-all,
+               python3-hatchling,
+               desktop-file-utils,
+               appstream,
+               python3-pytest <!nocheck>,
+               python3-gi <!nocheck>,
+               gir1.2-gtk-4.0 <!nocheck>,
+               gir1.2-adw-1 <!nocheck>,
+               python3-httpx <!nocheck>,
+               python3-socksio <!nocheck>,
+               python3-dbus-fast <!nocheck>,
+               python3-dnspython <!nocheck>,
+               python3-secretstorage <!nocheck>,
+               python3-cryptography <!nocheck>,
+               python3-libtorrent <!nocheck>,
+               dbus-daemon <!nocheck>,
+               libglib2.0-bin <!nocheck>,
+               ffmpeg <!nocheck>
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+Homepage: https://github.com/adiashishz/LDM
+Vcs-Browser: https://github.com/adiashishz/LDM
+Vcs-Git: https://github.com/adiashishz/LDM.git
+
+Package: ldm
+Architecture: all
+Depends: ${python3:Depends},
+         ${misc:Depends},
+         python3-gi,
+         gir1.2-gtk-4.0 (>= 4.12),
+         gir1.2-adw-1 (>= 1.5),
+         python3-httpx,
+         python3-socksio,
+         python3-dbus-fast,
+         python3-dnspython,
+         python3-secretstorage,
+         python3-cryptography,
+         ffmpeg,
+         libglib2.0-bin
+Recommends: yt-dlp,
+            python3-libtorrent,
+            nodejs,
+            wl-clipboard | xclip
+Description: download manager for files, videos and torrents
+ LDM is a download manager for Linux, inspired by 1DM for Android:
+ multi-part downloads with pause, resume and retry, video and stream
+ downloads (yt-dlp), torrents (libtorrent), a scheduler, desktop
+ notifications and a browser extension for Firefox, Chrome and Brave.
+ Downloads run in a background service, so closing the window never
+ stops them.
+ .
+ The package includes a copy of yt-dlp, used when it is newer than the
+ system's; LDM keeps a per-user copy up to date as well.
