@@ -1,16 +1,20 @@
 # Fedora / COPR package for LDM. Build locally with packaging/build-rpm.sh; see packaging/COPR.md.
 %bcond check 1
 
-Name:           ldm
+Name:           ldm-downloader
 Version:        0.2.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Download manager for files, videos and torrents
 License:        MIT
 URL:            https://github.com/adiashishz/LDM
 # GitHub's archive of the v%%{version} tag (top folder LDM-%%{version}); build-rpm.sh makes the same locally.
 Source0:        %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
-Source1:        ldm.rpmlintrc
+Source1:        ldm-downloader.rpmlintrc
 BuildArch:      noarch
+# Renamed from ldm (0.2.0-1, attached to the GitHub release): that name belongs to other projects
+# elsewhere (LTSP's display manager, an AUR device mounter). The command is still `ldm`.
+Provides:       ldm = %{version}-%{release}
+Obsoletes:      ldm < 0.2.0-2
 
 BuildRequires:  python3-devel
 BuildRequires:  pyproject-rpm-macros
@@ -111,6 +115,9 @@ cd ldm
 %{_datadir}/ldm/
 
 %changelog
+* Sat Nov 14 2026 Aditya Ashish <adiashishz@gmail.com> - 0.2.0-2
+- Rename the package to ldm-downloader (the command is still ldm)
+
 * Thu Oct 22 2026 Aditya Ashish <adiashishz@gmail.com> - 0.2.0-1
 - Selection mode: pause, resume, remove or delete several downloads at once
 - Signed video streams: send the browser's request headers (fixes HTTP 403)

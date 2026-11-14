@@ -19,22 +19,22 @@ Build once locally — this runs the tests and rpmlint the same way COPR will:
 1. Log in at <https://copr.fedorainfracloud.org> with your Fedora account (FAS).
 2. Copy the API token from <https://copr.fedorainfracloud.org/api/> into `~/.config/copr`.
 3. `sudo dnf install copr-cli`
-4. `copr-cli create ldm --chroot fedora-43-x86_64 --chroot fedora-44-x86_64 --chroot fedora-rawhide-x86_64`
+4. `copr-cli create ldm-downloader --chroot fedora-43-x86_64 --chroot fedora-44-x86_64 --chroot fedora-rawhide-x86_64`
    (the package is `noarch`; one architecture per release is enough).
 
 ## Each release
 
 ```
-# bump Version: and add a %changelog entry in ldm.spec, commit, then:
-ldm/packaging/build-rpm.sh                      # builds ~/rpmbuild/SRPMS/ldm-<version>-1.fc44.src.rpm
-copr-cli build ldm ~/rpmbuild/SRPMS/ldm-*.src.rpm
+# bump Version: and add a %changelog entry in ldm-downloader.spec, commit, then:
+ldm/packaging/build-rpm.sh                      # builds ~/rpmbuild/SRPMS/ldm-downloader-<version>-1.fc44.src.rpm
+copr-cli build ldm-downloader ~/rpmbuild/SRPMS/ldm-downloader-*.src.rpm
 ```
 
 ## What users run
 
 ```
-sudo dnf copr enable <your-fas-name>/ldm
-sudo dnf install ldm
+sudo dnf copr enable <your-fas-name>/ldm-downloader
+sudo dnf install ldm-downloader
 ```
 
 Then, once per user: log out and back in (or run `systemctl --user start ldm.service`) so the

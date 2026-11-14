@@ -47,7 +47,7 @@ Download the `.deb` for your system from the [latest release](https://github.com
 and install it; apt fetches the dependencies:
 
 ```sh
-sudo apt install ./ldm_0.2.0-1~ubuntu24.04_all.deb
+sudo apt install ./ldm-downloader_0.2.0-1~ubuntu24.04_all.deb
 ldm install-browser-integration   # once: magnet/.torrent links, Flatpak browsers such as Brave
 ```
 
@@ -103,7 +103,7 @@ More commands are in [`ldm/README.md`](ldm/README.md).
 
 ## Packaging
 
-- `ldm/packaging/ldm.spec` and `build-rpm.sh`: RPM for Fedora (COPR steps in `COPR.md`); release builds
+- `ldm/packaging/ldm-downloader.spec` and `build-rpm.sh`: RPM for Fedora (COPR steps in `COPR.md`); release builds
   are attached to the [GitHub releases](https://github.com/adiashishz/LDM/releases).
 - `debian/` and `ldm/packaging/build-deb.sh`: .deb for Debian and Ubuntu, with the yt-dlp release pinned in
   `debian/yt-dlp.pin`; CI builds, lints and test-installs it on Debian 13, Ubuntu 24.04 and 26.04.

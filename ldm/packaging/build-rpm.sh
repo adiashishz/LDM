@@ -6,18 +6,18 @@
 #                    dbus-daemon ffmpeg-free rb_libtorrent-python3
 set -euo pipefail
 REPO=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
-SPEC=$REPO/ldm/packaging/ldm.spec
+SPEC=$REPO/ldm/packaging/ldm-downloader.spec
 VERSION=$(awk '/^Version:/ {print $2}' "$SPEC")
 TOP=${RPM_TOPDIR:-$HOME/rpmbuild}
 mkdir -p "$TOP"/{SOURCES,SPECS,SRPMS,RPMS,BUILD}
 # Same layout as GitHub's archive of a release tag (top folder LDM-<version>).
-git -C "$REPO" archive --format=tar.gz --prefix="LDM-$VERSION/" -o "$TOP/SOURCES/ldm-$VERSION.tar.gz" HEAD
+git -C "$REPO" archive --format=tar.gz --prefix="LDM-$VERSION/" -o "$TOP/SOURCES/ldm-downloader-$VERSION.tar.gz" HEAD
 cp "$SPEC" "$TOP/SPECS/"
-cp "$REPO/ldm/packaging/ldm.rpmlintrc" "$TOP/SOURCES/"
+cp "$REPO/ldm/packaging/ldm-downloader.rpmlintrc" "$TOP/SOURCES/"
 # Build dependencies are generated from pyproject.toml; rpmbuild lists any that are missing.
-rpmbuild --define "_topdir $TOP" -ba "$TOP/SPECS/ldm.spec"
+rpmbuild --define "_topdir $TOP" -ba "$TOP/SPECS/ldm-downloader.spec"
 echo
-rpmlint -r "$REPO/ldm/packaging/ldm.rpmlintrc" "$TOP/SPECS/ldm.spec" "$TOP"/RPMS/noarch/ldm-"$VERSION"-*.rpm \
-    "$TOP"/SRPMS/ldm-"$VERSION"-*.src.rpm || true
+rpmlint -r "$REPO/ldm/packaging/ldm-downloader.rpmlintrc" "$TOP/SPECS/ldm-downloader.spec" "$TOP"/RPMS/noarch/ldm-downloader-"$VERSION"-*.rpm \
+    "$TOP"/SRPMS/ldm-downloader-"$VERSION"-*.src.rpm || true
 echo
-echo "Built:"; ls -1 "$TOP"/RPMS/noarch/ldm-"$VERSION"-*.rpm "$TOP"/SRPMS/ldm-"$VERSION"-*.src.rpm
+echo "Built:"; ls -1 "$TOP"/RPMS/noarch/ldm-downloader-"$VERSION"-*.rpm "$TOP"/SRPMS/ldm-downloader-"$VERSION"-*.src.rpm

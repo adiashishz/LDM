@@ -1,4 +1,4 @@
-Source: ldm
+Source: ldm-downloader
 Section: net
 Priority: optional
 Maintainer: Aditya Ashish <adiashishz@gmail.com>
@@ -29,7 +29,7 @@ Homepage: https://github.com/adiashishz/LDM
 Vcs-Browser: https://github.com/adiashishz/LDM
 Vcs-Git: https://github.com/adiashishz/LDM.git
 
-Package: ldm
+Package: ldm-downloader
 Architecture: all
 Depends: ${python3:Depends},
          ${misc:Depends},

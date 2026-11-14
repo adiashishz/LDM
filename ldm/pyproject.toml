@@ -1,5 +1,5 @@
 [project]
-name = "ldm"
+name = "ldm-downloader"  # the command and the Python module are `ldm`
 version = "0.2.0"
 description = "Linux download manager (v1, Python)"
 requires-python = ">=3.11"
@@ -21,6 +21,9 @@ ldm = "ldm.cli:main"
 
 [project.gui-scripts]
 ldm-gui = "ldm.gui:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ldm"]  # the project is named ldm-downloader, the package ldm
 
 [build-system]
 requires = ["hatchling"]

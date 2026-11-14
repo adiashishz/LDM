@@ -138,7 +138,7 @@ jobs:
         # Without Recommends: no system yt-dlp, so videos rely on the bundled copy.
         run: |
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ./dist/ldm_*.deb dbus-daemon
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ./dist/ldm-downloader_*.deb dbus-daemon
 
       - name: Smoke test as a normal user
         run: |

@@ -1,4 +1,4 @@
 # The yt-dlp release bundled in the .deb (official zipimport build) and its SHA-256 from the
-# release's SHA2-256SUMS. build-deb.sh puts it in the second source tarball, ldm_<version>.orig-ytdlp.tar.gz.
+# release's SHA2-256SUMS. build-deb.sh puts it in the second source tarball, ldm-downloader_<version>.orig-ytdlp.tar.gz.
 version=2026.10.26
 sha256=e51e69e89489f199530f13d32a4342da3ddb2cf34842f364603a066db05afbf3
