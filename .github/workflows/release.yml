@@ -1,0 +1,112 @@
+# Release: push a tag vX.Y.Z (after release.py X.Y.Z, merged; see RELEASING.md).
+#   1. the tag must match the version in every file;
+#   2. the whole CI runs: every package is built and install-tested on its distribution;
+#   3. the AUR PKGBUILD gets the checksum of GitHub's tarball of the tag, and is test-built from it;
+#   4. a DRAFT release collects the packages, the extension and SHA256SUMS, with the notes from the
+#      metainfo. Check it on GitHub, then publish it (publishing also updates the website).
+# Run it by hand (Actions → Release → Run workflow) for a dry run: steps 1-2 only, no release.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        name: The tag matches every file
+        run: |
+          python3 ldm/packaging/release.py --check ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          echo "version=$(sed -n 's/^version = "\(.*\)"/\1/p' ldm/pyproject.toml)" >> "$GITHUB_OUTPUT"
+
+  ci:
+    name: CI
+    needs: version
+    uses: ./.github/workflows/ci.yml
+
+  aur:
+    name: AUR PKGBUILD
+    if: github.ref_type == 'tag'
+    needs: version
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install the packaging tools
+        run: pacman -Syu --noconfirm --needed base-devel git
+
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: ldm/packaging/arch
+
+      - name: Pin GitHub's tarball of the tag and build from it
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          useradd -m builder
+          mkdir aur && cp ldm/packaging/arch/ldm-downloader/PKGBUILD aur/ && chown -R builder: aur
+          cd aur
+          curl -fsSL -o "ldm-downloader-$VERSION.tar.gz" "https://github.com/${{ github.repository }}/archive/v$VERSION.tar.gz"
+          sed -i "s/^sha256sums=.*/sha256sums=('$(sha256sum "ldm-downloader-$VERSION.tar.gz" | cut -d' ' -f1)')/" PKGBUILD
+          rm "ldm-downloader-$VERSION.tar.gz"  # makepkg downloads it again, as an AUR user would
+          echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
+          runuser -u builder -- makepkg --syncdeps --noconfirm --nocheck
+          runuser -u builder -- makepkg --printsrcinfo > .SRCINFO
+          mkdir ../aur-out && cp PKGBUILD .SRCINFO ../aur-out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aur
+          path: aur-out/
+          include-hidden-files: true
+
+  release:
+    name: Draft release
+    if: github.ref_type == 'tag'
+    needs: [version, ci, aur]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Collect the release files
+        run: |
+          mkdir release
+          cp artifacts/rpm-fedora44/*.noarch.rpm artifacts/rpm-fedora44/*.src.rpm release/
+          cp artifacts/deb-*/*.deb release/
+          cp artifacts/flatpak/ldm.flatpak "release/ldm-downloader-$VERSION-x86_64.flatpak"
+          cp artifacts/aur/PKGBUILD release/PKGBUILD
+          cp artifacts/aur/.SRCINFO release/SRCINFO
+          (cd extension && python3 build.py) && cp extension/dist/*.zip release/
+          (cd release && sha256sum * > SHA256SUMS)
+          # The website links to these files by name: every link must have its file.
+          python3 website/build.py site --version "$VERSION"
+          missing=0
+          for name in $(grep -o "href=\"[^\"]*/releases/download/v$VERSION/[^\"]*\"" site/index.html \
+                        | sed 's|.*/||; s|"$||' | sort -u); do
+            [ -f "release/$name" ] || { echo "the website links to $name, which isn't in the release"; missing=1; }
+          done
+          [ "$missing" = 0 ]
+          ls -l release/
+          python3 ldm/packaging/release.py --notes "$VERSION" > notes.md
+          cat notes.md
+
+      - name: Create the draft release
+        run: |
+          gh release create "${{ github.ref_name }}" release/* --draft --verify-tag \
+            --title "LDM $VERSION" --notes-file notes.md

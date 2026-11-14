@@ -1,0 +1,57 @@
+# Publish the website (website/) to https://ldm-downloader.github.io, which is served from the repository
+# ldm-downloader/ldm-downloader.github.io. Runs when a release is published (its download links point at
+# that release), and when the site changes on main (links: the latest published release).
+# Needs the secret SITE_DEPLOY_KEY: the private half of a deploy key with write access to that repository
+# (see RELEASING.md). Without it, the site is built and checked but not published.
+name: Website
+
+on:
+  release:
+    types: [published]
+  push:
+    branches: [main]
+    paths: ["website/**", "ldm/data/screenshots/**", "ldm/src/ldm/resources/*.svg"]
+  workflow_dispatch:
+
+concurrency:
+  group: website
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SITE_REPO: ldm-downloader/ldm-downloader.github.io
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build for the published release
+        run: |
+          tag="${{ github.event.release.tag_name }}"
+          [ -n "$tag" ] || tag=$(gh release view --repo "${{ github.repository }}" --json tagName -q .tagName)
+          python3 website/build.py site --version "${tag#v}"
+
+      - name: Publish
+        env:
+          SITE_DEPLOY_KEY: ${{ secrets.SITE_DEPLOY_KEY }}
+        run: |
+          if [ -z "$SITE_DEPLOY_KEY" ]; then
+            echo "::notice::SITE_DEPLOY_KEY is not set: the site was built but not published"
+            exit 0
+          fi
+          install -m 600 /dev/null "$RUNNER_TEMP/key" && printf '%s\n' "$SITE_DEPLOY_KEY" > "$RUNNER_TEMP/key"
+          export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/key -o StrictHostKeyChecking=accept-new"
+          git clone --depth 1 "git@github.com:$SITE_REPO.git" published
+          find published -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a site/. published/
+          cd published
+          git add -A
+          if git diff --cached --quiet; then echo "the site is unchanged"; exit 0; fi
+          git -c user.name="LDM website" -c user.email="actions@users.noreply.github.com" \
+            commit -q -m "site from ${{ github.repository }}@${GITHUB_SHA::7}"
+          git push -q origin HEAD
