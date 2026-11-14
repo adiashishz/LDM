@@ -23,6 +23,10 @@ BuildRequires:  desktop-file-utils
 BuildRequires:  libappstream-glib
 %if %{with check}
 BuildRequires:  python3-pytest
+# pytest's settings and the GUI test modules import these even when the GUI tests are deselected.
+BuildRequires:  python3-gobject
+BuildRequires:  gtk4
+BuildRequires:  libadwaita
 BuildRequires:  dbus-daemon
 BuildRequires:  ffmpeg-free
 BuildRequires:  rb_libtorrent-python3
