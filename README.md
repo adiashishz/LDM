@@ -8,6 +8,11 @@ GTK 4 / libadwaita and Python, inspired by 1DM for Android.
 
 Downloads run in a small background service, so closing the window never stops them.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="ldm/data/screenshots/main-dark.png">
+  <img src="ldm/data/screenshots/main.png" width="800" alt="LDM's main window: a list of finished, paused, running and failed downloads">
+</picture>
+
 ## Features
 
 - **Files:** up to 32 connections per download, pause/resume across restarts, automatic retries,
