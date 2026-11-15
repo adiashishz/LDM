@@ -1,6 +1,5 @@
 """DaemonClient (Qt) against the daemon on a private bus."""
 
-import os
 import random
 import shutil
 import time
@@ -15,12 +14,9 @@ from ldm.qt.client import DaemonClient  # noqa: E402
 pytestmark = pytest.mark.skipif(shutil.which("dbus-daemon") is None, reason="dbus-daemon not installed")
 
 
-@pytest.fixture(scope="module")
-def app():
-    # Qt's own event loop, not GLib's: the GTK tests leave GTK work on GLib's default context, which Qt
-    # would otherwise run (and crash on). The app never has GTK and Qt in one process.
-    os.environ["QT_NO_GLIB"] = "1"
-    return QCoreApplication.instance() or QCoreApplication([])
+@pytest.fixture
+def app(qt_app):
+    return qt_app
 
 
 def spin_until(condition, timeout=15.0):

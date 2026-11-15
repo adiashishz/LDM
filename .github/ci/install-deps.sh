@@ -25,12 +25,12 @@ debian)  # Debian and Ubuntu
     # PySide6 (the Qt window): Debian 13 and Ubuntu 26.04 have it, Ubuntu 24.04 doesn't (Flatpak there).
     if apt-cache show python3-pyside6.qtwidgets >/dev/null 2>&1; then
         apt-get install -y --no-install-recommends \
-            python3-pyside6.qtcore python3-pyside6.qtgui python3-pyside6.qtwidgets
+            python3-pyside6.qtcore python3-pyside6.qtgui python3-pyside6.qtwidgets python3-pyside6.qtsvg
     fi
     ;;
 arch)
     pacman -Syu --noconfirm --needed \
-        python python-gobject gtk4 libadwaita pyside6 \
+        python python-gobject gtk4 libadwaita pyside6 qt6-svg \
         python-httpx python-socksio python-dbus-fast python-dnspython python-secretstorage python-cryptography \
         yt-dlp ffmpeg libtorrent-rasterbar \
         glib2 dbus xdg-utils desktop-file-utils \

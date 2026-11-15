@@ -306,3 +306,17 @@ def doh_server():
     yield start
     for server in servers:
         server.close()
+
+
+# --- Qt -------------------------------------------------------------------------------------
+
+@pytest.fixture(scope="session")
+def qt_app():
+    """One QApplication for every Qt test, drawn offscreen and on Qt's own event loop: the GTK tests leave
+    GTK work on GLib's default context, which Qt would otherwise run (and crash on)."""
+    pytest.importorskip("PySide6")
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    os.environ["QT_NO_GLIB"] = "1"
+    from PySide6.QtWidgets import QApplication
+
+    return QApplication.instance() or QApplication([])

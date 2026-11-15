@@ -41,7 +41,13 @@ def _report_too_old(message: str) -> None:
 
 
 def main() -> int:
-    """`ldm-gui` entry point: check the toolkit versions before loading the window code."""
+    """`ldm-gui` entry point: check the toolkit versions before loading the window code.
+
+    `ldm-gui --qt` opens the new Qt window instead (while it is being built)."""
+    if "--qt" in sys.argv[1:]:
+        from ..qt.app import main as qt_main
+
+        return qt_main()
     if message := too_old():
         _report_too_old(message)
         return 1
