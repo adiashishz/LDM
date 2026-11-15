@@ -3,7 +3,7 @@
 
 pkgname=ldm-downloader-git
 _pkgname=ldm-downloader
-pkgver=0.2.0.r0.g0000000
+pkgver=0.3.0.r0.g0000000
 pkgrel=1
 pkgdesc="Download manager for files, videos and torrents, with a browser extension (GTK 4; latest from git)"
 arch=('any')
