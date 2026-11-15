@@ -11,16 +11,7 @@ from typing import Any, Callable
 from gi.repository import Adw, GObject, Gtk
 
 from ..schedule import DAYS, parse_days, parse_time
-
-WINDOW_KEYS = ("schedule_start", "schedule_stop", "schedule_days")
-
-
-def describe_window(start: str, stop: str, days: str) -> str:
-    chosen = parse_days(days) if days else set()
-    names = "every day" if not chosen or len(chosen) == 7 else " ".join(DAYS[i].capitalize() for i in sorted(chosen))
-    overnight = " (overnight)" if parse_time(stop) < parse_time(start) else ""
-    return f"{start}–{stop}{overnight}, {names}"
-
+from ..ui.text import WINDOW_KEYS, describe_window  # noqa: F401 (re-exported)
 
 class TimeRow(Adw.ActionRow):
     """HH:MM with two spin buttons."""

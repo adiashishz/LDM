@@ -2,21 +2,20 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlsplit
 
 from gi.repository import Adw, Gio, GLib, Gtk
 
 from ..format import STATE_LABELS, human
-from ..hlskey import aes_hex
 from ..nmhost import header_name
 from ..sandbox import folder_problem
+from ..ui.text import (capture_details, duration_text, is_torrent_link, is_url, key_valid,
+                       looks_like_login, parse_limit, short_path)
 from .client import DaemonClient
 from .compat import spinner
 from .schedule_rows import ScheduleEditor
-from .dialogs import is_url, parse_limit, read_clipboard_url, short_path
+from .dialogs import read_clipboard_url
 
 # "Save in" choices: (label, XDG directory or None for the download folder setting)
 FOLDERS = [
@@ -30,42 +29,6 @@ OTHER_FOLDER = "Other folder…"
 MAX_PARTS = 32
 EDITABLE_HEADERS = ("Referer", "Origin", "Cookie", "User-Agent")
 PLAYLIST_EXTENSIONS = (".m3u8", ".mpd")
-
-
-def capture_details(capture: dict[str, Any]) -> str:
-    kind = {"hls": "HLS stream", "dash": "DASH stream", "video": "Video", "audio": "Audio"}.get(capture.get("kind"), "")
-    host = urlsplit(capture["url"]).hostname or ""
-    return " · ".join(p for p in (kind, human(capture["size"]) if capture.get("size") else "", host) if p)
-
-
-def key_valid(text: str) -> bool:
-    if not text.strip():
-        return True
-    try:
-        aes_hex(text)
-        return True
-    except ValueError:
-        return False
-
-
-def looks_like_login(url: str) -> bool:
-    """A download link that ended on the site's sign-in page (the site wants a logged-in browser)."""
-    return bool(re.search(r"/(log-?in|sign-?in|auth|account/login)(/|$|\?)", urlsplit(url).path.lower() + "/"))
-
-
-def is_torrent_link(text: str) -> bool:
-    parts = urlsplit(text.strip())
-    if parts.scheme == "magnet":
-        return "xt=" in parts.query
-    return parts.scheme in ("http", "https", "file") and parts.path.lower().endswith(".torrent")
-
-
-def duration_text(seconds: float | None) -> str:
-    if not seconds:
-        return ""
-    seconds = int(seconds)
-    hours, rest = divmod(seconds, 3600)
-    return f"{hours}:{rest // 60:02d}:{rest % 60:02d}" if hours else f"{rest // 60}:{rest % 60:02d}"
 
 
 class AddDialog(Adw.Dialog):
