@@ -30,7 +30,7 @@ debian)  # Debian and Ubuntu
     ;;
 arch)
     pacman -Syu --noconfirm --needed \
-        python python-gobject gtk4 libadwaita pyside6 \
+        python python-gobject gtk4 libadwaita pyside6 qt6-svg \
         python-httpx python-socksio python-dbus-fast python-dnspython python-secretstorage python-cryptography \
         yt-dlp ffmpeg libtorrent-rasterbar \
         glib2 dbus xdg-utils desktop-file-utils \
