@@ -19,7 +19,7 @@
     --line: rgba(0, 0, 6, .10); --shadow: 0 0 0 1px rgba(0, 0, 6, .07), 0 1px 3px rgba(0, 0, 6, .06);
     --accent: #1c71d8; --accent-fg: #ffffff; --link: #1a5fb4;
     --pill: #e3e1de; --term: #241f31; --term-fg: #f6f5f4; --term-button: #3d3846;
-    --code-bg: #f0eeec; --soon-bg: #fdf0d5; --soon-fg: #8a5100;
+    --code-bg: #f0eeec;
     --sans: Cantarell, "Noto Sans", "Segoe UI", system-ui, sans-serif;
     --mono: "Source Code Pro", "Noto Sans Mono", ui-monospace, monospace;
   }
@@ -29,7 +29,7 @@
       --line: rgba(255, 255, 255, .10); --shadow: 0 0 0 1px rgba(255, 255, 255, .06);
       --accent: #3584e4; --accent-fg: #ffffff; --link: #99c1f1;
       --pill: #3a3a3e; --term: #121214; --term-fg: #f6f5f4; --term-button: #3a3a3e;
-      --code-bg: #3a3a3e; --soon-bg: #4d3a12; --soon-fg: #f8e45c;
+      --code-bg: #3a3a3e;
       color-scheme: dark;
     }
   }
@@ -82,7 +82,6 @@
   .panel { padding: 22px; display: flex; flex-direction: column; gap: 14px; }
   .panel h3 { margin: 0; font-size: 18px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .panel p { margin: 0; color: var(--dim); font-size: 15px; }
-  .soon { font-size: 13px; padding: 2px 10px; border-radius: 999px; background: var(--soon-bg); color: var(--soon-fg); }
   .downloads { display: flex; gap: 10px; flex-wrap: wrap; }
   .downloads a { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; border-radius: 10px;
                  background: var(--accent); color: var(--accent-fg); font-weight: 700; text-decoration: none; font-size: 15px; }
@@ -192,7 +191,7 @@
       <div class="card">
         <div class="panel" role="tabpanel" id="panel-fedora" aria-labelledby="tab-fedora">
           <h3>Fedora 43 and 44</h3>
-          <p>Download the package and install it; dnf fetches the rest. A COPR repository with automatic updates is planned.</p>
+          <p>Download the package and install it; dnf fetches the rest.</p>
           <div class="downloads"><a href="{{DL}}/ldm-downloader-{{VERSION}}-1.fc44.noarch.rpm">Download .rpm</a></div>
           <div class="terminal"><code>sudo dnf install ./ldm-downloader-{{VERSION}}-1.fc44.noarch.rpm</code><button type="button">Copy</button></div>
         </div>
@@ -212,12 +211,12 @@
           <div class="terminal"><code>sudo apt install ./ldm-downloader_{{VERSION}}-1.deb13_all.deb</code><button type="button">Copy</button></div>
         </div>
         <div class="panel" role="tabpanel" id="panel-arch" aria-labelledby="tab-arch" hidden>
-          <h3>Arch Linux, Manjaro, EndeavourOS <span class="soon">AUR coming soon</span></h3>
-          <p>Until it is on the AUR, build the package from the release's PKGBUILD.</p>
+          <h3>Arch Linux, Manjaro, EndeavourOS</h3>
+          <p>Build the package from the release's PKGBUILD; makepkg installs the dependencies.</p>
           <div class="terminal"><code>curl -LO {{DL}}/PKGBUILD &amp;&amp; makepkg -si</code><button type="button">Copy</button></div>
         </div>
         <div class="panel" role="tabpanel" id="panel-flatpak" aria-labelledby="tab-flatpak" hidden>
-          <h3>Any other distribution <span class="soon">Flathub coming soon</span></h3>
+          <h3>Any other distribution</h3>
           <p>The Flatpak saves to your Downloads folder; choosing another folder in LDM gives it access to that one.</p>
           <div class="downloads"><a href="{{DL}}/ldm-downloader-{{VERSION}}-x86_64.flatpak">Download .flatpak</a></div>
           <div class="terminal"><code>flatpak install --user ./ldm-downloader-{{VERSION}}-x86_64.flatpak</code><button type="button">Copy</button></div>
@@ -234,9 +233,9 @@
       <h2>Browser extension</h2>
       <p>Clicks on download links go to LDM with the browser's cookies, so sign-in downloads work. On a video page, it lists the streams it found.</p>
       <div class="stores">
-        <a class="card" href="{{REPO}}#browser-extension"><strong>Firefox</strong><span>Firefox Add-ons: coming soon</span></a>
-        <a class="card" href="{{REPO}}#browser-extension"><strong>Chrome</strong><span>Chrome Web Store: coming soon</span></a>
-        <a class="card" href="{{REPO}}#browser-extension"><strong>Brave</strong><span>Chrome Web Store: coming soon</span></a>
+        <a class="card" href="{{DL}}/ldm-firefox-{{VERSION}}.zip"><strong>Firefox</strong><span>Download the zip, then about:debugging → Load Temporary Add-on</span></a>
+        <a class="card" href="{{DL}}/ldm-chromium-{{VERSION}}.zip"><strong>Chrome</strong><span>Download and unzip, then Developer mode → Load unpacked</span></a>
+        <a class="card" href="{{DL}}/ldm-chromium-{{VERSION}}.zip"><strong>Brave</strong><span>The Chrome zip: unzip, then Developer mode → Load unpacked</span></a>
       </div>
     </div>
   </section>

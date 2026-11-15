@@ -38,7 +38,7 @@ ldm install-browser-integration   # once: magnet/.torrent links, Flatpak browser
 ```
 
 Open **LDM** from the app menu, then add the browser extension (below). The package also ships the
-extension builds in `/usr/share/ldm/extension/`. A COPR repository with automatic updates is planned.
+extension builds in `/usr/share/ldm/extension/`.
 
 ## Install on Debian 13, Ubuntu 24.04 or newer (.deb)
 
@@ -71,7 +71,7 @@ The package is named `ldm-downloader`; the command is `ldm`. It conflicts with t
 ## Install as a Flatpak (any distribution)
 
 Download the `.flatpak` from the [latest release](https://github.com/adiashishz/LDM/releases/latest)
-(Flathub is planned) and install it; it uses the GNOME runtime from Flathub:
+and install it; it uses the GNOME runtime from Flathub:
 
 ```sh
 flatpak install --user ./ldm-downloader-*-x86_64.flatpak
@@ -110,9 +110,9 @@ cd extension && python3 build.py            # dist/firefox and dist/chromium
 ```
 
 - **Firefox:** `about:debugging` → This Firefox → Load Temporary Add-on → `dist/firefox/manifest.json`
-  (or the `ldm-firefox-0.2.0.zip`). A signed version for permanent installs is planned.
+  (or the `ldm-firefox-*.zip` from the release). Firefox removes temporary add-ons when it restarts.
 - **Chrome / Brave:** the extensions page → Developer mode → Load unpacked → `dist/chromium`
-  (or a folder with `ldm-chromium-0.2.0.zip` unzipped into it).
+  (or a folder with the release's `ldm-chromium-*.zip` unzipped into it).
 - Brave as a Flatpak also needs D-Bus access (the installer prints the `flatpak override` command).
 
 ## Use
