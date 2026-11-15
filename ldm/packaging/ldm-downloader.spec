@@ -2,8 +2,8 @@
 %bcond check 1
 
 Name:           ldm-downloader
-Version:        0.2.0
-Release:        2%{?dist}
+Version:        0.3.0
+Release:        1%{?dist}
 Summary:        Download manager for files, videos and torrents
 License:        MIT
 URL:            https://github.com/adiashishz/LDM
@@ -119,6 +119,14 @@ cd ldm
 %{_datadir}/ldm/
 
 %changelog
+* Sun Nov 15 2026 Aditya Ashish <adiashishz@gmail.com> - 0.3.0-1
+- Packages for Debian 13, Ubuntu 24.04 and 26.04 (also Linux Mint 22) and Arch Linux, alongside Fedora
+- A Flatpak for every other distribution
+- The package is now called ldm-downloader; the command is still ldm, and on Fedora it replaces the old ldm package automatically
+- Runs on older GNOME libraries (libadwaita 1.5), so Ubuntu 24.04 and Linux Mint 22 are supported
+- Keeps yt-dlp up to date for each user, so YouTube downloads keep working where the distribution's yt-dlp is old
+- The browser extension works with more browser setups, and explains what to do with Snap browsers
+
 * Sat Nov 14 2026 Aditya Ashish <adiashishz@gmail.com> - 0.2.0-2
 - Rename the package to ldm-downloader (the command is still ldm)
 

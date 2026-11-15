@@ -1,3 +1,14 @@
+ldm-downloader (0.3.0-1) unstable; urgency=medium
+
+  * Packages for Debian 13, Ubuntu 24.04 and 26.04 (also Linux Mint 22) and Arch Linux, alongside Fedora
+  * A Flatpak for every other distribution
+  * The package is now called ldm-downloader; the command is still ldm, and on Fedora it replaces the old ldm package automatically
+  * Runs on older GNOME libraries (libadwaita 1.5), so Ubuntu 24.04 and Linux Mint 22 are supported
+  * Keeps yt-dlp up to date for each user, so YouTube downloads keep working where the distribution's yt-dlp is old
+  * The browser extension works with more browser setups, and explains what to do with Snap browsers
+
+ -- Aditya Ashish <adiashishz@gmail.com>  Sun, 15 Nov 2026 10:45:31 +0530
+
 ldm-downloader (0.2.0-1) unstable; urgency=medium
 
   * First Debian and Ubuntu package.
