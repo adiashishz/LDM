@@ -5,50 +5,19 @@ Annotations are D-Bus signature strings read by dbus-fast, so this module must n
 """
 
 import contextlib
-from typing import Any
 
-from dbus_fast import DBusError, Variant
+from dbus_fast import DBusError
 from dbus_fast.service import ServiceInterface, method, signal
 
 from .busnames import BUS_NAME, ERROR_PREFIX, INTERFACE, OBJECT_PATH  # noqa: F401 (re-exported)
 from .engine import DownloadError
 from .manager import Busy, Duplicate, InvalidArgument, Manager, NotFound, SizeMismatch
+from .variants import from_vardict, to_variant, to_vardict  # noqa: F401 (to_variant re-exported)
 
 ADD_OPTIONS = {"dir", "name", "connections", "headers", "speed_limit", "start",
                "kind", "format", "format_label", "subtitles", "title", "page_url",
                "priorities", "sequential", "metadata", "peers", "scheduled", "unmetered_only",
                "schedule_start", "schedule_stop", "schedule_days", "hls_key", "hls_iv"}
-
-
-def to_variant(value: Any) -> Variant:
-    if isinstance(value, (bytes, bytearray)):
-        return Variant("ay", bytes(value))
-    if isinstance(value, bool):
-        return Variant("b", value)
-    if isinstance(value, int):
-        return Variant("x", value)
-    if isinstance(value, float):
-        return Variant("d", value)
-    if isinstance(value, str):
-        return Variant("s", value)
-    if isinstance(value, dict):
-        return Variant("a{ss}", {str(k): str(v) for k, v in value.items()})
-    if isinstance(value, list) and value and all(isinstance(v, dict) for v in value):
-        return Variant("aa{sv}", [to_vardict(v) for v in value])
-    if isinstance(value, list) and value and all(isinstance(v, int) and not isinstance(v, bool) for v in value):
-        return Variant("ax", value)
-    if isinstance(value, list):
-        return Variant("as", [str(v) for v in value])
-    raise TypeError(f"cannot send {type(value).__name__} over D-Bus")
-
-
-def to_vardict(values: dict[str, Any]) -> dict[str, Variant]:
-    """None values are omitted: clients treat a missing key as unknown."""
-    return {k: to_variant(v) for k, v in values.items() if v is not None}
-
-
-def from_vardict(values: dict[str, Variant]) -> dict[str, Any]:
-    return {k: v.value for k, v in values.items()}
 
 
 @contextlib.contextmanager
