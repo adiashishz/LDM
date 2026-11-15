@@ -43,11 +43,11 @@ extension builds in `/usr/share/ldm/extension/`. A COPR repository with automati
 ## Install on Debian 13, Ubuntu 24.04 or newer (.deb)
 
 Download the `.deb` for your system from the [latest release](https://github.com/adiashishz/LDM/releases/latest)
-(`~deb13` for Debian 13, `~ubuntu24.04` for Ubuntu 24.04 and Linux Mint 22, `~ubuntu26.04` for Ubuntu 26.04)
+(`deb13` for Debian 13, `ubuntu24.04` for Ubuntu 24.04 and Linux Mint 22, `ubuntu26.04` for Ubuntu 26.04)
 and install it; apt fetches the dependencies:
 
 ```sh
-sudo apt install ./ldm-downloader_*~ubuntu24.04_all.deb
+sudo apt install ./ldm-downloader_*ubuntu24.04_all.deb
 ldm install-browser-integration   # once: magnet/.torrent links, Flatpak browsers such as Brave
 ```
 

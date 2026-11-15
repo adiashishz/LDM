@@ -88,7 +88,9 @@ jobs:
         run: |
           mkdir release
           cp artifacts/rpm-fedora44/*.noarch.rpm artifacts/rpm-fedora44/*.src.rpm release/
-          cp artifacts/deb-*/*.deb release/
+          # GitHub turns "~" in uploaded file names into ".": rename first, so SHA256SUMS and the
+          # website's links use the names the release really has.
+          for deb in artifacts/deb-*/*.deb; do name=$(basename "$deb"); cp "$deb" "release/${name//\~/.}"; done
           cp artifacts/flatpak/ldm.flatpak "release/ldm-downloader-$VERSION-x86_64.flatpak"
           cp artifacts/aur/PKGBUILD release/PKGBUILD
           cp artifacts/aur/.SRCINFO release/SRCINFO
