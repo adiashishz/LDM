@@ -68,6 +68,11 @@ jobs:
           print("GTK       ", ".".join(map(str, (Gtk.get_major_version(), Gtk.get_minor_version(), Gtk.get_micro_version()))))
           print("libadwaita", ".".join(map(str, (Adw.get_major_version(), Adw.get_minor_version(), Adw.get_micro_version()))))
           print("PyGObject ", gi.__version__)
+          try:
+              import PySide6
+              print("PySide6   ", PySide6.__version__)
+          except ImportError:
+              print("PySide6    (not packaged)")
           EOF
           echo "Installed by pip because the distribution's is missing or too old:"
           runuser -u tester -- ldm/.venv/bin/python -m pip list --local --exclude-editable --format=freeze | grep -v '^pip=' || echo "  (none)"

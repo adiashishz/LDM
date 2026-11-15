@@ -7,7 +7,7 @@ set -eu
 case "$1" in
 fedora)
     dnf install -y --setopt=install_weak_deps=False \
-        python3 python3-gobject gobject-introspection gtk4 libadwaita \
+        python3 python3-gobject gobject-introspection gtk4 libadwaita python3-pyside6 \
         python3-httpx python3-socksio python3-dbus-fast python3-dns python3-secretstorage python3-cryptography \
         yt-dlp ffmpeg-free rb_libtorrent-python3 \
         glib2 dbus-daemon xdg-utils desktop-file-utils \
@@ -22,10 +22,15 @@ debian)  # Debian and Ubuntu
         yt-dlp ffmpeg python3-libtorrent \
         libglib2.0-bin dbus-daemon xdg-utils desktop-file-utils \
         xvfb xauth ca-certificates
+    # PySide6 (the Qt window): Debian 13 and Ubuntu 26.04 have it, Ubuntu 24.04 doesn't (Flatpak there).
+    if apt-cache show python3-pyside6.qtwidgets >/dev/null 2>&1; then
+        apt-get install -y --no-install-recommends \
+            python3-pyside6.qtcore python3-pyside6.qtgui python3-pyside6.qtwidgets
+    fi
     ;;
 arch)
     pacman -Syu --noconfirm --needed \
-        python python-gobject gtk4 libadwaita \
+        python python-gobject gtk4 libadwaita pyside6 \
         python-httpx python-socksio python-dbus-fast python-dnspython python-secretstorage python-cryptography \
         yt-dlp ffmpeg libtorrent-rasterbar \
         glib2 dbus xdg-utils desktop-file-utils \

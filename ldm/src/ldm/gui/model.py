@@ -8,19 +8,9 @@ from urllib.parse import unquote, urlsplit
 from gi.repository import Gio, GObject, Gtk
 
 from ..filetypes import group_of
-from .. import sandbox
-from ..format import human, status_text
-
-FINISH_ACTIONS = [("Do Nothing", "nothing"), ("Quit LDM", "quit"), ("Suspend", "suspend"), ("Power Off", "poweroff")]
-if sandbox.flatpak():  # a Flatpak can't suspend or power off the computer (no portal for it)
-    FINISH_ACTIONS = FINISH_ACTIONS[:2]
-VIEWS = {
-    "all": None,
-    "downloading": {"running", "processing", "queued", "paused"},
-    "finished": {"done", "seeding"},
-    "problems": {"error", "expired", "changed"},
-}
-
+from ..format import status_text
+from ..ui.states import FINISH_ACTIONS, VIEWS  # noqa: F401 (re-exported)
+from ..ui.text import torrent_extra
 
 class DownloadItem(GObject.Object):
     id = GObject.Property(type=GObject.TYPE_UINT64)
@@ -80,14 +70,6 @@ class DownloadItem(GObject.Object):
     @property
     def path(self) -> str | None:
         return f"{self.dir}/{self.name}" if self.dir and self.name else None
-
-
-def torrent_extra(state: str, peers: int, upload_speed: float, ratio: float) -> str:
-    if state == "running":
-        return f" · {peers} peer{'s' if peers != 1 else ''}" + (f" · ↑ {human(upload_speed)}/s" if upload_speed else "")
-    if state == "seeding":
-        return f" · ratio {ratio:.2f}" + (f" · ↑ {human(upload_speed)}/s" if upload_speed else "")
-    return ""
 
 
 def _order(a: DownloadItem, b: DownloadItem, *_) -> int:

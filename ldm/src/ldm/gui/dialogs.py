@@ -2,19 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Callable
-from urllib.parse import urlsplit
 
 from gi.repository import Adw, GLib, Gtk
 
-from ..format import human, parse_rate
-from ..sandbox import host_path
-
-
-def is_url(text: str) -> bool:
-    parts = urlsplit(text.strip())
-    return parts.scheme in ("http", "https") and bool(parts.netloc)
+from ..ui.text import is_url, limit_text, parse_limit, short_path  # noqa: F401 (re-exported)
 
 
 def read_clipboard_url(widget: Gtk.Widget, apply: Callable[[str], None]) -> None:
@@ -30,16 +22,6 @@ def read_clipboard_url(widget: Gtk.Widget, apply: Callable[[str], None]) -> None
             apply(text.strip())
 
     clipboard.read_text_async(None, done)
-
-
-def parse_limit(text: str) -> int | None:
-    """Speed-limit entry text -> bytes/s; '' = unlimited (0); None if invalid."""
-    if not text.strip():
-        return 0
-    try:
-        return parse_rate(text)
-    except ValueError:
-        return None
 
 
 def ask_text(parent: Gtk.Widget, heading: str, body: str, action: str, text: str,
@@ -70,12 +52,3 @@ def confirm(parent: Gtk.Widget, heading: str, body: str, action: str, on_confirm
     dialog.present(parent)
 
 
-def limit_text(rate: int) -> str:
-    return "0" if not rate else human(rate).replace(" ", "").replace("iB", "")
-
-
-def short_path(path: str) -> str:
-    """For display: ~ for the home folder, and a folder's real location rather than the document portal's
-    path for it (folders chosen inside a Flatpak)."""
-    path, home = host_path(path), str(Path.home())
-    return "~" + path[len(home):] if path == home or path.startswith(home + "/") else path

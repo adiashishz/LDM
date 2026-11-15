@@ -15,6 +15,7 @@ Issues = "https://github.com/adiashishz/LDM/issues"
 [project.optional-dependencies]
 dev = ["pytest>=7.4"]
 gui = ["PyGObject>=3.50"]  # usually the distro package (python3-gobject)
+qt = ["PySide6-Essentials>=6.8"]  # the new window; usually the distro package (python3-pyside6)
 
 [project.scripts]
 ldm = "ldm.cli:main"

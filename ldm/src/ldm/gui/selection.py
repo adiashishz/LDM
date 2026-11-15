@@ -4,11 +4,8 @@ from __future__ import annotations
 
 from gi.repository import Gio, GObject
 
+from ..ui.states import PAUSABLE, RESUMABLE  # noqa: F401 (re-exported)
 from .model import DownloadItem
-
-PAUSABLE = {"running", "processing", "queued", "seeding"}
-RESUMABLE = {"paused", "error", "changed"}
-
 
 class Selection(GObject.Object):
     """Ticked download ids within the shown view. Leaving selection mode clears them; downloads that leave
