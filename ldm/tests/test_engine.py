@@ -82,7 +82,8 @@ def test_empty_file(tmp_path, http_server):
 
 def test_pause_and_resume_continues_where_it_stopped(tmp_path, http_server):
     data = payload(2_000_000)
-    cfg, url = http_server(data=data, delay=0.01)
+    # The second half comes slowly: on a busy machine the pause still lands before the end.
+    cfg, url = http_server(data=data, delay=0.01, slow_from=len(data) // 2, slow_delay=0.2)
     store, did = new_download(tmp_path, url)
     # Enough saved that resuming clearly fetches less than the whole file (resuming re-requests a little).
     pause_after_progress(store, did, at_least=len(data) // 4)
@@ -91,7 +92,7 @@ def test_pause_and_resume_continues_where_it_stopped(tmp_path, http_server):
     saved = sum(p.done for p in store.load_parts(did))
     assert 0 < saved < len(data)
 
-    cfg.delay, cfg.bytes_sent = 0.0, 0
+    cfg.delay, cfg.slow_delay, cfg.bytes_sent = 0.0, 0.0, 0
     assert download(store, did).read_bytes() == data
     assert cfg.bytes_sent < len(data)  # did not fetch everything again
 
