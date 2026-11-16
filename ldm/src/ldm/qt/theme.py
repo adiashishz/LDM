@@ -7,6 +7,7 @@ design's 24×24 line drawings, drawn in any colour through QtSvg.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QIcon, QPainter, QPalette, QPixmap
@@ -143,10 +144,16 @@ def colors_for(choice: str) -> Colors:
     return _current
 
 
+FONTS = Path(__file__).with_name("fonts")  # Inter 4.1 (SIL Open Font License), the design's font
+
+
 def ui_font() -> QFont:
-    """Inter when installed, else the system's font, at the design's 13px."""
+    """Inter — bundled with LDM, so every system shows the design's font — at the design's 13px."""
+    for path in sorted(FONTS.glob("Inter-*.ttf")):
+        QFontDatabase.addApplicationFont(str(path))
     font = QFont("Inter") if "Inter" in QFontDatabase.families() else QGuiApplication.font()
     font.setPixelSize(13)
+    font.setHintingPreference(QFont.HintingPreference.PreferNoHinting)  # Inter's shapes, as in the design
     return font
 
 
@@ -168,8 +175,6 @@ def palette(c: Colors) -> QPalette:
 
 def arrow_files(color: str) -> dict[str, str]:
     """Small up/down arrow images for spin and combo boxes (Qt style sheets take images only from files)."""
-    from pathlib import Path
-
     from PySide6.QtCore import QStandardPaths
 
     folder = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation) or ".") / "icons"
@@ -191,7 +196,7 @@ def stylesheet(c: Colors) -> str:
 QMainWindow, #central {{ background: {c.win}; }}
 #topbar {{ background: {c.chrome}; }}
 #topbar QMenuBar {{ background: transparent; color: {c.fg}; }}
-#topbar QMenuBar::item {{ padding: 6px 10px; border-radius: 6px; background: transparent; }}
+#topbar QMenuBar::item {{ padding: 6px 10px; font-size: 13px; border-radius: 6px; background: transparent; }}
 #topbar QMenuBar::item:selected, #topbar QMenuBar::item:pressed {{ background: {c.press}; }}
 #brand {{ font-weight: 700; color: {c.fg}; }}
 #search {{ background: {c.field}; border: 0; border-radius: 8px; padding: 0 8px; color: {c.fg};

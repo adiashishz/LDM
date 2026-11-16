@@ -29,7 +29,7 @@ from ..ui.states import FINISH_ACTIONS, PAUSABLE, RESUMABLE
 from ..ui.text import is_url, limit_text, short_path
 from .add_dialog import AddDialog
 from .details import PANEL_WIDTH, DetailsPanel
-from .model import DownloadsFilter, DownloadsModel, queue_label
+from .model import DownloadsFilter, DownloadsModel, queue_key, queue_label
 from .preferences import PreferencesDialog
 from .sidebar import SIDEBAR_WIDTH, Sidebar
 from .table import DownloadTable
@@ -102,6 +102,7 @@ class MainWindow(QMainWindow):
         self.details = DetailsPanel(self.colors)
         self.details.action.connect(self._details_action)
         self.details.more_requested.connect(self._row_menu)
+        self.details.queue_place = self._queue_place
         # Dragging the edge resizes the details panel (within its limits); the width is remembered.
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.setHandleWidth(4)
@@ -216,12 +217,14 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(16, 0, 12, 0)
         layout.setSpacing(4)
         self.logo = QLabel()
-        self.logo.setToolTip("LDM")
-        self.logo.setContentsMargins(0, 0, 10, 0)
         layout.addWidget(self.logo)
+        brand = QLabel("LDM")  # as in the design: the name in bold between the logo and the menus
+        brand.setObjectName("brand")
+        brand.setContentsMargins(8, 0, 14, 0)
+        layout.addWidget(brand)
         menubar = QMenuBar()
         menubar.setNativeMenuBar(False)  # the menus sit in the window's own bar, as in the design
-        tasks = menubar.addMenu("&Tasks")
+        tasks = menubar.addMenu("Tasks")
         tasks.addActions([self.add_action, self.batch_action, self.grab_action])
         tasks.addSeparator()
         tasks.addActions([self.import_links_action, self.export_links_action])
@@ -229,7 +232,7 @@ class MainWindow(QMainWindow):
         tasks.addActions([self.export_unfinished_action, self.import_unfinished_action])
         tasks.addSeparator()
         tasks.addAction(self.quit_action)
-        file = menubar.addMenu("&File")
+        file = menubar.addMenu("File")
         file.addActions([self.open_action, self.open_folder_action, self.copy_link_action])
         file.addSeparator()
         file.addActions([self.rename_action, self.move_to_action])
@@ -237,7 +240,7 @@ class MainWindow(QMainWindow):
         file.addActions([self.checksum_action, self.torrent_action, self.parts_action, self.log_action])
         file.addSeparator()
         file.addAction(self.delete_action)
-        downloads = menubar.addMenu("&Downloads")
+        downloads = menubar.addMenu("Downloads")
         downloads.addActions([self.resume_action, self.pause_action])
         downloads.addSeparator()
         downloads.addActions([self.resume_all_action, self.pause_all_action, self.start_queue_action,
@@ -255,7 +258,7 @@ class MainWindow(QMainWindow):
             action.setChecked(value == "nothing")
             self.finish_group.addAction(action)
         self.finish_group.triggered.connect(self._finish_chosen)
-        view = menubar.addMenu("&View")
+        view = menubar.addMenu("View")
         view.addAction(self.details_action)
         view.addAction(self.search_action)
         theme = view.addMenu("Appearance")
@@ -274,7 +277,7 @@ class MainWindow(QMainWindow):
                 col, Qt.SortOrder.AscendingOrder if col in (-1, 0) else Qt.SortOrder.DescendingOrder))
         view.addSeparator()
         view.addAction(self.settings_action)
-        help_menu = menubar.addMenu("&Help")
+        help_menu = menubar.addMenu("Help")
         help_menu.addAction(self._action("Keyboard shortcuts", self.show_shortcuts, "Ctrl+?"))
         help_menu.addAction(self._action("Report a problem", lambda: QDesktopServices.openUrl(
             QUrl("https://github.com/adiashishz/LDM/issues"))))
@@ -492,8 +495,12 @@ class MainWindow(QMainWindow):
                 (self.resume_action, connected and bool(states & RESUMABLE)),
                 (self.pause_action, connected and bool(states & PAUSABLE)),
                 (self.delete_action, connected and bool(items)),
-                (self.pause_all_action, connected), (self.resume_all_action, connected),
-                (self.start_queue_action, connected), (self.stop_queue_action, connected),
+                # Only when there is something to act on.
+                (self.pause_all_action, connected and any(d.state in PAUSABLE for d in self.downloads)),
+                (self.resume_all_action, connected and any(d.state in RESUMABLE for d in self.downloads)),
+                (self.start_queue_action, connected and any(d.state == "paused" and not d.on_schedule
+                                                            for d in self.downloads)),
+                (self.stop_queue_action, connected and any(d.state == "queued" for d in self.downloads)),
                 (self.open_action, current is not None and current.state in {"done", "seeding"}),
                 (self.open_folder_action, current is not None and bool(current.path)),
                 (self.copy_link_action, bool(items)),
@@ -569,6 +576,13 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         menu.addAction(self.delete_action)
         menu.exec(position)
+
+    def _queue_place(self, d: Download) -> str:
+        """Where a waiting download is in its queue: "Main queue, 2 of 5"."""
+        key = queue_key(d)
+        waiting = sorted((o for o in self.downloads if o.state == "queued" and queue_key(o) == key),
+                         key=lambda o: (o.position, o.id))
+        return f"{queue_label(key)}, {waiting.index(d) + 1} of {len(waiting)}" if key and d in waiting else ""
 
     def _details_action(self, name: str) -> None:
         d = self.details.download

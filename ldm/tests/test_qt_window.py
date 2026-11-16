@@ -220,3 +220,37 @@ def test_add_link_skips_a_copied_link_already_in_the_list(app, window):
     dialog = window.ask_add()
     assert dialog.url.text() == "https://example.com/new.zip"
     dialog.reject()
+
+
+def test_queue_actions_only_when_something_to_act_on(app, tmp_path):
+    from qt_fake import FakeClient
+
+    from ldm.qt.window import MainWindow
+
+    w = MainWindow(FakeClient([row(1, "a.pdf", "done"), row(2, "b.zip", "error")]),
+                   QSettings(str(tmp_path / "ui.ini"), QSettings.Format.IniFormat))
+    assert not w.pause_all_action.isEnabled() and not w.stop_queue_action.isEnabled()
+    assert not w.start_queue_action.isEnabled() and w.resume_all_action.isEnabled()  # the failed one
+    w.downloads.upsert(row(3, "c.iso", "running"))
+    assert w.pause_all_action.isEnabled()
+    w.close()
+
+
+def test_details_show_queue_place_and_checksum_link(app, window):
+    window.downloads.upsert(row(6, "f.zip", "queued", position=6))
+    window.table.select_id(6)
+
+    def facts():
+        grid = window.details.facts
+        return {grid.itemAtPosition(r, 0).widget().text(): grid.itemAtPosition(r, 1).widget()
+                for r in range(grid.rowCount()) if grid.itemAtPosition(r, 0)}
+
+    assert facts()["Queue"].text() == "Main queue, 1 of 1"
+    assert window.details.parts_label.text().endswith("connections") or window.details.parts_label.text() == "1 connection"
+    window.table.select_id(2)  # finished
+    link = facts()["Checksum"]
+    assert "Calculate" in link.text()
+    opened = []
+    window.show_checksum = opened.append
+    link.linkActivated.emit("checksum")
+    assert opened and opened[0].id == 2

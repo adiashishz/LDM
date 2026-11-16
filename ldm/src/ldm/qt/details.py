@@ -3,6 +3,7 @@ action that fits its state."""
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
@@ -12,6 +13,7 @@ from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QPushBu
                                QVBoxLayout, QWidget)
 
 from ..format import STATE_LABELS, eta_text, human
+from ..schedule import describe_start, next_start
 from ..ui.item import Download, when_text
 from ..ui.text import describe_window, short_path
 from .theme import Colors, icon
@@ -79,6 +81,7 @@ class DetailsPanel(QFrame):
         self.setMaximumWidth(PANEL_MAX)
         self.colors = colors
         self.download: Download | None = None
+        self.queue_place: Callable[[Download], str] | None = None  # "Main queue, 2 of 5"; set by the window
         self.parts: list[dict[str, Any]] = []
 
         outer = QVBoxLayout(self)
@@ -224,7 +227,15 @@ class DetailsPanel(QFrame):
         self._primary_action = name
         self.folder.setEnabled(bool(d.path) and d.state in {"done", "seeding"})
 
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self.download is not None and event.oldSize().width() != event.size().width():
+            self._show_facts(self.download)  # shorten long values to the new width
+
     def _show_parts(self, d: Download) -> None:
+        """The connection strip, as in the design: one segment per connection, each filling from its start."""
+        connections = max(d.connections, 1)
+        label = f"{connections} connection{'s' if connections != 1 else ''}"
         if d.kind == "http" and self.parts:
             sizes = [p["last"] - p["first"] + 1 for p in self.parts]
             fractions = [p["done"] / size if size > 0 else 0.0 for p, size in zip(self.parts, sizes)]
@@ -233,14 +244,15 @@ class DetailsPanel(QFrame):
                 fractions = [sum(fractions[i:i + per]) / len(fractions[i:i + per])
                              for i in range(0, len(fractions), per)]
             active = sum(1 for p in self.parts if p.get("active"))
-            self.parts_label.setText(f"{len(self.parts)} part{'s' if len(self.parts) != 1 else ''}")
-            self.parts_note.setText(f"{active} downloading" if active else "each fills from its own start")
+            self.parts_label.setText(f"{len(self.parts)} connection{'s' if len(self.parts) != 1 else ''}")
+            self.parts_note.setText("each fills from its own start" if d.state == "running" and active
+                                    else NOTES.get(d.state, ""))
             self.strip.set(fractions, d.tone)
             self.strip_box.show()
-        elif d.kind == "http" and d.state == "done":
-            self.parts_label.setText("Finished")
-            self.parts_note.setText("all parts done")
-            self.strip.set([1.0], "done")
+        elif d.kind == "http":  # finished, or not started: the parts aren't known (or no longer kept)
+            self.parts_label.setText(label)
+            self.parts_note.setText(NOTES.get(d.state, ""))
+            self.strip.set([1.0 if d.state == "done" else d.fraction] * min(connections, MAX_SEGMENTS), d.tone)
             self.strip_box.show()
         else:
             self.strip_box.hide()
@@ -266,8 +278,16 @@ class DetailsPanel(QFrame):
             facts.append(("Speed", f"{human(d.speed)}/s", ""))
             if d.size > 0 and d.speed > 0:
                 facts.append(("Time left", eta_text(d.size - d.done, d.speed).removesuffix(" left"), ""))
+        if d.kind == "media":
+            facts.append(("Type", "Video, through yt-dlp", ""))
+        if d.state == "queued" and self.queue_place is not None and (place := self.queue_place(d)):
+            facts.append(("Queue", place, ""))
         if d.on_schedule and d.schedule_start and d.schedule_stop:
             facts.append(("Schedule", describe_window(d.schedule_start, d.schedule_stop, d.schedule_days), ""))
+            if d.state == "queued":
+                now = datetime.now()
+                when = next_start(now, d.schedule_start, d.schedule_stop, d.schedule_days)
+                facts.append(("Starts", describe_start(when, now).capitalize() if when else "Now", ""))
         if d.speed_limit:
             facts.append(("Speed limit", f"{human(d.speed_limit)}/s", ""))
         if d.dir:
@@ -275,9 +295,15 @@ class DetailsPanel(QFrame):
         facts.append(("Added", when_text(d.added_at), ""))
         if d.finished_at:
             facts.append(("Finished", when_text(d.finished_at), ""))
-        if d.state not in {"done", "seeding"} and d.kind == "http":
+        if d.state == "expired":
+            facts.append(("Can resume", "With a new link", ""))
+        elif d.state not in {"done", "seeding"} and d.kind == "http":
             facts.append(("Can resume", "Yes" if d.resumable else "No, starts over",
                           "good" if d.resumable else ""))
+        if d.state in {"done", "seeding"} and d.path:
+            facts.append(("Checksum", "Calculate…", "link"))
+        keys = max(QLabel(k).fontMetrics().horizontalAdvance(k) for k, _, _ in facts)
+        room = max(self.width() - 36 - 14 - keys - 8, 60)  # the panel's padding, the gap, the key column
         for row, (key, value, tone) in enumerate(facts):
             key_label = QLabel(key)
             key_label.setObjectName("factkey")
@@ -286,7 +312,11 @@ class DetailsPanel(QFrame):
             value_label.setToolTip(value)
             value_label.setMinimumWidth(10)
             value_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-            value_label.setText(value_label.fontMetrics().elidedText(value, Qt.TextElideMode.ElideMiddle, 200))
+            value_label.setText(value_label.fontMetrics().elidedText(value, Qt.TextElideMode.ElideMiddle, room))
+            if tone == "link":  # an action in the facts: opens the matching dialog
+                value_label.setText(f'<a href="checksum" style="color: {c.accent}; text-decoration: none">{value}</a>')
+                value_label.setCursor(Qt.CursorShape.PointingHandCursor)
+                value_label.linkActivated.connect(lambda _href: self.action.emit("show_checksum"))
             color = c.green if tone == "good" else c.red if tone == "bad" else c.fg
             for label in (key_label, value_label):
                 label.setStyleSheet(f"font-size: 12.5px;{'' if label is key_label else f' color: {color};'}")
@@ -295,3 +325,5 @@ class DetailsPanel(QFrame):
 
 
 PROBLEM_STATES = {"error", "expired", "changed"}
+NOTES = {"queued": "starts after the current ones", "paused": "kept for resuming", "error": "kept for retrying",
+         "expired": "kept for the new link", "done": "all done"}
