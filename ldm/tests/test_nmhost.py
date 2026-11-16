@@ -208,3 +208,72 @@ def test_headers_for_keeps_what_the_browser_sent():
             "referer": "https://site/", "user_agent": "Brave UA", "cookies": "a=1"}
     assert headers_for(item) == {"User-Agent": "Brave UA", "Accept-Language": "en-US,en;q=0.8", "Accept": "*/*",
                                  "Sec-Fetch-Mode": "cors", "Referer": "https://site/", "Cookie": "a=1"}
+
+
+# --- the local channel (Windows, macOS; here with LDM_TRANSPORT=socket) ----------------------------
+
+# Stands in for LDM's window on the local channel: registers, then writes the first Add request it gets.
+FAKE_WINDOW = textwrap.dedent("""
+    import json, os, socket, sys
+    path = os.path.join(os.environ["XDG_RUNTIME_DIR"], "ldm", "service.sock")
+    sock = socket.socket(socket.AF_UNIX)
+    sock.connect(path)
+    sock.sendall(b'{"id": 1, "method": "RegisterWindow", "params": []}\\n')
+    for line in sock.makefile("rb"):
+        message = json.loads(line)
+        if message.get("signal") == "AddRequest":
+            open(sys.argv[1], "w").write(json.dumps(message["args"][0]))
+            break
+""")
+
+
+def test_socket_ping_direct_add_and_dialog(daemon, http_server, tmp_path, monkeypatch):
+    monkeypatch.setenv("LDM_TRANSPORT", "socket")
+    data = random.Random(13).randbytes(150_000)
+    cfg, url = http_server(data=data)
+    host = Host()
+    assert host.request(cmd="ping") == {"id": 1, "ok": True, "daemon": True, "gui": False,
+                                        "host_version": nmhost.VERSION}
+    reply = host.request(cmd="add", mode="direct", url=url, filename="over-socket.bin", referer="https://e.com/")
+    assert reply["ok"] and reply["download_id"] == 1
+    wait_for(lambda: "done" in ldm_list())
+    out = tmp_path / "request.json"
+    window = subprocess.Popen([sys.executable, "-c", FAKE_WINDOW, str(out)])
+    wait_for(lambda: host.request(cmd="ping")["gui"])
+    reply = host.request(cmd="add", url="https://example.com/a.iso", filename="a.iso", cookies="k=v")
+    assert reply["ok"] and reply["dialog"]
+    window.wait(10)
+    host.close()
+    assert json.loads(out.read_text()) == {"url": "https://example.com/a.iso", "filename": "a.iso",
+                                           "headers": {"Cookie": "k=v"}, "size": None, "page_url": None,
+                                           "kind": None, "captures": []}
+
+
+def test_socket_dialog_starts_the_window(daemon, tmp_path, monkeypatch):
+    """No window open: the host starts it (LDM_GUI_COMMAND) and the request still arrives."""
+    script, out = tmp_path / "window.py", tmp_path / "request.json"
+    script.write_text(FAKE_WINDOW)
+    monkeypatch.setenv("LDM_TRANSPORT", "socket")
+    monkeypatch.setenv("LDM_GUI_COMMAND", f"{sys.executable} {script} {out}")
+    host = Host()
+    reply = host.request(cmd="add", url="https://example.com/b.iso")
+    host.close()
+    assert reply["ok"] and reply["dialog"]
+    wait_for(out.exists)
+    assert json.loads(out.read_text())["url"] == "https://example.com/b.iso"
+
+
+@needs_dbus
+def test_socket_starts_the_service(bus_address, http_server, tmp_path, monkeypatch):
+    """No service running and no D-Bus activation (as on Windows and macOS): the host starts `ldm daemon`."""
+    monkeypatch.setenv("LDM_TRANSPORT", "socket")
+    monkeypatch.setenv("LDM_COMMAND", f"{sys.executable} -m ldm --db {tmp_path / 'started.db'}")
+    cfg, url = http_server(data=random.Random(14).randbytes(50_000))
+    host = Host()
+    assert host.request(cmd="ping")["daemon"] is False
+    reply = host.request(cmd="add", mode="direct", url=url, filename="started.bin")
+    assert reply["ok"], reply
+    assert host.request(cmd="ping")["daemon"] is True
+    host.close()
+    wait_for(lambda: "done" in ldm_list())
+    # The started service ends with its bus (the bus_address fixture stops it).
