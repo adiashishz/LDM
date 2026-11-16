@@ -32,7 +32,7 @@ from .passwords import open_store
 from .torrent import TorrentDownloader, TorrentSession
 from .ratelimit import TokenBucket
 from .schedule import describe_start, in_window, next_start, parse_days, parse_time
-from .system import Conditions
+from .conditions import Conditions
 from .store import DEFAULT_SETTINGS, DownloadRow, HostRule, Store, default_db_path
 
 RESUMABLE_STATES = {"paused", "error", "expired", "changed"}

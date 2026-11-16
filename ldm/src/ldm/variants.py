@@ -7,10 +7,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from dbus_fast import Variant
+try:
+    from dbus_fast import Variant
+except Exception:  # noqa: BLE001 (Windows, macOS: no dbus-fast; values stay plain for the local channel's JSON)
+    Variant = None
 
 
 def to_variant(value: Any) -> Variant:
+    if Variant is None:
+        return value
     if isinstance(value, (bytes, bytearray)):
         return Variant("ay", bytes(value))
     if isinstance(value, bool):
@@ -43,7 +48,7 @@ def from_vardict(values: dict[str, Variant]) -> dict[str, Any]:
 
 def unwrap(value: Any) -> Any:
     """A reply or signal body as plain Python: Variants opened, all the way down."""
-    if isinstance(value, Variant):
+    if Variant is not None and isinstance(value, Variant):
         return unwrap(value.value)
     if isinstance(value, dict):
         return {k: unwrap(v) for k, v in value.items()}

@@ -14,14 +14,15 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Any, Awaitable, Callable
-
-from dbus_fast import Message, MessageFlag, MessageType
-from dbus_fast.aio import MessageBus
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from .. import paths
 from ..busnames import BUS_NAME, ERROR_PREFIX, INTERFACE, OBJECT_PATH
 from ..variants import to_vardict, unwrap
+
+if TYPE_CHECKING:  # dbus-fast is Linux only: Remote imports it when it connects
+    from dbus_fast import Message
+    from dbus_fast.aio import MessageBus
 
 log = logging.getLogger(__name__)
 
@@ -119,8 +120,11 @@ class Remote:
 
     async def _connect(self, address: str | None) -> None:
         try:
+            from dbus_fast import Message, MessageType
+            from dbus_fast.aio import MessageBus
+
             self._bus = await MessageBus(bus_address=address).connect()
-        except Exception as e:  # noqa: BLE001 (no session bus: stay disconnected)
+        except Exception as e:  # noqa: BLE001 (no session bus, or no dbus-fast: stay disconnected)
             log.warning("cannot connect to the session bus: %s", e)
             return
         self._bus.add_message_handler(self._on_message)
@@ -139,6 +143,8 @@ class Remote:
             self._bus = None
 
     async def _add_match(self, rule: str) -> None:
+        from dbus_fast import Message
+
         await self._bus.call(Message(destination=BUS[0], path=BUS[1], interface=BUS[2],
                                      member="AddMatch", signature="s", body=[rule]))
 
@@ -148,6 +154,8 @@ class Remote:
         self._deliver(lambda: self._set_connected(connected))
 
     def _on_message(self, message: Message) -> None:
+        from dbus_fast import MessageType
+
         if message.message_type != MessageType.SIGNAL:
             return
         if message.interface == BUS[2] and message.member == "NameOwnerChanged":
@@ -159,6 +167,8 @@ class Remote:
 
     async def _call(self, method: str, signature: str, args: list[Any], callback: Callback | None,
                     timeout: float | None) -> None:
+        from dbus_fast import Message, MessageFlag, MessageType
+
         result, error = None, None
         if self._bus is None or self._owner is None:
             error = not_running()

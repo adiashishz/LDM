@@ -9,6 +9,7 @@ import sys
 
 import pytest
 
+from conftest import HAS_DBUS
 from ldm import channel
 from ldm.api import METHODS, Api
 from ldm.manager import Manager
@@ -43,6 +44,7 @@ def test_codec_keeps_bytes():
         channel.decode(b"[1, 2]")
 
 
+@pytest.mark.skipif(not HAS_DBUS, reason="needs dbus-fast (Linux)")
 def test_both_channels_offer_the_same_methods():
     from ldm.api import SIGNALS
     from ldm.dbus_service import ManagerInterface

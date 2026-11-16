@@ -4,6 +4,7 @@ from PySide6.QtCore import QObject, Signal
 
 from ldm.store import DEFAULT_SETTINGS
 from ldm.ui.remote import ServiceCalls
+from ldm.variants import unwrap
 
 
 def real_client(daemon):
@@ -39,7 +40,7 @@ class FakeClient(QObject, ServiceCalls):
                    "ListHostRules": [], "ListLogins": [],
                    "Get": next((r for r in self.rows if args and r["id"] == args[0]), None), **self.answers}
         if method == "SetSettings":
-            self.settings.update({k: v.value for k, v in args[0].items()})
+            self.settings.update(unwrap(args[0]))
         if callback:
             callback(answers.get(method), None)
 

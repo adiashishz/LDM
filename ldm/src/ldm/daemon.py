@@ -16,7 +16,7 @@ from .manager import Manager
 from .finish import LocalFinisher
 from .store import Store, default_db_path
 from .integration import set_autostart
-from .system import Conditions
+from .conditions import Conditions
 
 log = logging.getLogger(__name__)
 

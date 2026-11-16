@@ -135,6 +135,7 @@ def test_follows_the_service_starting_and_stopping(app, session_bus, transport, 
     assert changes == [True, False]
 
 
+@pytest.mark.skipif(not HAS_DBUS, reason="needs a D-Bus session bus (Linux)")
 def test_no_session_bus(app, tmp_path):
     client = DaemonClient(f"unix:path={tmp_path}/missing")
     _, error = call(client.list)

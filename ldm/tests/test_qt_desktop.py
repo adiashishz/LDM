@@ -10,6 +10,8 @@ import pytest
 pytest.importorskip("PySide6")
 from PySide6.QtCore import QSettings  # noqa: E402
 
+from conftest import HAS_DBUS  # noqa: E402
+
 
 
 @pytest.fixture
@@ -120,6 +122,7 @@ def test_notifies_when_a_download_it_saw_running_finishes(app, ldm_window, monke
     assert [d.id for d in opened] == [1]
 
 
+@pytest.mark.skipif(not HAS_DBUS, reason="the Linux desktop's D-Bus side")
 def test_add_request_parsing():
     from ldm.ui.desktop import add_request
 

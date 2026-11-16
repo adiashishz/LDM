@@ -18,6 +18,7 @@ from dbus_fast import BusType, Message, MessageType, Variant
 from dbus_fast.aio import MessageBus
 
 from . import sandbox
+from .conditions import Conditions
 
 log = logging.getLogger(__name__)
 
@@ -30,14 +31,6 @@ UPOWER_DISPLAY = ("org.freedesktop.UPower", "/org/freedesktop/UPower/devices/Dis
                   "org.freedesktop.UPower.Device")
 LOGIND = ("org.freedesktop.login1", "/org/freedesktop/login1", "org.freedesktop.login1.Manager")
 METERED = {1, 3}  # NM_METERED_YES, NM_METERED_GUESS_YES
-
-
-class Conditions:
-    """Current state; also the fallback when the system bus or its services are unavailable."""
-
-    metered = False
-    on_battery = False
-    battery = 100.0
 
 
 class SystemMonitor(Conditions):

@@ -20,6 +20,21 @@ import pytest
 # (to try that on Linux), the test service runs on the local channel only and D-Bus tests are skipped.
 HAS_DBUS = (sys.platform.startswith("linux") and bool(shutil.which("dbus-daemon"))
             and not os.environ.get("LDM_TEST_NO_DBUS"))
+if not HAS_DBUS:
+    # Test files for the Linux desktop's D-Bus parts (they import dbus-fast, which Windows can't load).
+    collect_ignore = ["test_dbus.py", "test_finish.py", "test_notify.py", "test_system.py", "test_tray.py"]
+if os.environ.get("LDM_TEST_NO_DBUS"):
+    import importlib.abc
+
+    class _NoDbusFast(importlib.abc.MetaPathFinder):
+        """As on Windows: dbus-fast can't be imported, so nothing shared with Windows may need it."""
+
+        def find_spec(self, name, path=None, target=None):
+            if name == "dbus_fast" or name.startswith("dbus_fast."):
+                raise ImportError(f"{name} is blocked (LDM_TEST_NO_DBUS)")
+            return None
+
+    sys.meta_path.insert(0, _NoDbusFast())
 needs_dbus = pytest.mark.skipif(not HAS_DBUS, reason="needs a D-Bus session bus (Linux)")
 linux_only = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux desktop only")
 

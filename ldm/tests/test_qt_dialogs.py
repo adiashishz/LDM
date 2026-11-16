@@ -10,6 +10,8 @@ from PySide6.QtWidgets import QWidget  # noqa: E402
 
 from qt_fake import FakeClient, real_client  # noqa: E402
 
+from ldm.variants import unwrap  # noqa: E402
+
 MB = 1024 * 1024
 PROBE = {"size": 10 * MB, "resumable": True, "content_type": "application/zip", "filename": "server-name.zip"}
 MEDIA = {"title": "A talk", "site": "Example", "duration": 75, "subtitles": ["en", "de"],
@@ -73,7 +75,7 @@ def test_add_checks_the_link_and_builds_options(app, parent):
     assert options["dir"] == "/tmp" and options["scheduled"] is False
     dialog.start_button.click()
     url, sent = client.called("Add")[0]
-    assert url == "https://example.com/file.zip" and sent["start"].value is True
+    assert url == "https://example.com/file.zip" and unwrap(sent["start"]) is True
 
 
 def test_add_finds_a_video_on_a_page(app, parent):

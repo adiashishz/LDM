@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
-from dbus_fast import Message, MessageType, Variant
-from dbus_fast.aio import MessageBus
+if TYPE_CHECKING:  # dbus-fast is Linux only: LocalFinisher works without it
+    from dbus_fast import Message
+    from dbus_fast.aio import MessageBus
 
-from .notify import GUI_ID, GUI_PATH, NOTIFICATIONS
-from .system import LOGIND, SystemMonitor
+    from .system import SystemMonitor
 
 log = logging.getLogger(__name__)
 
@@ -79,6 +79,8 @@ class Finisher:
 
     async def _quit(self) -> None:
         """Close the window if it's open, then stop the service (downloads are all finished)."""
+        from .notify import GUI_ID, GUI_PATH
+
         try:
             if (await self._call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
                                  "NameHasOwner", "s", [GUI_ID])).body[0]:
@@ -89,6 +91,11 @@ class Finisher:
         self.stop()
 
     async def _count_down(self, action: str) -> None:
+        from dbus_fast import Variant
+
+        from .notify import GUI_ID, NOTIFICATIONS
+        from .system import LOGIND
+
         method, doing = ACTIONS[action]
         try:
             try:
@@ -117,11 +124,17 @@ class Finisher:
                 self._notification = 0
 
     def _on_message(self, msg: Message) -> None:
+        from dbus_fast import MessageType
+
+        from .notify import NOTIFICATIONS
+
         if (msg.message_type == MessageType.SIGNAL and msg.interface == NOTIFICATIONS[2]
                 and msg.member == "ActionInvoked" and self._notification and msg.body[0] == self._notification):
             self.cancel()
 
     async def _call(self, destination, path, interface, member, signature="", body=None) -> Message:
+        from dbus_fast import Message, MessageType
+
         reply = await self.bus.call(Message(destination=destination, path=path, interface=interface,
                                             member=member, signature=signature, body=body or []))
         if reply.message_type == MessageType.ERROR:
