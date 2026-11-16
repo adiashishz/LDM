@@ -141,7 +141,7 @@ def activation_files(data: Path, config: Path) -> dict[Path, str]:
         data / "applications" / f"{GUI_ID}.desktop": (
             "[Desktop Entry]\nType=Application\nName=LDM\nGenericName=Download Manager\n"
             f"Comment=Download files, videos and torrents\nExec={gui} %U\nIcon={GUI_ID}\nTerminal=false\n"
-            "Categories=Network;FileTransfer;GTK;\nStartupNotify=true\nDBusActivatable=true\n"
+            "Categories=Network;FileTransfer;Qt;\nStartupNotify=true\nDBusActivatable=true\n"
             f"MimeType={';'.join(TORRENT_TYPES)};\n"),
     }
 

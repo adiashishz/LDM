@@ -356,7 +356,7 @@ class Manager:
             if isinstance(priorities, str):
                 priorities = json.loads(priorities)
             metadata = torrent_options.get("metadata") or None
-            if isinstance(metadata, list):  # PyGObject clients unpack D-Bus byte arrays into lists
+            if isinstance(metadata, list):  # some D-Bus clients send byte arrays as lists of numbers
                 metadata = bytes(metadata)
             self.store.save_torrent(download_id, metadata=metadata,
                                     priorities=[int(p) for p in priorities],

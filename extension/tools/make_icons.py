@@ -1,6 +1,6 @@
 """Render src/icons/icon-{16,32,48,128}.png from LDM's app icon (one design for the app and the extension).
 
-Needs PyGObject (Fedora: python3-gobject), which LDM's GUI uses anyway.
+Needs PyGObject (Fedora: python3-gobject): a developer tool, not part of LDM.
 """
 
 from pathlib import Path
