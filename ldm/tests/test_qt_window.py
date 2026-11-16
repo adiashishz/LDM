@@ -7,10 +7,10 @@ import time
 import pytest
 
 pytest.importorskip("PySide6")
-from PySide6.QtCore import QObject, QSettings, Qt, Signal  # noqa: E402
+from PySide6.QtCore import QSettings, Qt  # noqa: E402
 
 from ldm.qt.model import ADDED, NAME, DownloadsFilter, DownloadsModel, queue_key  # noqa: E402
-from ldm.ui.remote import ServiceCalls  # noqa: E402
+from qt_fake import FakeClient  # noqa: E402
 
 MB = 1024 * 1024
 
@@ -44,30 +44,6 @@ def row(i, name, state="queued", size=10 * MB, done=0, speed=0.0, **extra):
 ROWS = [row(1, "a.iso", "running", done=5 * MB, speed=MB), row(2, "b.pdf", "done", done=10 * MB),
         row(3, "c.zip", "paused", done=MB), row(4, "d.mp3", "error", error="boom"),
         row(5, "e.zip", "queued", scheduled=True, schedule_start="01:00", schedule_stop="06:00", schedule_days="")]
-
-
-class FakeClient(QObject, ServiceCalls):
-    added = Signal("qulonglong")
-    removed = Signal("qulonglong")
-    state_changed = Signal("qulonglong", str, str)
-    progress = Signal(object)
-    connected_changed = Signal(bool)
-    connected = True
-
-    def __init__(self, rows):
-        super().__init__()
-        self.rows, self.calls = rows, []
-
-    def _call(self, method, signature, args, callback, timeout=None):
-        self.calls.append((method, args))
-        answers = {"List": self.rows, "GetSettings": {"download_dir": "/tmp", "clipboard_watch": False},
-                   "FindDuplicates": [], "Add": 99, "GetParts": [],
-                   "Get": next((r for r in self.rows if args and r["id"] == args[0]), None)}
-        if callback:
-            callback(answers.get(method), None)
-
-    def close(self):
-        pass
 
 
 def test_model_keeps_queue_order(app):
@@ -167,11 +143,22 @@ def test_actions_follow_the_selection(app, window):
     assert ("Pause", [1]) in window.client.calls
 
 
-def test_pasted_link_is_added(app, window):
+def test_pasted_link_opens_the_add_dialog(app, window):
+    from ldm.qt.add_dialog import AddDialog
+
     window.search.setText("https://example.com/new.iso")
     assert window.proxy.text == ""  # a link is not a search
     window.search.returnPressed.emit()
     assert window.search.text() == ""
+    dialog = window.findChild(AddDialog)
+    assert dialog is not None and dialog.url.text() == "https://example.com/new.iso"
+    dialog.reject()
+
+
+def test_pasted_link_is_added_without_asking(app, window):
+    window.service["skip_add_dialog"] = True
+    window.search.setText("https://example.com/new.iso")
+    window.search.returnPressed.emit()
     assert [m for m, _ in window.client.calls if m in ("FindDuplicates", "Add")] == ["FindDuplicates", "Add"]
     assert window.toast_widget.isVisible() and window.toast_widget.label.text().startswith("Added")
 
