@@ -4,13 +4,13 @@
 
 A download manager for Linux: fast multi-part downloads that survive restarts, videos and streams,
 torrents, a scheduler, and a browser extension that hands your downloads to it. Built with
-GTK 4 / libadwaita and Python, inspired by 1DM for Android.
+Qt (PySide6) and Python, inspired by 1DM for Android and IDM.
 
 Downloads run in a small background service, so closing the window never stops them.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="ldm/data/screenshots/main-dark.png">
-  <img src="ldm/data/screenshots/main.png" width="800" alt="LDM's main window: a list of finished, paused, running and failed downloads">
+  <img src="ldm/data/screenshots/main.png" width="800" alt="LDM's main window: downloads by category and queue, with the details of the one in progress">
 </picture>
 
 ## Features
@@ -45,19 +45,21 @@ ldm install-browser-integration   # once: magnet/.torrent links, Flatpak browser
 Open **LDM** from the app menu, then add the browser extension (below). The package also ships the
 extension builds in `/usr/share/ldm/extension/`.
 
-## Install on Debian 13, Ubuntu 24.04 or newer (.deb)
+## Install on Debian 13 or Ubuntu 26.04 (.deb)
 
 Download the `.deb` for your system from the [latest release](https://github.com/adiashishz/LDM/releases/latest)
-(`deb13` for Debian 13, `ubuntu24.04` for Ubuntu 24.04 and Linux Mint 22, `ubuntu26.04` for Ubuntu 26.04)
-and install it; apt fetches the dependencies:
+(`deb13` for Debian 13, `ubuntu26.04` for Ubuntu 26.04) and install it; apt fetches the dependencies:
 
 ```sh
-sudo apt install ./ldm-downloader_*ubuntu24.04_all.deb
+sudo apt install ./ldm-downloader_*ubuntu26.04_all.deb
 ldm install-browser-integration   # once: magnet/.torrent links, Flatpak browsers such as Brave
 ```
 
 These distributions ship an older yt-dlp than YouTube needs, so the package includes a current one
-and LDM keeps a per-user copy up to date (Preferences → Video → Keep yt-dlp up to date).
+and LDM keeps a per-user copy up to date (Settings → General → Keep yt-dlp up to date).
+
+Ubuntu 24.04 and Linux Mint 22 don't have the Qt libraries LDM needs (PySide6): use the
+[Flatpak](#install-as-a-flatpak-any-distribution) there.
 
 ## Install on Arch Linux
 
@@ -76,23 +78,23 @@ The package is named `ldm-downloader`; the command is `ldm`. It conflicts with t
 ## Install as a Flatpak (any distribution)
 
 Download the `.flatpak` from the [latest release](https://github.com/adiashishz/LDM/releases/latest)
-and install it; it uses the GNOME runtime from Flathub:
+and install it; it uses the KDE runtime and Qt's PySide base from Flathub:
 
 ```sh
 flatpak install --user ./ldm-downloader-*-x86_64.flatpak
 flatpak run --command=ldm io.github.adiashishz.LDM install-browser-integration   # once, for the extension
 ```
 
-As a Flatpak, LDM saves to your Downloads folder; choosing another folder in LDM (Preferences or the Add
+As a Flatpak, LDM saves to your Downloads folder; choosing another folder in LDM (Settings or the Add
 dialog) gives it access to that folder. Start at login goes through your desktop's background apps setting.
 Brave from Flathub can't reach a Flatpak LDM; use Firefox, Chrome, Chromium or Brave from your distribution.
 
 ## Install from source (Fedora)
 
-LDM uses the distribution's GTK, so the virtual environment is built on the system Python:
+LDM uses the distribution's Qt (PySide6), so the virtual environment is built on the system Python:
 
 ```sh
-sudo dnf install python3-gobject gobject-introspection gtk4 libadwaita ffmpeg-free python3-dbus-fast \
+sudo dnf install python3-pyside6 qt6-qtsvg ffmpeg-free python3-dbus-fast \
                  python3-dns python3-socksio python3-secretstorage python3-cryptography
 sudo dnf install rb_libtorrent-python3   # for torrents (optional)
 
@@ -139,11 +141,11 @@ More commands are in [`ldm/README.md`](ldm/README.md).
 - `ldm/packaging/ldm-downloader.spec` and `build-rpm.sh`: RPM for Fedora (COPR steps in `COPR.md`); release builds
   are attached to the [GitHub releases](https://github.com/adiashishz/LDM/releases).
 - `debian/` and `ldm/packaging/build-deb.sh`: .deb for Debian and Ubuntu, with the yt-dlp release pinned in
-  `debian/yt-dlp.pin`; CI builds, lints and test-installs it on Debian 13, Ubuntu 24.04 and 26.04.
+  `debian/yt-dlp.pin`; CI builds, lints and test-installs it on Debian 13 and Ubuntu 26.04.
 - `ldm/packaging/arch/` and `build-arch.sh`: PKGBUILDs for Arch (`ldm-downloader` for releases,
   `ldm-downloader-git` for the latest commit); CI builds, lints and test-installs both.
-- `ldm/packaging/io.github.adiashishz.LDM.yml`: Flatpak manifest (GNOME 51 runtime; ffmpeg, libtorrent and
-  Node.js built in). Python dependencies are pinned in `flatpak-python-deps.yml` by `flatpak-python-deps.py`;
+- `ldm/packaging/io.github.adiashishz.LDM.yml`: Flatpak manifest (KDE 6.11 runtime with Qt's PySide base;
+  ffmpeg, libtorrent and Node.js built in). Python dependencies are pinned in `flatpak-python-deps.yml` by `flatpak-python-deps.py`;
   CI builds it, runs `flatpak-builder-lint` and the smoke test inside the sandbox.
 - `extension/sign-firefox.sh`: signs the Firefox add-on for permanent installs.
 

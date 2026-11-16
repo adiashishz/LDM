@@ -46,7 +46,7 @@
   </branding>
   <screenshots>
     <screenshot type="default">
-      <caption>Downloads: finished, paused, running and one whose link expired</caption>
+      <caption>Downloads by category and queue, with the connections and details of the one in progress</caption>
       <image>https://raw.githubusercontent.com/adiashishz/LDM/main/ldm/data/screenshots/main.png</image>
     </screenshot>
     <screenshot environment="gnome:dark">

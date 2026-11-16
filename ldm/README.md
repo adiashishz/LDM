@@ -14,7 +14,7 @@ This file lists what each milestone added and the command-line examples.
   limit, request headers), pause/resume/retry, set new link, per-download speed limit, open file or
   folder, remove (optionally deleting the file), preferences and host rules, notifications. It is a
   pure D-Bus client: closing it never stops downloads. If the service is not running, a banner
-  offers to start it (it is never started automatically).
+  offers to start it (it is never started automatically). Replaced by the Qt window in 0.4.0 (M7).
 
 - **M4:** browser integration. Extension in `../extension` (Firefox, Chrome, Brave): catches browser
   downloads (size / extension / site rules) with cookies and referer, "Download with ldm" context
@@ -35,6 +35,13 @@ This file lists what each milestone added and the command-line examples.
   settings. ldm becomes the default app for magnet links and .torrent files.
   `ldm torrent-files SOURCE`, `ldm add MAGNET --files 0,2 --sequential`.
 
+- **M7:** the window redesigned and rebuilt in Qt (PySide6), so the same window can run on Windows and
+  macOS later: menus and search, a labelled toolbar, a sidebar of views, categories, queues and the
+  speed graph, the download table, a resizable details panel (connections, facts, the action that fits),
+  a status bar, light and dark, with Inter bundled. `ldm/qt/` draws it; `ldm/ui/` holds what doesn't
+  depend on the toolkit (text, states, the D-Bus connection on its own thread, the window's place on the
+  session bus). `tools/render_qt.py` renders it offscreen with sample downloads.
+
 ## Browser integration
 
 ```sh
@@ -52,8 +59,9 @@ cd ../extension && python3 build.py                 # dist/firefox, dist/chromiu
 
 ## Use
 
-The GUI needs the distro's PyGObject, GTK 4 and libadwaita (Fedora: `python3-gobject gtk4
-libadwaita`), so the venv is built on the system Python with its site packages:
+The window needs the distro's Qt for Python (Fedora: `python3-pyside6 qt6-qtsvg`; Debian/Ubuntu:
+`python3-pyside6.qtwidgets python3-pyside6.qtsvg qt6-svg-plugins`), so the venv is built on the system
+Python with its site packages (or `uv pip install -e '.[dev,gui]'` takes PySide6 from PyPI):
 
 ```sh
 uv venv --python /usr/bin/python3 --system-site-packages .venv && uv pip install -e '.[dev]'
