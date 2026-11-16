@@ -2,7 +2,7 @@
 # Arch package for LDM releases (AUR: ldm-downloader). The -git variant is in ../ldm-downloader-git.
 
 pkgname=ldm-downloader
-pkgver=0.3.0
+pkgver=0.4.0
 pkgrel=1
 pkgdesc="Download manager for files, videos and torrents, with a browser extension (Qt)"
 arch=('any')

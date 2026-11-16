@@ -2,7 +2,7 @@
 %bcond check 1
 
 Name:           ldm-downloader
-Version:        0.3.0
+Version:        0.4.0
 Release:        1%{?dist}
 Summary:        Download manager for files, videos and torrents
 License:        MIT
@@ -117,6 +117,12 @@ cd ldm
 %{_datadir}/ldm/
 
 %changelog
+* Mon Nov 16 2026 Aditya Ashish <adiashishz@gmail.com> - 0.4.0-1
+- A new window, built with Qt: menus and search, a toolbar, a sidebar with categories, queues and a speed graph, and a resizable details panel with each download's connections
+- Every dialog redone: Add, Settings, Schedule, Batch download, Checksum, Torrent details and more
+- Light and dark, following the system or chosen in View → Appearance
+- Ubuntu 24.04 and Linux Mint 22 now use the Flatpak (they lack the Qt libraries LDM needs)
+
 * Sun Nov 15 2026 Aditya Ashish <adiashishz@gmail.com> - 0.3.0-1
 - Packages for Debian 13, Ubuntu 24.04 and 26.04 (also Linux Mint 22) and Arch Linux, alongside Fedora
 - A Flatpak for every other distribution
