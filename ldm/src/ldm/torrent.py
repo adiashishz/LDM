@@ -241,9 +241,19 @@ class TorrentSession:
             if entry in self._waiters:
                 self._waiters.remove(entry)
 
+    async def flush(self, handle, timeout: float = 60) -> None:
+        """Wait until the torrent's pieces are on disk and its files closed. libtorrent may report a torrent
+        finished while its last pieces are still being written (seen on Windows): the file isn't complete
+        until then, so a download isn't done until then either."""
+        if not handle.is_valid():
+            return
+        handle.flush_cache()
+        try:
+            await self.wait_for(lambda a: isinstance(a, lt.cache_flushed_alert) and a.handle == handle, timeout)
+        except asyncio.TimeoutError:
+            log.warning("libtorrent did not confirm writing %s to disk", handle.status().name)
+
     async def save_resume(self, handle) -> bytes | None:
-        """The torrent's resume data, after its pieces are written to disk (libtorrent 2.1 may still hold
-        downloaded pieces in memory when it reports the torrent finished)."""
         if not handle.is_valid() or not handle.status().has_metadata:
             return None
         handle.save_resume_data(lt.save_resume_flags_t.save_info_dict | lt.save_resume_flags_t.flush_disk_cache)
@@ -454,6 +464,7 @@ class TorrentDownloader:
             if st.is_finished or st.is_seeding:
                 break
             await asyncio.sleep(self.progress_interval)
+        await session.flush(handle)
         await self._save(session, handle)
         path = Path(d.dir) / name
         settings = self.store.get_settings()
