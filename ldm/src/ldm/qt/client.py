@@ -1,16 +1,19 @@
 """The background service as a Qt object: its calls, and its signals as Qt signals.
 
-The connection itself is `ldm.ui.remote.Remote`; this class hands its replies and signals to Qt's
-event loop, so callbacks and slots always run on the window's thread.
+The connection itself is `ldm.ui.remote.Remote` (D-Bus, on Linux) or `SocketRemote` (the local channel,
+elsewhere, or with LDM_TRANSPORT=socket); this class hands their replies and signals to Qt's event loop, so
+callbacks and slots always run on the window's thread.
 """
 
 from __future__ import annotations
 
+import os
+import sys
 from typing import Any, Callable
 
 from PySide6.QtCore import QObject, Qt, Signal, Slot
 
-from ..ui.remote import DEFAULT_TIMEOUT, Callback, DaemonError, Remote, ServiceCalls, start_daemon
+from ..ui.remote import DEFAULT_TIMEOUT, Callback, DaemonError, Remote, ServiceCalls, SocketRemote, start_daemon
 
 __all__ = ["DaemonClient", "DaemonError"]
 
@@ -24,18 +27,23 @@ class DaemonClient(QObject, ServiceCalls):
 
     _posted = Signal(object)  # a callable from the D-Bus thread, run on this object's thread
 
-    def __init__(self, address: str | None = None, parent: QObject | None = None):
+    def __init__(self, address: str | None = None, parent: QObject | None = None, transport: str | None = None):
+        """`address`: the D-Bus address, or the socket's path (default: the user's bus or socket);
+        `transport`: "dbus" or "socket" (default: LDM_TRANSPORT, else D-Bus on Linux and the socket elsewhere)."""
         super().__init__(parent)
         self._posted.connect(self._run_posted, Qt.ConnectionType.QueuedConnection)
-        self._remote = Remote(self._posted.emit, self.connected_changed.emit, self._on_signal, address)
+        self.transport = transport or os.environ.get("LDM_TRANSPORT") or (
+            "dbus" if sys.platform.startswith("linux") else "socket")
+        kind = SocketRemote if self.transport == "socket" else Remote
+        self._remote = kind(self._posted.emit, self.connected_changed.emit, self._on_signal, address)
 
     @property
     def connected(self) -> bool:
         return self._remote.connected
 
     @property
-    def remote(self) -> Remote:
-        """The D-Bus connection itself, for the window's own place on the bus (ldm.qt.desktop)."""
+    def remote(self) -> Remote | SocketRemote:
+        """The connection itself, for the window's own place on the bus (ldm.qt.desktop; D-Bus only)."""
         return self._remote
 
     def close(self) -> None:
