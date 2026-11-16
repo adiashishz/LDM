@@ -269,6 +269,13 @@ def daemon(bus_address, tmp_path):
     thread.join(10)
 
 
+@pytest.fixture(params=["dbus", "socket"])
+def cli_transport(request, monkeypatch):
+    """Run a command-line test over D-Bus, then over the local channel."""
+    monkeypatch.setenv("LDM_TRANSPORT", request.param)
+    return request.param
+
+
 @pytest.fixture
 def service_socket(daemon):
     """The running test service's local channel (a Unix socket in the test's own runtime folder)."""
