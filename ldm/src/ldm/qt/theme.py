@@ -177,7 +177,9 @@ def arrow_files(color: str) -> dict[str, str]:
     """Small up/down arrow images for spin and combo boxes (Qt style sheets take images only from files)."""
     from PySide6.QtCore import QStandardPaths
 
-    folder = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation) or ".") / "icons"
+    # A fixed folder: the app's own cache folder is named after the app, which a script may not have set.
+    cache = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.GenericCacheLocation)
+    folder = Path(cache or ".") / "ldm" / "icons"
     folder.mkdir(parents=True, exist_ok=True)
     files = {}
     for name, points in (("up", "2,7 6,3 10,7"), ("down", "2,4 6,8 10,4")):
@@ -275,14 +277,14 @@ QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QPlainTe
 QLineEdit[error="true"] {{ border: 1px solid {c.red}; }}
 QComboBox {{ padding-right: 26px; }}
 QComboBox::drop-down {{ border: 0; width: 24px; subcontrol-origin: padding; subcontrol-position: center right; }}
-QComboBox::down-arrow {{ image: url({arrows["down"]}); width: 12px; height: 12px; }}
+QComboBox::down-arrow {{ image: url("{arrows["down"]}"); width: 12px; height: 12px; }}
 QSpinBox, QDoubleSpinBox {{ padding-right: 22px; }}
 QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-origin: padding; subcontrol-position: top right;
     width: 20px; border: 0; background: transparent; }}
 QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-origin: padding; subcontrol-position: bottom right;
     width: 20px; border: 0; background: transparent; }}
-QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url({arrows["up"]}); width: 10px; height: 10px; }}
-QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url({arrows["down"]}); width: 10px; height: 10px; }}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url("{arrows["up"]}"); width: 10px; height: 10px; }}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url("{arrows["down"]}"); width: 10px; height: 10px; }}
 QComboBox QAbstractItemView {{ background: {c.card}; color: {c.fg}; border: 1px solid {c.line};
     selection-background-color: {c.press}; selection-color: {c.fg}; outline: 0; }}
 QPushButton {{ background: {c.card}; color: {c.fg}; border: 1px solid {c.line}; border-radius: 8px;

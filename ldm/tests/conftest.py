@@ -319,4 +319,8 @@ def qt_app():
     os.environ["QT_NO_GLIB"] = "1"
     from PySide6.QtWidgets import QApplication
 
-    return QApplication.instance() or QApplication([])
+    from ldm.qt.theme import ui_font
+
+    app = QApplication.instance() or QApplication([])
+    app.setFont(ui_font())  # the bundled Inter, as the app uses: the same text widths on every system
+    return app

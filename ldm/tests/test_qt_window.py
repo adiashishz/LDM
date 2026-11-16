@@ -245,7 +245,7 @@ def test_details_show_queue_place_and_checksum_link(app, window):
         return {grid.itemAtPosition(r, 0).widget().text(): grid.itemAtPosition(r, 1).widget()
                 for r in range(grid.rowCount()) if grid.itemAtPosition(r, 0)}
 
-    assert facts()["Queue"].text() == "Main queue, 1 of 1"
+    assert facts()["Queue"].toolTip() == "Main queue, 1 of 1"  # the full value (the label may be shortened)
     assert window.details.parts_label.text().endswith("connections") or window.details.parts_label.text() == "1 connection"
     window.table.select_id(2)  # finished
     link = facts()["Checksum"]
@@ -260,7 +260,7 @@ def test_paused_video_can_resume(app, window):
     window.downloads.upsert(row(7, "talk", "paused", kind="media", quality="Best quality"))
     window.table.select_id(7)
     grid = window.details.facts
-    facts = {grid.itemAtPosition(r, 0).widget().text(): grid.itemAtPosition(r, 1).widget().text()
-             for r in range(grid.rowCount()) if grid.itemAtPosition(r, 0)}
+    facts = {grid.itemAtPosition(r, 0).widget().text(): grid.itemAtPosition(r, 1).widget().toolTip()
+             for r in range(grid.rowCount()) if grid.itemAtPosition(r, 0)}  # full values (labels may be shortened)
     assert facts["Can resume"] == "Yes" and facts["Type"] == "Video, through yt-dlp"
     assert window.details.strip_box.isHidden()  # yt-dlp doesn't report connections
