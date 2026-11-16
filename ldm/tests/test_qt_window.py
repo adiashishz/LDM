@@ -254,3 +254,13 @@ def test_details_show_queue_place_and_checksum_link(app, window):
     window.show_checksum = opened.append
     link.linkActivated.emit("checksum")
     assert opened and opened[0].id == 2
+
+
+def test_paused_video_can_resume(app, window):
+    window.downloads.upsert(row(7, "talk", "paused", kind="media", quality="Best quality"))
+    window.table.select_id(7)
+    grid = window.details.facts
+    facts = {grid.itemAtPosition(r, 0).widget().text(): grid.itemAtPosition(r, 1).widget().text()
+             for r in range(grid.rowCount()) if grid.itemAtPosition(r, 0)}
+    assert facts["Can resume"] == "Yes" and facts["Type"] == "Video, through yt-dlp"
+    assert window.details.strip_box.isHidden()  # yt-dlp doesn't report connections

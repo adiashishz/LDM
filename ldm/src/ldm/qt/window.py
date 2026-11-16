@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 from PySide6.QtCore import QSettings, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
-                               QMainWindow, QMenu, QMenuBar, QMessageBox, QSplitter, QStackedWidget, QToolButton,
+                               QMainWindow, QMenu, QMenuBar, QMessageBox, QSizePolicy, QSplitter, QStackedWidget, QToolButton,
                                QVBoxLayout, QWidget)
 
 from .. import __version__
@@ -217,11 +217,11 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(16, 0, 12, 0)
         layout.setSpacing(4)
         self.logo = QLabel()
-        layout.addWidget(self.logo)
+        layout.addWidget(self.logo, 0, Qt.AlignmentFlag.AlignVCenter)
         brand = QLabel("LDM")  # as in the design: the name in bold between the logo and the menus
         brand.setObjectName("brand")
         brand.setContentsMargins(8, 0, 14, 0)
-        layout.addWidget(brand)
+        layout.addWidget(brand, 0, Qt.AlignmentFlag.AlignVCenter)
         menubar = QMenuBar()
         menubar.setNativeMenuBar(False)  # the menus sit in the window's own bar, as in the design
         tasks = menubar.addMenu("Tasks")
@@ -283,7 +283,10 @@ class MainWindow(QMainWindow):
             QUrl("https://github.com/adiashishz/LDM/issues"))))
         help_menu.addAction(self.about_action)
         self.menubar = menubar
-        layout.addWidget(menubar)
+        # A menu bar draws its items at the top of its box: keep the box as tall as the items and centred,
+        # so the menus line up with the name beside them.
+        menubar.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        layout.addWidget(menubar, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addStretch(1)
         self.search = QLineEdit()
         self.search.setObjectName("search")

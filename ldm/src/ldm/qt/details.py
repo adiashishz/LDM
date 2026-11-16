@@ -300,6 +300,8 @@ class DetailsPanel(QFrame):
         elif d.state not in {"done", "seeding"} and d.kind == "http":
             facts.append(("Can resume", "Yes" if d.resumable else "No, starts over",
                           "good" if d.resumable else ""))
+        elif d.state not in {"done", "seeding"} and d.kind == "media":
+            facts.append(("Can resume", "Yes", "good"))  # yt-dlp keeps the partial file and continues it
         if d.state in {"done", "seeding"} and d.path:
             facts.append(("Checksum", "Calculate…", "link"))
         keys = max(QLabel(k).fontMetrics().horizontalAdvance(k) for k, _, _ in facts)
