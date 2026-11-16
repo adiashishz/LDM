@@ -22,6 +22,7 @@ from .window import MainWindow
 APP_ID = "io.github.adiashishz.LDM"
 SERVICE_FLAG = "--gapplication-service"  # the name GTK's GApplication used; the .service file passes it
 SERVICE_WAIT_MS = 20_000  # started by D-Bus activation but never asked to show: quit after this
+SERVICE_START_MS = 1_500  # no D-Bus activation (Windows, macOS): start the service if none answers by then
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,6 +52,8 @@ def main(argv: list[str] | None = None) -> int:
     window = MainWindow(client)
     if desktop is not None:
         desktop.window = window
+    else:  # nothing starts the service on demand here: the window does (a second one would refuse to run)
+        QTimer.singleShot(SERVICE_START_MS, lambda: client.connected or window.start_daemon())
     if not service:
         window.show()
     elif desktop is not None:

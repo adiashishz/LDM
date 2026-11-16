@@ -23,6 +23,8 @@ from pathlib import Path
 
 import httpx
 
+from . import paths
+
 # LDM_YTDLP_RELEASES: a mirror with the same layout (the tests point it at nothing).
 RELEASES = os.environ.get("LDM_YTDLP_RELEASES") or "https://github.com/yt-dlp/yt-dlp/releases"
 ASSET = "yt-dlp"            # the zipimport build
@@ -31,8 +33,7 @@ VERSION_FILE = "yt_dlp/version.py"
 
 
 def folder() -> Path:
-    data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
-    return data / "ldm" / "yt-dlp"
+    return paths.data_dir() / "yt-dlp"
 
 
 def user_copy() -> Path:
@@ -41,7 +42,7 @@ def user_copy() -> Path:
 
 def bundled_copy() -> Path | None:
     """The copy a distribution package ships in <data dir>/ldm/yt-dlp/ (searched in XDG_DATA_DIRS), if any."""
-    for data in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":"):
+    for data in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(os.pathsep):
         path = Path(data) / "ldm" / "yt-dlp" / ASSET
         if data and path.is_file():
             return path

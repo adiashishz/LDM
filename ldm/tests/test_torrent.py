@@ -51,7 +51,15 @@ class Swarm:
         return lt.make_magnet_uri(self.info) + f"&x.pe={self.peer}"
 
     def same(self, folder: Path, name: str) -> bool:
-        return (folder / name).read_bytes() == (self.src / name).read_bytes()
+        got, want = (folder / name).read_bytes(), (self.src / name).read_bytes()
+        if got != want:  # say how they differ (and whether waiting helps: data written late)
+            first = next((i for i, (a, b) in enumerate(zip(got, want)) if a != b), min(len(got), len(want)))
+            time.sleep(3)
+            later = (folder / name).read_bytes() == want
+            print(f"{name}: {len(got)} bytes, expected {len(want)}; first difference at {first}; "
+                  f"zeros from there: {not any(got[first:first + 65536])}; equal 3 s later: {later}; "
+                  f"files there: {sorted(p.name for p in folder.iterdir())}")
+        return got == want
 
 
 @pytest.fixture

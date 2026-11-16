@@ -7,7 +7,7 @@ import pytest
 
 from ldm.manager import InvalidArgument, Manager
 from ldm.store import Store
-from ldm.system import Conditions
+from ldm.conditions import Conditions
 
 from test_manager import payload, run, wait_state
 

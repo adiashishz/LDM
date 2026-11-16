@@ -59,7 +59,8 @@ def find_js_runtime(configured: str = "") -> tuple[str, str] | None:
     candidates += sorted(glob.glob(str(home / ".nvm/versions/node/*/bin/node")), key=_node_version, reverse=True)
     candidates += [str(home / ".bun/bin/bun")]
     for path in filter(None, candidates):
-        name = Path(path).name.removesuffix("js") if Path(path).name == "nodejs" else Path(path).name
+        name = Path(path).name.lower().removesuffix(".exe")  # node.exe on Windows
+        name = name.removesuffix("js") if name == "nodejs" else name
         if name in RUNTIMES and os.access(path, os.X_OK):
             return name, path
     return None

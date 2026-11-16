@@ -21,8 +21,9 @@ from ldm.store import Store
 
 @pytest.fixture(autouse=True)
 def data_home(tmp_path, monkeypatch):
-    """The user copy lives under XDG_DATA_HOME: keep it in the test's folder."""
+    """The user copy lives under XDG_DATA_HOME (Windows: LOCALAPPDATA): keep it in the test's folder."""
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "data"))
     return tmp_path / "data"
 
 
@@ -147,7 +148,7 @@ def test_bundled_copy_is_found_in_xdg_data_dirs(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_DATA_DIRS", str(tmp_path / "system"))
     assert ytdlp.bundled_copy() is None
     path = bundle(tmp_path, "2099.1.2")
-    monkeypatch.setenv("XDG_DATA_DIRS", f"{tmp_path / 'elsewhere'}::{tmp_path / 'system'}")
+    monkeypatch.setenv("XDG_DATA_DIRS", os.pathsep.join([str(tmp_path / "elsewhere"), "", str(tmp_path / "system")]))
     assert ytdlp.bundled_copy() == path
 
 

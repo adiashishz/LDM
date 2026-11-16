@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import stat
+import sys
 from datetime import datetime, timedelta
 
 import pytest
@@ -71,7 +72,8 @@ def test_encrypted_backup_carries_passwords(tmp_path):
     path = run(first, make)
     blob = open(path, "rb").read()
     assert backup.is_encrypted(blob) and b"s3cret" not in blob and b"example.com" not in blob
-    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    if sys.platform != "win32":  # no modes there
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
     with pytest.raises(backup.BackupError, match="wrong password"):
         backup.decode(blob, "nope")
     with pytest.raises(backup.BackupError, match="protected"):

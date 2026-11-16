@@ -24,10 +24,12 @@ from urllib.parse import unquote, urlsplit
 import httpx
 
 from .ratelimit import TokenBucket
+from .paths import WINDOWS
 from .segments import Part, split_even, steal
 from .net import DEFAULT_USER_AGENT, EventCallback, NetConfig
 from .store import DownloadRow, Store
 
+BINARY = getattr(os, "O_BINARY", 0)  # Windows: else os.open is in text mode and rewrites line endings
 UNKNOWN_LAST = 1 << 62  # `last` of the single part when the size is unknown; EOF ends it
 
 _CONTENT_RANGE = re.compile(r"bytes\s+(?:(\d+)-(\d+)|\*)/(\d+|\*)")
@@ -85,8 +87,19 @@ class ProbeResult:
 
 def sanitize_filename(name: str) -> str:
     name = name.replace("/", "_").replace("\0", "").strip().lstrip(".")
+    if WINDOWS:
+        name = windows_name(name)
     name = name.encode()[:240].decode(errors="ignore")
     return name or "download"
+
+
+def windows_name(name: str) -> str:
+    """A name Windows accepts: no <>:"/\\|?* or control characters, no trailing dot or space, and not a
+    device name (CON, NUL, COM1, …, with or without an extension)."""
+    name = _WINDOWS_FORBIDDEN.sub("_", name).rstrip(". ")
+    if name.split(".")[0].strip().upper() in _WINDOWS_DEVICES:
+        name = "_" + name
+    return name
 
 
 def filename_for(response: httpx.Response) -> str:
@@ -99,6 +112,11 @@ def filename_for(response: httpx.Response) -> str:
     if not name:
         name = unquote(Path(urlsplit(str(response.url)).path).name)
     return sanitize_filename(name)
+
+
+_WINDOWS_FORBIDDEN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_WINDOWS_DEVICES = {"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10)),
+                    *(f"LPT{n}" for n in range(1, 10))}
 
 
 def unique_path(path: Path) -> Path:
@@ -251,7 +269,7 @@ class Downloader:
         self.d, self.parts = d, parts
         self.store.save_parts(self.id, self._snapshot())
 
-        fd = os.open(d.temp_path, os.O_RDWR | os.O_CREAT, 0o644)
+        fd = os.open(d.temp_path, os.O_RDWR | os.O_CREAT | BINARY, 0o644)
         try:
             if not d.resumable:
                 os.ftruncate(fd, 0)
@@ -379,7 +397,7 @@ class Downloader:
                 if room <= 0:
                     return
                 data = chunk[:room]
-                os.pwrite(self.fd, data, part.pos)
+                pwrite(self.fd, data, part.pos)
                 part.done += len(data)
                 if len(data) < len(chunk):
                     return
@@ -448,5 +466,18 @@ class Downloader:
 def _preallocate(fd: int, size: int) -> None:
     try:
         os.posix_fallocate(fd, 0, size)
-    except OSError:
-        os.ftruncate(fd, size)  # filesystem without fallocate support: sparse file
+    except (OSError, AttributeError):  # no fallocate on this filesystem (sparse file), or none at all (Windows)
+        os.ftruncate(fd, size)
+
+
+def seek_write(fd: int, data: bytes, offset: int) -> int:
+    """pwrite where there is none (Windows). Every write runs on the event loop's thread without awaiting in
+    between, so seeking first can't interleave with another part's write."""
+    os.lseek(fd, offset, os.SEEK_SET)
+    written = 0
+    while written < len(data):
+        written += os.write(fd, data[written:])
+    return written
+
+
+pwrite = getattr(os, "pwrite", seek_write)

@@ -114,7 +114,7 @@ class DBusClient(ServiceClient):
 
 class SocketClient(ServiceClient):
     def __init__(self, address: str | None = None):
-        self.path = Path(address) if address else (channel.tcp_file() if channel.TCP else channel.socket_path())
+        self.path = Path(address) if address else channel.address()
         self.reader: asyncio.StreamReader | None = None
         self.writer: asyncio.StreamWriter | None = None
         self.pending: dict[int, asyncio.Future] = {}

@@ -10,18 +10,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-from dbus_fast import Message, MessageFlag, MessageType
-from dbus_fast.aio import MessageBus
-
+from .. import paths
 from ..busnames import BUS_NAME, ERROR_PREFIX, INTERFACE, OBJECT_PATH
 from ..variants import to_vardict, unwrap
+
+if TYPE_CHECKING:  # dbus-fast is Linux only: Remote imports it when it connects
+    from dbus_fast import Message
+    from dbus_fast.aio import MessageBus
 
 log = logging.getLogger(__name__)
 
@@ -119,8 +120,11 @@ class Remote:
 
     async def _connect(self, address: str | None) -> None:
         try:
+            from dbus_fast import Message, MessageType
+            from dbus_fast.aio import MessageBus
+
             self._bus = await MessageBus(bus_address=address).connect()
-        except Exception as e:  # noqa: BLE001 (no session bus: stay disconnected)
+        except Exception as e:  # noqa: BLE001 (no session bus, or no dbus-fast: stay disconnected)
             log.warning("cannot connect to the session bus: %s", e)
             return
         self._bus.add_message_handler(self._on_message)
@@ -139,6 +143,8 @@ class Remote:
             self._bus = None
 
     async def _add_match(self, rule: str) -> None:
+        from dbus_fast import Message
+
         await self._bus.call(Message(destination=BUS[0], path=BUS[1], interface=BUS[2],
                                      member="AddMatch", signature="s", body=[rule]))
 
@@ -148,6 +154,8 @@ class Remote:
         self._deliver(lambda: self._set_connected(connected))
 
     def _on_message(self, message: Message) -> None:
+        from dbus_fast import MessageType
+
         if message.message_type != MessageType.SIGNAL:
             return
         if message.interface == BUS[2] and message.member == "NameOwnerChanged":
@@ -159,6 +167,8 @@ class Remote:
 
     async def _call(self, method: str, signature: str, args: list[Any], callback: Callback | None,
                     timeout: float | None) -> None:
+        from dbus_fast import Message, MessageFlag, MessageType
+
         result, error = None, None
         if self._bus is None or self._owner is None:
             error = not_running()
@@ -207,7 +217,7 @@ class SocketRemote:
         self.connected = False
         self._post, self._on_connected, self._on_signal = post, on_connected, on_signal
         self._closed = False
-        self._path = Path(address) if address else (channel.tcp_file() if channel.TCP else channel.socket_path())
+        self._path = Path(address) if address else channel.address()
         self._writer: asyncio.StreamWriter | None = None
         self._pending: dict[int, asyncio.Future] = {}
         self._next_id = 1
@@ -327,12 +337,20 @@ class SocketRemote:
 
 def start_daemon() -> None:
     """Start `ldm daemon` in its own session so it outlives the window. Raises OSError on failure."""
-    log_dir = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "ldm"
+    log_dir = paths.log_dir()
     log_dir.mkdir(parents=True, exist_ok=True)
     with open(log_dir / "daemon.log", "ab") as log_file:
         process = subprocess.Popen([sys.executable, "-m", "ldm", "daemon"], stdin=subprocess.DEVNULL,
-                                   stdout=log_file, stderr=log_file, start_new_session=True)
+                                   stdout=log_file, stderr=log_file, **detached())
     threading.Thread(target=process.wait, name="ldm-daemon-reaper", daemon=True).start()  # reap on exit
+
+
+def detached() -> dict[str, Any]:
+    """Popen options for a process that outlives its starter (on Windows: without a console window)."""
+    if sys.platform == "win32":
+        return {"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+                | subprocess.CREATE_NO_WINDOW}
+    return {"start_new_session": True}
 
 
 class ServiceCalls:

@@ -6,13 +6,37 @@ import asyncio
 import mimetypes
 import os
 import re
+import shutil
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
+
+# A session bus for the tests: Linux with dbus-daemon. Elsewhere (Windows, macOS), or with LDM_TEST_NO_DBUS=1
+# (to try that on Linux), the test service runs on the local channel only and D-Bus tests are skipped.
+HAS_DBUS = (sys.platform.startswith("linux") and bool(shutil.which("dbus-daemon"))
+            and not os.environ.get("LDM_TEST_NO_DBUS"))
+if not HAS_DBUS:
+    # Test files for the Linux desktop's D-Bus parts (they import dbus-fast, which Windows can't load).
+    collect_ignore = ["test_dbus.py", "test_finish.py", "test_notify.py", "test_system.py", "test_tray.py"]
+if os.environ.get("LDM_TEST_NO_DBUS"):
+    import importlib.abc
+
+    class _NoDbusFast(importlib.abc.MetaPathFinder):
+        """As on Windows: dbus-fast can't be imported, so nothing shared with Windows may need it."""
+
+        def find_spec(self, name, path=None, target=None):
+            if name == "dbus_fast" or name.startswith("dbus_fast."):
+                raise ImportError(f"{name} is blocked (LDM_TEST_NO_DBUS)")
+            return None
+
+    sys.meta_path.insert(0, _NoDbusFast())
+needs_dbus = pytest.mark.skipif(not HAS_DBUS, reason="needs a D-Bus session bus (Linux)")
+linux_only = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux desktop only")
 
 
 @pytest.fixture(autouse=True)
@@ -25,6 +49,7 @@ def private_folders(tmp_path_factory, monkeypatch):
     # The local channel's socket: never next to the user's running service.
     (folders / "runtime").mkdir(mode=0o700)
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(folders / "runtime"))
+    monkeypatch.setenv("LOCALAPPDATA", str(folders / "LocalAppData"))  # Windows: the channel's file, data
     monkeypatch.delenv("LDM_SOCKET", raising=False)
     # The daily yt-dlp check must not reach GitHub (nothing listens on port 9).
     monkeypatch.setenv("LDM_YTDLP_RELEASES", "http://127.0.0.1:9/releases")
@@ -230,6 +255,8 @@ def http_server():
 
 @pytest.fixture
 def bus_address(monkeypatch, tmp_path_factory):
+    if not HAS_DBUS:
+        pytest.skip("needs a D-Bus session bus (Linux)")
     # Own XDG_DATA_HOME: the bus must not see the user's real ldm activation files.
     env = {**os.environ, "XDG_DATA_HOME": str(tmp_path_factory.mktemp("bus-data"))}
     proc = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--print-address"],
@@ -242,8 +269,10 @@ def bus_address(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture
-def daemon(bus_address, tmp_path):
-    """Run `serve()` in its own thread and event loop."""
+def daemon(request, tmp_path):
+    """Run `serve()` in its own thread and event loop: on D-Bus and the local channel, or the channel only
+    where there is no D-Bus (then the fixture's value is None, not the bus address)."""
+    bus_address = request.getfixturevalue("bus_address") if HAS_DBUS else None
     loop = asyncio.new_event_loop()
     stop, ready = asyncio.Event(), threading.Event()
     from ldm.passwords import MemoryPasswords
@@ -256,7 +285,8 @@ def daemon(bus_address, tmp_path):
         task = asyncio.create_task(serve(bus_address=bus_address, db_path=tmp_path / "daemon.db",
                                          stop=stop, ready=started, manager_options=options,
                                          system_bus_address=bus_address,  # never the real system bus
-                                         manage_autostart=False))          # nor the user's systemd
+                                         manage_autostart=False,           # nor the user's systemd
+                                         dbus=HAS_DBUS))
         await started.wait()
         ready.set()
         await task
@@ -269,19 +299,37 @@ def daemon(bus_address, tmp_path):
     thread.join(10)
 
 
+def use_service(monkeypatch, daemon) -> None:
+    """Clients (the command line, the browser bridge) find the test service: on its bus, or without D-Bus
+    on the local channel."""
+    if daemon:
+        monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", daemon)
+    else:
+        monkeypatch.setenv("LDM_TRANSPORT", "socket")
+
+
+@pytest.fixture
+def session_bus(request):
+    """The test bus's address where there is D-Bus, else None (for tests that run either way)."""
+    return request.getfixturevalue("bus_address") if HAS_DBUS else None
+
+
 @pytest.fixture(params=["dbus", "socket"])
 def cli_transport(request, monkeypatch):
     """Run a command-line test over D-Bus, then over the local channel."""
+    if request.param == "dbus" and not HAS_DBUS:
+        pytest.skip("needs a D-Bus session bus (Linux)")
     monkeypatch.setenv("LDM_TRANSPORT", request.param)
     return request.param
 
 
 @pytest.fixture
 def service_socket(daemon):
-    """The running test service's local channel (a Unix socket in the test's own runtime folder)."""
+    """The running test service's local channel (a Unix socket in the test's own runtime folder; on Windows
+    the file with its port and token)."""
     from ldm import channel
 
-    return str(channel.socket_path())
+    return str(channel.address())
 
 
 # --- proxies and DNS-over-HTTPS ---------------------------------------------------------

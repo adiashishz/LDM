@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from . import paths
 from .segments import Part
 
 # Applied in order; PRAGMA user_version records how many have run.
@@ -96,12 +97,11 @@ CREATE TABLE logins (
 
 
 def default_download_dir() -> str:
-    return os.environ.get("XDG_DOWNLOAD_DIR") or str(Path.home() / "Downloads")
+    return str(paths.download_dir())
 
 
 def default_db_path(name: str = "ldm.db") -> Path:
-    data_home = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share"
-    return Path(data_home) / "ldm" / name
+    return paths.data_dir() / name
 
 
 # Values stored as JSON in `settings`; missing keys fall back to these.

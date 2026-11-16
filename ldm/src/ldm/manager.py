@@ -32,7 +32,7 @@ from .passwords import open_store
 from .torrent import TorrentDownloader, TorrentSession
 from .ratelimit import TokenBucket
 from .schedule import describe_start, in_window, next_start, parse_days, parse_time
-from .system import Conditions
+from .conditions import Conditions
 from .store import DEFAULT_SETTINGS, DownloadRow, HostRule, Store, default_db_path
 
 RESUMABLE_STATES = {"paused", "error", "expired", "changed"}
@@ -1175,7 +1175,7 @@ class Manager:
 
         def write() -> None:
             path.parent.mkdir(parents=True, exist_ok=True)
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0), 0o600)
             with os.fdopen(fd, "wb") as f:
                 f.write(blob)
 

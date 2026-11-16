@@ -5,11 +5,9 @@ import json
 import shutil
 
 import pytest
-from dbus_fast.aio import MessageBus
 
 from ldm.clipboard import Offer, background_method, candidate, run_watcher
 
-from test_notify import FakeGui, FakeNotifications, until
 
 
 @pytest.mark.parametrize("text, expected", [
@@ -51,6 +49,9 @@ def test_background_method(monkeypatch):
 
 @pytest.mark.skipif(shutil.which("dbus-daemon") is None, reason="dbus-daemon not installed")
 def test_watcher_offers_new_links_and_opens_the_add_dialog(bus_address):
+    from dbus_fast.aio import MessageBus
+    from test_notify import FakeGui, FakeNotifications, until
+
     async def scenario():
         services = await MessageBus(bus_address=bus_address).connect()
         notifications, gui = FakeNotifications(), FakeGui()

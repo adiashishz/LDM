@@ -7,18 +7,55 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
-from dbus_fast import Message, MessageType, Variant
-from dbus_fast.aio import MessageBus
+if TYPE_CHECKING:  # dbus-fast is Linux only: LocalFinisher works without it
+    from dbus_fast import Message
+    from dbus_fast.aio import MessageBus
 
-from .notify import GUI_ID, GUI_PATH, NOTIFICATIONS
-from .system import LOGIND, SystemMonitor
+    from .system import SystemMonitor
 
 log = logging.getLogger(__name__)
 
 COUNTDOWN = 60.0
 ACTIONS = {"suspend": ("Suspend", "Suspending"), "poweroff": ("PowerOff", "Powering off")}
+
+
+class LocalFinisher:
+    """Without D-Bus (Windows, macOS): "quit" closes the windows on the local channel, then the service;
+    suspend and power off use `power` (the system's own calls) after the countdown, when there is one."""
+
+    def __init__(self, close_windows: Callable[[], object], stop: Callable[[], None],
+                 power: Callable[[str], Awaitable[None]] | None = None, countdown: float = COUNTDOWN):
+        self.close_windows, self.stop, self.power, self.countdown = close_windows, stop, power, countdown
+        self._pending: asyncio.Task | None = None
+
+    def run(self, action: str) -> None:
+        if action == "quit":
+            self.close_windows()
+            self.stop()
+        elif action in ACTIONS and self.power is None:
+            log.warning("all downloads finished, but %s isn't available on this system", action)
+        elif action in ACTIONS and self._pending is None:
+            self._pending = asyncio.get_running_loop().create_task(self._count_down(action))
+
+    def cancel(self, *_) -> None:
+        if self._pending is not None:
+            self._pending.cancel()
+            self._pending = None
+
+    async def _count_down(self, action: str) -> None:
+        try:
+            await asyncio.sleep(self.countdown)
+            await self.power(action)
+            log.info("all downloads finished: %s", action)
+        except asyncio.CancelledError:
+            log.info("%s cancelled", action)
+            raise
+        except Exception as e:
+            log.warning("could not %s: %s", action, e)
+        finally:
+            self._pending = None
 
 
 class Finisher:
@@ -42,6 +79,8 @@ class Finisher:
 
     async def _quit(self) -> None:
         """Close the window if it's open, then stop the service (downloads are all finished)."""
+        from .notify import GUI_ID, GUI_PATH
+
         try:
             if (await self._call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
                                  "NameHasOwner", "s", [GUI_ID])).body[0]:
@@ -52,6 +91,11 @@ class Finisher:
         self.stop()
 
     async def _count_down(self, action: str) -> None:
+        from dbus_fast import Variant
+
+        from .notify import GUI_ID, NOTIFICATIONS
+        from .system import LOGIND
+
         method, doing = ACTIONS[action]
         try:
             try:
@@ -80,11 +124,17 @@ class Finisher:
                 self._notification = 0
 
     def _on_message(self, msg: Message) -> None:
+        from dbus_fast import MessageType
+
+        from .notify import NOTIFICATIONS
+
         if (msg.message_type == MessageType.SIGNAL and msg.interface == NOTIFICATIONS[2]
                 and msg.member == "ActionInvoked" and self._notification and msg.body[0] == self._notification):
             self.cancel()
 
     async def _call(self, destination, path, interface, member, signature="", body=None) -> Message:
+        from dbus_fast import Message, MessageType
+
         reply = await self.bus.call(Message(destination=destination, path=path, interface=interface,
                                             member=member, signature=signature, body=body or []))
         if reply.message_type == MessageType.ERROR:

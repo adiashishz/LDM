@@ -4,6 +4,17 @@ from PySide6.QtCore import QObject, Signal
 
 from ldm.store import DEFAULT_SETTINGS
 from ldm.ui.remote import ServiceCalls
+from ldm.variants import unwrap
+
+
+def real_client(daemon):
+    """A DaemonClient of the test service (the `daemon` fixture): on its bus, or on the local channel."""
+    from ldm import channel
+    from ldm.qt.client import DaemonClient
+
+    if daemon:
+        return DaemonClient(daemon, transport="dbus")
+    return DaemonClient(str(channel.address()), transport="socket")
 
 
 class FakeClient(QObject, ServiceCalls):
@@ -13,6 +24,8 @@ class FakeClient(QObject, ServiceCalls):
     progress = Signal(object)
     connected_changed = Signal(bool)
     add_request = Signal(object)
+    show_requested = Signal()
+    quit_requested = Signal()
     connected = True
 
     def __init__(self, rows, **answers):
@@ -27,7 +40,7 @@ class FakeClient(QObject, ServiceCalls):
                    "ListHostRules": [], "ListLogins": [],
                    "Get": next((r for r in self.rows if args and r["id"] == args[0]), None), **self.answers}
         if method == "SetSettings":
-            self.settings.update({k: v.value for k, v in args[0].items()})
+            self.settings.update(unwrap(args[0]))
         if callback:
             callback(answers.get(method), None)
 
