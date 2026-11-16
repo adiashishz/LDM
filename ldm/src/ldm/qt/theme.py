@@ -7,6 +7,7 @@ design's 24×24 line drawings, drawn in any colour through QtSvg.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QIcon, QPainter, QPalette, QPixmap
@@ -111,8 +112,23 @@ def icon(name: str, color: str, size: int = 20, width: float = 1.8) -> QIcon:
     return QIcon(svg_pixmap(svg, size))
 
 
+def tool_icon(name: str, color: str, disabled: str, size: int = 20) -> QIcon:
+    """A toolbar icon with its greyed-out look for when the action can't be used."""
+    result = icon(name, color, size)
+    result.addPixmap(icon(name, disabled, size).pixmap(size, size), QIcon.Mode.Disabled)
+    return result
+
+
 def logo(accent: str, size: int = 20) -> QPixmap:
     return svg_pixmap(LOGO.format(accent=accent), size)
+
+
+_current = LIGHT
+
+
+def current() -> Colors:
+    """The colours in use (for widgets that paint themselves)."""
+    return _current
 
 
 def system_is_dark() -> bool:
@@ -122,14 +138,22 @@ def system_is_dark() -> bool:
 
 def colors_for(choice: str) -> Colors:
     """`choice`: "system", "light" or "dark"."""
+    global _current
     dark = system_is_dark() if choice == "system" else choice == "dark"
-    return DARK if dark else LIGHT
+    _current = DARK if dark else LIGHT
+    return _current
+
+
+FONTS = Path(__file__).with_name("fonts")  # Inter 4.1 (SIL Open Font License), the design's font
 
 
 def ui_font() -> QFont:
-    """Inter when installed, else the system's font, at the design's 13px."""
+    """Inter — bundled with LDM, so every system shows the design's font — at the design's 13px."""
+    for path in sorted(FONTS.glob("Inter-*.ttf")):
+        QFontDatabase.addApplicationFont(str(path))
     font = QFont("Inter") if "Inter" in QFontDatabase.families() else QGuiApplication.font()
     font.setPixelSize(13)
+    font.setHintingPreference(QFont.HintingPreference.PreferNoHinting)  # Inter's shapes, as in the design
     return font
 
 
@@ -149,12 +173,30 @@ def palette(c: Colors) -> QPalette:
     return p
 
 
+def arrow_files(color: str) -> dict[str, str]:
+    """Small up/down arrow images for spin and combo boxes (Qt style sheets take images only from files)."""
+    from PySide6.QtCore import QStandardPaths
+
+    folder = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation) or ".") / "icons"
+    folder.mkdir(parents=True, exist_ok=True)
+    files = {}
+    for name, points in (("up", "2,7 6,3 10,7"), ("down", "2,4 6,8 10,4")):
+        path = folder / f"arrow-{name}-{color.lstrip('#')}.svg"
+        if not path.exists():
+            path.write_text(f'<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12">'
+                            f'<polyline points="{points}" fill="none" stroke="{color}" stroke-width="1.6" '
+                            f'stroke-linecap="round" stroke-linejoin="round"/></svg>')
+        files[name] = path.as_posix()
+    return files
+
+
 def stylesheet(c: Colors) -> str:
+    arrows = arrow_files(c.dim)
     return f"""
 QMainWindow, #central {{ background: {c.win}; }}
 #topbar {{ background: {c.chrome}; }}
 #topbar QMenuBar {{ background: transparent; color: {c.fg}; }}
-#topbar QMenuBar::item {{ padding: 6px 10px; border-radius: 6px; background: transparent; }}
+#topbar QMenuBar::item {{ padding: 6px 10px; font-size: 13px; border-radius: 6px; background: transparent; }}
 #topbar QMenuBar::item:selected, #topbar QMenuBar::item:pressed {{ background: {c.press}; }}
 #brand {{ font-weight: 700; color: {c.fg}; }}
 #search {{ background: {c.field}; border: 0; border-radius: 8px; padding: 0 8px; color: {c.fg};
@@ -168,6 +210,7 @@ QMainWindow, #central {{ background: {c.win}; }}
 #toolbar QToolButton#primary:hover {{ background: {QColor(c.accent).darker(110).name()}; }}
 #toolbar QToolButton#primary:disabled {{ background: {c.track}; color: {c.dim}; }}
 #toolsep {{ background: {c.line}; }}
+QSplitter::handle {{ background: transparent; }}
 #sidebar {{ background: {c.side}; border-right: 1px solid {c.line}; }}
 #sidebar QLabel#section {{ color: {c.dim}; font-size: 11px; font-weight: 600; }}
 #speedcard {{ background: {c.card}; border: 1px solid {c.line}; border-radius: 12px; }}
@@ -217,5 +260,43 @@ QScrollBar:vertical {{ background: transparent; width: 10px; margin: 0; }}
 QScrollBar::handle:vertical {{ background: {c.track}; border-radius: 4px; min-height: 30px; margin: 2px; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
+QDialog#dialog, #page, #pagebody {{ background: {c.side}; }}
+#footer {{ background: {c.chrome}; border-top: 1px solid {c.line}; }}
+#card {{ background: {c.card}; border: 1px solid {c.line}; border-radius: 10px; }}
+#rowline {{ background: {c.line}; }}
+#rowtitle {{ color: {c.fg}; }}
+#rowsub {{ color: {c.dim}; font-size: 12px; }}
+#cardtitle {{ color: {c.fg}; font-weight: 600; }}
+#foldbody {{ background: transparent; }}
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit {{ background: {c.field}; color: {c.fg};
+    border: 1px solid transparent; border-radius: 7px; padding: 5px 8px; selection-background-color: {c.accent}; }}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QPlainTextEdit:focus {{
+    border: 1px solid {c.accent}; }}
+QLineEdit[error="true"] {{ border: 1px solid {c.red}; }}
+QComboBox {{ padding-right: 26px; }}
+QComboBox::drop-down {{ border: 0; width: 24px; subcontrol-origin: padding; subcontrol-position: center right; }}
+QComboBox::down-arrow {{ image: url({arrows["down"]}); width: 12px; height: 12px; }}
+QSpinBox, QDoubleSpinBox {{ padding-right: 22px; }}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-origin: padding; subcontrol-position: top right;
+    width: 20px; border: 0; background: transparent; }}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-origin: padding; subcontrol-position: bottom right;
+    width: 20px; border: 0; background: transparent; }}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url({arrows["up"]}); width: 10px; height: 10px; }}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url({arrows["down"]}); width: 10px; height: 10px; }}
+QComboBox QAbstractItemView {{ background: {c.card}; color: {c.fg}; border: 1px solid {c.line};
+    selection-background-color: {c.press}; selection-color: {c.fg}; outline: 0; }}
+QPushButton {{ background: {c.card}; color: {c.fg}; border: 1px solid {c.line}; border-radius: 8px;
+    padding: 6px 14px; }}
+QPushButton:hover {{ background: {c.press}; }}
+QPushButton:disabled {{ color: {c.dim}; }}
+QPushButton#primary {{ background: {c.accent}; color: #FFFFFF; border: 0; font-weight: 600; }}
+QPushButton#primary:disabled {{ background: {c.track}; color: {c.dim}; }}
+QPushButton#day {{ padding: 5px 0; }}
+QPushButton#day:checked {{ background: {c.accent}; color: #FFFFFF; border: 0; }}
+#badge {{ font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9px; color: {c.dim}; }}
+#badge[tone="accent"] {{ color: {c.accent}; background: {c.field}; }}
+#badge[tone="good"] {{ color: {c.green}; background: {c.field}; }}
+#badge[tone="warn"] {{ color: {c.red}; background: {c.field}; }}
+QCheckBox {{ color: {c.fg}; spacing: 8px; }}
 QToolTip {{ background: {c.card}; color: {c.fg}; border: 1px solid {c.line}; padding: 4px 6px; }}
 """

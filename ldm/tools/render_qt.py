@@ -15,7 +15,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QObject, QSettings, Signal  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from ldm.qt.add_dialog import AddDialog  # noqa: E402
+from ldm.qt.preferences import PreferencesDialog  # noqa: E402
 from ldm.qt.theme import ui_font  # noqa: E402
+from ldm.store import DEFAULT_SETTINGS  # noqa: E402
 from ldm.qt.window import MainWindow  # noqa: E402
 from ldm.ui.remote import ServiceCalls  # noqa: E402
 
@@ -52,6 +55,9 @@ SAMPLE = [
         hours_ago=26),
     row(10, "song-of-the-week.flac", "https://music.example.com/song.flac", "done", 38 * MB, hours_ago=30),
 ]
+SETTINGS = {**DEFAULT_SETTINGS, "download_dir": str(Path.home() / "Downloads"), "clipboard_watch": False,
+            "ytdlp_version": "2026.10.30", "js_runtime_detected": "deno 2.5", "data_used": 3 * 1024 * MB,
+            "backup_folder": str(Path.home() / "Documents/LDM Backups")}
 PARTS = [{"first": i * 18 * MB, "last": (i + 1) * 18 * MB - 1, "done": int(18 * MB * f), "active": f < 1}
          for i, f in enumerate([.18, .12, .15, .09, .14, .2, .11, .13, .08, .16, .1, .12, .07, .14, .09, .11])]
 
@@ -67,8 +73,12 @@ class FakeClient(QObject, ServiceCalls):
     connected = True
 
     def _call(self, method, signature, args, callback, timeout=None):
-        answers = {"List": SAMPLE, "GetSettings": {"speed_limit": 0, "download_dir": str(Path.home()),
-                                                   "clipboard_watch": False, "finish_action": "nothing"},
+        answers = {"List": SAMPLE, "GetSettings": SETTINGS,
+                   "Probe": {"size": 286 * MB, "resumable": True, "content_type": "application/x-xz",
+                             "filename": "blender-4.5.2-linux-x64.tar.xz"},
+                   "FindDuplicates": [], "ListHostRules": [{"host": "example.com", "max_connections": 4,
+                                                            "max_downloads": 1, "include_subdomains": True}],
+                   "ListLogins": [],
                    "GetParts": PARTS, "Get": next((r for r in SAMPLE if args and r["id"] == args[0]), None)}
         if callback:
             callback(answers.get(method), None)
@@ -114,6 +124,23 @@ def main() -> None:
     window.sidebar.choose("view:finished")
     settle(app)
     window.grab().save(str(OUT / "main-finished-view.png"))
+    window.details_action.trigger()
+    window.sidebar.choose("view:all")
+    for theme in ("light", "dark"):
+        window.set_theme(theme)
+        add = AddDialog(window, window.client, "https://download.blender.org/release/blender-4.5.2-linux-x64.tar.xz")
+        add.show()
+        settle(app, 0.5)
+        add.grab().save(str(OUT / f"add-{theme}.png"))
+        add.close()
+        prefs = PreferencesDialog(window, window.client)
+        prefs.show()
+        settle(app, 0.5)
+        prefs.grab().save(str(OUT / f"settings-{theme}.png"))
+        prefs.show_page("sites")
+        settle(app)
+        prefs.grab().save(str(OUT / f"settings-sites-{theme}.png"))
+        prefs.close()
     print("saved the rest to", OUT)
 
 

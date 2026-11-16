@@ -11,11 +11,12 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
+from urllib.parse import urlsplit
 
 from PySide6.QtCore import QSettings, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
-                               QMainWindow, QMenu, QMenuBar, QMessageBox, QStackedWidget, QToolButton,
+                               QMainWindow, QMenu, QMenuBar, QMessageBox, QSizePolicy, QSplitter, QStackedWidget, QToolButton,
                                QVBoxLayout, QWidget)
 
 from .. import __version__
@@ -26,17 +27,20 @@ from ..schedule import describe_start, next_start
 from ..ui.item import CATEGORIES, LIBRARY, Download
 from ..ui.states import FINISH_ACTIONS, PAUSABLE, RESUMABLE
 from ..ui.text import is_url, limit_text, short_path
-from .details import DetailsPanel
-from .model import DownloadsFilter, DownloadsModel, queue_label
-from .sidebar import Sidebar
+from .add_dialog import AddDialog
+from .details import PANEL_WIDTH, DetailsPanel
+from .model import DownloadsFilter, DownloadsModel, queue_key, queue_label
+from .preferences import PreferencesDialog
+from .sidebar import SIDEBAR_WIDTH, Sidebar
 from .table import DownloadTable
-from .theme import Colors, colors_for, icon, logo, palette, stylesheet
+from .theme import Colors, colors_for, icon, logo, palette, stylesheet, tool_icon
+from .tools import (BatchDialog, ChecksumDialog, ImportLinksDialog, LogDialog, LoginDialog, PartsDialog,
+                    ScheduleDialog, TorrentDetailsDialog)
 from .widgets import EmptyState, MessageBar, Toast
 
 if TYPE_CHECKING:
     from .client import DaemonClient
 
-LATER = "Comes with the next update of the new window"  # dialogs arrive in the next step of the Qt work
 EMPTY = {
     "all": ("No downloads", "Add a link, paste one into the search field, or drop it here."),
     "downloading": ("Nothing downloading", "Active, queued and paused downloads appear here."),
@@ -95,12 +99,22 @@ class MainWindow(QMainWindow):
         list_layout = QVBoxLayout(list_box)
         list_layout.setContentsMargins(8, 4, 8, 4)
         list_layout.addWidget(self.stack)
-        body.addWidget(list_box, 1)
         self.details = DetailsPanel(self.colors)
         self.details.action.connect(self._details_action)
-        self.details.hide_requested.connect(lambda: self.details_action.setChecked(False))
         self.details.more_requested.connect(self._row_menu)
-        body.addWidget(self.details)
+        self.details.queue_place = self._queue_place
+        # Dragging the edge resizes the details panel (within its limits); the width is remembered.
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setHandleWidth(4)
+        self.splitter.setChildrenCollapsible(False)
+        self.splitter.addWidget(list_box)
+        self.splitter.addWidget(self.details)
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 0)
+        width = self.settings.value("details_width", PANEL_WIDTH, type=int)
+        self.splitter.setSizes([max(self.width() - SIDEBAR_WIDTH - width, 400), width])
+        self.splitter.splitterMoved.connect(lambda *_: self.settings.setValue("details_width", self.details.width()))
+        body.addWidget(self.splitter, 1)
         column.addLayout(body, 1)
         column.addWidget(self._build_statusbar())
         self.setCentralWidget(central)
@@ -148,11 +162,6 @@ class MainWindow(QMainWindow):
         self.addAction(action)
         return action
 
-    def _later(self, text: str, shortcut: str | None = None) -> QAction:
-        action = self._action(text, lambda: None, shortcut, LATER, enabled=False)
-        action.setData("later")
-        return action
-
     def _build_actions(self) -> None:
         a = self._action
         self.add_action = a("Add link…", self.ask_add, QKeySequence.StandardKey.New, "Add a download (Ctrl+N)")
@@ -167,11 +176,20 @@ class MainWindow(QMainWindow):
         self.start_queue_action = a("Start queue", self.start_queue, tip="Resume the paused downloads in the queue")
         self.stop_queue_action = a("Stop queue", self.stop_queue,
                                    tip="Pause the queued downloads; running ones finish")
-        self.schedule_action = self._later("Schedule…")
-        self.grab_action = self._later("Grab videos…")
-        self.settings_action = self._later("Settings…", "Ctrl+,")
-        self.batch_action = self._later("Batch download…")
-        self.import_links_action = self._later("Import links…")
+        self.schedule_action = a("Schedule…", lambda: self._on_current(self.ask_schedule),
+                                 tip="Download the selected file at set times")
+        self.grab_action = a("Grab videos…", self.grab_videos, "Ctrl+Shift+N",
+                             tip="Download a video from a page link (YouTube and many other sites)")
+        self.settings_action = a("Settings…", self.show_settings, "Ctrl+,", "Settings (Ctrl+,)")
+        self.batch_action = a("Batch download…", self.batch_download,
+                              tip="Download numbered links, e.g. img001.jpg to img100.jpg")
+        self.import_links_action = a("Import links…", self.import_links, tip="Add links from a text file")
+        self.checksum_action = a("Checksum…", lambda: self._on_current(self.show_checksum))
+        self.log_action = a("Diagnostics…", lambda: self._on_current(self.show_log))
+        self.parts_action = a("Parts…", lambda: self._on_current(self.show_parts))
+        self.torrent_action = a("Torrent details…", lambda: self._on_current(self.show_torrent_details))
+        self.login_action = a("Add login…", lambda: self._on_current(self.ask_login),
+                              tip="Save a user name and password for this site")
         self.details_action = a("Details", self._toggle_details, "F9", "Show or hide the details panel")
         self.details_action.setCheckable(True)
         self.details_action.setChecked(self.settings.value("details", True, type=bool))
@@ -199,14 +217,14 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(16, 0, 12, 0)
         layout.setSpacing(4)
         self.logo = QLabel()
-        layout.addWidget(self.logo)
-        brand = QLabel("LDM")
+        layout.addWidget(self.logo, 0, Qt.AlignmentFlag.AlignVCenter)
+        brand = QLabel("LDM")  # as in the design: the name in bold between the logo and the menus
         brand.setObjectName("brand")
-        brand.setContentsMargins(8, 0, 14, 0)
-        layout.addWidget(brand)
+        brand.setContentsMargins(8, 0, 4, 0)  # the first menu adds its own 10px of padding
+        layout.addWidget(brand, 0, Qt.AlignmentFlag.AlignVCenter)
         menubar = QMenuBar()
         menubar.setNativeMenuBar(False)  # the menus sit in the window's own bar, as in the design
-        tasks = menubar.addMenu("&Tasks")
+        tasks = menubar.addMenu("Tasks")
         tasks.addActions([self.add_action, self.batch_action, self.grab_action])
         tasks.addSeparator()
         tasks.addActions([self.import_links_action, self.export_links_action])
@@ -214,19 +232,22 @@ class MainWindow(QMainWindow):
         tasks.addActions([self.export_unfinished_action, self.import_unfinished_action])
         tasks.addSeparator()
         tasks.addAction(self.quit_action)
-        file = menubar.addMenu("&File")
+        file = menubar.addMenu("File")
         file.addActions([self.open_action, self.open_folder_action, self.copy_link_action])
         file.addSeparator()
         file.addActions([self.rename_action, self.move_to_action])
         file.addSeparator()
+        file.addActions([self.checksum_action, self.torrent_action, self.parts_action, self.log_action])
+        file.addSeparator()
         file.addAction(self.delete_action)
-        downloads = menubar.addMenu("&Downloads")
+        downloads = menubar.addMenu("Downloads")
         downloads.addActions([self.resume_action, self.pause_action])
         downloads.addSeparator()
         downloads.addActions([self.resume_all_action, self.pause_all_action, self.start_queue_action,
                               self.stop_queue_action])
         downloads.addSeparator()
-        downloads.addActions([self.move_top_action, self.limit_action, self.schedule_action, self.set_url_action])
+        downloads.addActions([self.move_top_action, self.limit_action, self.schedule_action, self.set_url_action,
+                              self.login_action])
         downloads.addSeparator()
         finish = downloads.addMenu("When all finish")
         self.finish_group = QActionGroup(self)
@@ -237,7 +258,7 @@ class MainWindow(QMainWindow):
             action.setChecked(value == "nothing")
             self.finish_group.addAction(action)
         self.finish_group.triggered.connect(self._finish_chosen)
-        view = menubar.addMenu("&View")
+        view = menubar.addMenu("View")
         view.addAction(self.details_action)
         view.addAction(self.search_action)
         theme = view.addMenu("Appearance")
@@ -256,13 +277,16 @@ class MainWindow(QMainWindow):
                 col, Qt.SortOrder.AscendingOrder if col in (-1, 0) else Qt.SortOrder.DescendingOrder))
         view.addSeparator()
         view.addAction(self.settings_action)
-        help_menu = menubar.addMenu("&Help")
+        help_menu = menubar.addMenu("Help")
         help_menu.addAction(self._action("Keyboard shortcuts", self.show_shortcuts, "Ctrl+?"))
         help_menu.addAction(self._action("Report a problem", lambda: QDesktopServices.openUrl(
             QUrl("https://github.com/adiashishz/LDM/issues"))))
         help_menu.addAction(self.about_action)
         self.menubar = menubar
-        layout.addWidget(menubar)
+        # A menu bar draws its items at the top of its box: keep the box as tall as the items and centred,
+        # so the menus line up with the name beside them.
+        menubar.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        layout.addWidget(menubar, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addStretch(1)
         self.search = QLineEdit()
         self.search.setObjectName("search")
@@ -284,6 +308,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(10, 0, 10, 0)
         layout.setSpacing(2)
         self.tool_buttons: list[tuple[QToolButton, str]] = []
+        self.tool_icons: list[tuple[QAction, str, bool]] = []
         groups = [[(self.add_action, "add", "Add link"), (self.resume_action, "resume", "Resume"),
                    (self.pause_action, "pause", "Pause"), (self.pause_all_action, "pause-all", "Pause all"),
                    (self.delete_action, "delete", "Delete")],
@@ -306,8 +331,9 @@ class MainWindow(QMainWindow):
 
     def _tool_button(self, action: QAction, icon_name: str, label: str, primary: bool = False) -> QToolButton:
         button = QToolButton()
-        button.setDefaultAction(action)
-        button.setText(label)  # shorter than the menu text ("Add link…")
+        action.setIconText(label)  # the button's text: shorter than the menu's ("Add link…")
+        action.setIconVisibleInMenu(False)
+        button.setDefaultAction(action)  # the button shows the action's icon, so the icon lives on the action
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         button.setFixedHeight(52)
         button.setMinimumWidth(70)
@@ -317,6 +343,7 @@ class MainWindow(QMainWindow):
         if primary:
             button.setObjectName("primary")
         self.tool_buttons.append((button, icon_name))
+        self.tool_icons.append((action, icon_name, primary))
         return button
 
     def _build_statusbar(self) -> QWidget:
@@ -348,9 +375,8 @@ class MainWindow(QMainWindow):
         app.setPalette(palette(self.c))
         app.setStyleSheet(stylesheet(self.c))
         self.logo.setPixmap(logo(self.c.accent))
-        for button, icon_name in self.tool_buttons:
-            color = "#FFFFFF" if button.objectName() == "primary" else self.c.fg
-            button.setIcon(icon(icon_name, color if button.isEnabled() else self.c.dim))
+        for action, icon_name, primary in self.tool_icons:
+            action.setIcon(tool_icon(icon_name, "#FFFFFF" if primary else self.c.fg, self.c.dim))
         self.search_icon.setIcon(icon("search", self.c.dim, 14, 2))
         for widget in (self.sidebar, self.details, self.service_bar, self.offer_bar):
             widget.restyle()
@@ -472,8 +498,12 @@ class MainWindow(QMainWindow):
                 (self.resume_action, connected and bool(states & RESUMABLE)),
                 (self.pause_action, connected and bool(states & PAUSABLE)),
                 (self.delete_action, connected and bool(items)),
-                (self.pause_all_action, connected), (self.resume_all_action, connected),
-                (self.start_queue_action, connected), (self.stop_queue_action, connected),
+                # Only when there is something to act on.
+                (self.pause_all_action, connected and any(d.state in PAUSABLE for d in self.downloads)),
+                (self.resume_all_action, connected and any(d.state in RESUMABLE for d in self.downloads)),
+                (self.start_queue_action, connected and any(d.state == "paused" and not d.on_schedule
+                                                            for d in self.downloads)),
+                (self.stop_queue_action, connected and any(d.state == "queued" for d in self.downloads)),
                 (self.open_action, current is not None and current.state in {"done", "seeding"}),
                 (self.open_folder_action, current is not None and bool(current.path)),
                 (self.copy_link_action, bool(items)),
@@ -487,12 +517,18 @@ class MainWindow(QMainWindow):
                 (self.move_to_action, connected and current is not None
                  and current.state in {"queued", "paused", "error", "expired", "changed", "done"}),
                 (self.export_unfinished_action, connected), (self.import_unfinished_action, connected),
+                (self.schedule_action, connected and current is not None
+                 and current.state in {"queued", "running", "paused", "error"}),
+                (self.grab_action, connected), (self.settings_action, connected),
+                (self.batch_action, connected), (self.import_links_action, connected),
+                (self.checksum_action, connected and current is not None and current.state in {"done", "seeding"}),
+                (self.log_action, connected and current is not None),
+                (self.parts_action, connected and current is not None and current.kind == "http"
+                 and current.state in {"queued", "running", "paused", "error", "expired", "changed"}),
+                (self.torrent_action, connected and current is not None and current.kind == "torrent"),
+                (self.login_action, connected and current is not None and current.state == "error"),
                 (self.export_links_action, len(self.downloads) > 0)):
             action.setEnabled(enabled)
-        if hasattr(self, "tool_buttons"):
-            for button, icon_name in self.tool_buttons:
-                color = "#FFFFFF" if button.objectName() == "primary" else self.c.fg
-                button.setIcon(icon(icon_name, color if button.isEnabled() else self.c.dim))
 
     def _update_status(self) -> None:
         downloads = list(self.downloads)
@@ -538,8 +574,18 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         menu.addActions([self.rename_action, self.move_to_action])
         menu.addSeparator()
+        menu.addActions([a for a in (self.checksum_action, self.torrent_action, self.parts_action, self.login_action,
+                                     self.log_action) if a.isEnabled()])
+        menu.addSeparator()
         menu.addAction(self.delete_action)
         menu.exec(position)
+
+    def _queue_place(self, d: Download) -> str:
+        """Where a waiting download is in its queue: "Main queue, 2 of 5"."""
+        key = queue_key(d)
+        waiting = sorted((o for o in self.downloads if o.state == "queued" and queue_key(o) == key),
+                         key=lambda o: (o.position, o.id))
+        return f"{queue_label(key)}, {waiting.index(d) + 1} of {len(waiting)}" if key and d in waiting else ""
 
     def _details_action(self, name: str) -> None:
         d = self.details.download
@@ -686,21 +732,31 @@ class MainWindow(QMainWindow):
 
     # --- adding ---------------------------------------------------------------------------------
 
-    def ask_add(self) -> None:
-        """A plain prompt until the new add dialog arrives (next step of the Qt work)."""
+    def ask_add(self, url: str = "", name: str = "", headers: dict[str, str] | None = None, kind: str = "",
+                captures: list[dict] | None = None) -> AddDialog | None:
+        if not self._need_service():
+            return None
+        dialog = AddDialog(self, self.client, url, name=name, headers=headers, kind=kind, captures=captures,
+                           on_show=self.table.select_id, known=self.downloads.urls())
+        dialog.open()
+        return dialog
+
+    def grab_videos(self) -> None:
+        """The Add dialog in video mode: a page link (YouTube and other sites yt-dlp knows) or a stream."""
         clipboard = QGuiApplication.clipboard().text().strip()
-        url, ok = QInputDialog.getText(self, "Add link", "Link to download (http, https or magnet):",
-                                       text=clipboard if is_url(clipboard) or clipboard.startswith("magnet:") else "")
-        if ok and url.strip():
-            self.request_download(url.strip())
+        fresh = is_url(clipboard) and clipboard not in self.downloads.urls()
+        self.ask_add(clipboard if fresh else "", kind="media")
 
     def request_download(self, url: str, name: str = "", headers: dict[str, str] | None = None,
-                         kind: str = "") -> None:
-        """A link from the search field, the clipboard, a drop or the desktop: checked for duplicates, added."""
-        if not self.client.connected:
-            self.toast("Start the download service first")
+                         kind: str = "", captures: list[dict] | None = None) -> None:
+        """A link from the search field, the clipboard, a drop, the browser or the desktop: the Add dialog, or
+        added at once when "Add without asking" is on (1DM's "skip editor")."""
+        if not self._need_service():
             return
         kind = kind or ("torrent" if url.startswith("magnet:") or url.lower().endswith(".torrent") else "")
+        if not self.service.get("skip_add_dialog"):
+            self.ask_add(url, name, headers, kind, captures)
+            return
         options = {"name": name or None, "headers": headers or None, "kind": kind or None, "start": True}
 
         def add() -> None:
@@ -755,6 +811,69 @@ class MainWindow(QMainWindow):
             event.acceptProposedAction()
             self.request_download(url)
 
+    # --- dialogs --------------------------------------------------------------------------------
+
+    def _need_service(self) -> bool:
+        if not self.client.connected:
+            self.toast("Start the download service first")
+        return self.client.connected
+
+    def show_settings(self) -> None:
+        if self._need_service():
+            dialog = PreferencesDialog(self, self.client)
+            dialog.finished.connect(lambda _r: self._load_service_settings())
+            dialog.open()
+
+    def batch_download(self) -> None:
+        if self._need_service():
+            BatchDialog(self, self.client, self.toast).open()
+
+    def import_links(self) -> None:
+        if not self._need_service():
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Import links", str(Path.home()), "Text files (*.txt);;All files (*)")
+        if not path:
+            return
+        try:
+            links = self.import_link_file(path)
+        except OSError as e:
+            self.toast(f"Could not read the file: {e}")
+            return
+        if not links:
+            self.toast("No links found in that file")
+            return
+        ImportLinksDialog(self, self.client, links, self.downloads.urls(), self.toast).open()
+
+    def ask_schedule(self, d: Download) -> None:
+        def with_row(row, error) -> None:
+            if error:
+                self._report(None, error)
+                return
+            ScheduleDialog(self, d.title, row, self.service, save).open()
+
+        def save(scheduled: bool, window: dict[str, str]) -> None:
+            self.client.set_schedule(d.id, scheduled, window,
+                                     lambda r, e: self._report(r, e) if e else self.refresh(d.id))
+
+        self.client.get(d.id, with_row)
+
+    def show_checksum(self, d: Download) -> None:
+        ChecksumDialog(self, self.client, d.id, d.title).open()
+
+    def show_log(self, d: Download) -> None:
+        LogDialog(self, self.client, d.id, d.title).open()
+
+    def show_parts(self, d: Download) -> None:
+        PartsDialog(self, self.client, d.id, d.title).open()
+
+    def show_torrent_details(self, d: Download) -> None:
+        TorrentDetailsDialog(self, self.client, d.id, d.title, lambda: d.state).open()
+
+    def ask_login(self, d: Download) -> None:
+        host = urlsplit(d.url).hostname or ""
+        LoginDialog(self, host, "", lambda h, user, password, subdomains: self.client.set_login(
+            h, user, password, subdomains, lambda r, e: self._report(r, e) if e else self.resume(d))).open()
+
     # --- import and export ----------------------------------------------------------------------
 
     def export_links(self) -> None:
@@ -791,7 +910,7 @@ class MainWindow(QMainWindow):
                                      self.toast(f"{len(ids)} downloads imported — they are paused"))
 
     def import_link_file(self, path: str) -> list[str]:
-        """Links in a text file (for the import dialog of the next step)."""
+        """Links in a text file, for the import dialog."""
         return parse_link_list(Path(path).read_text(errors="replace"))
 
     def _write(self, path: str, text: str, message: str) -> None:

@@ -7,10 +7,10 @@ import time
 import pytest
 
 pytest.importorskip("PySide6")
-from PySide6.QtCore import QObject, QSettings, Qt, Signal  # noqa: E402
+from PySide6.QtCore import QSettings, Qt  # noqa: E402
 
 from ldm.qt.model import ADDED, NAME, DownloadsFilter, DownloadsModel, queue_key  # noqa: E402
-from ldm.ui.remote import ServiceCalls  # noqa: E402
+from qt_fake import FakeClient  # noqa: E402
 
 MB = 1024 * 1024
 
@@ -44,30 +44,6 @@ def row(i, name, state="queued", size=10 * MB, done=0, speed=0.0, **extra):
 ROWS = [row(1, "a.iso", "running", done=5 * MB, speed=MB), row(2, "b.pdf", "done", done=10 * MB),
         row(3, "c.zip", "paused", done=MB), row(4, "d.mp3", "error", error="boom"),
         row(5, "e.zip", "queued", scheduled=True, schedule_start="01:00", schedule_stop="06:00", schedule_days="")]
-
-
-class FakeClient(QObject, ServiceCalls):
-    added = Signal("qulonglong")
-    removed = Signal("qulonglong")
-    state_changed = Signal("qulonglong", str, str)
-    progress = Signal(object)
-    connected_changed = Signal(bool)
-    connected = True
-
-    def __init__(self, rows):
-        super().__init__()
-        self.rows, self.calls = rows, []
-
-    def _call(self, method, signature, args, callback, timeout=None):
-        self.calls.append((method, args))
-        answers = {"List": self.rows, "GetSettings": {"download_dir": "/tmp", "clipboard_watch": False},
-                   "FindDuplicates": [], "Add": 99, "GetParts": [],
-                   "Get": next((r for r in self.rows if args and r["id"] == args[0]), None)}
-        if callback:
-            callback(answers.get(method), None)
-
-    def close(self):
-        pass
 
 
 def test_model_keeps_queue_order(app):
@@ -167,11 +143,22 @@ def test_actions_follow_the_selection(app, window):
     assert ("Pause", [1]) in window.client.calls
 
 
-def test_pasted_link_is_added(app, window):
+def test_pasted_link_opens_the_add_dialog(app, window):
+    from ldm.qt.add_dialog import AddDialog
+
     window.search.setText("https://example.com/new.iso")
     assert window.proxy.text == ""  # a link is not a search
     window.search.returnPressed.emit()
     assert window.search.text() == ""
+    dialog = window.findChild(AddDialog)
+    assert dialog is not None and dialog.url.text() == "https://example.com/new.iso"
+    dialog.reject()
+
+
+def test_pasted_link_is_added_without_asking(app, window):
+    window.service["skip_add_dialog"] = True
+    window.search.setText("https://example.com/new.iso")
+    window.search.returnPressed.emit()
     assert [m for m, _ in window.client.calls if m in ("FindDuplicates", "Add")] == ["FindDuplicates", "Add"]
     assert window.toast_widget.isVisible() and window.toast_widget.label.text().startswith("Added")
 
@@ -203,3 +190,77 @@ def test_window_with_the_real_service(app, daemon, http_server, tmp_path):
     assert (d.size, d.fraction, d.state_word) == (len(data), 1.0, "Done")
     assert w.sidebar.library["finished"].count == 1
     w.close()
+
+
+def test_toolbar_icons_survive_toggling(app, window):
+    """A toolbar button copies its action's icon whenever the action changes: the icons live on the actions."""
+    button = next(b for b, name in window.tool_buttons if name == "details")
+    for _ in range(2):
+        window.details_action.trigger()
+        assert not button.icon().isNull() and button.text() == "Details"
+    window.table.select_id(3)  # enabling and disabling actions keeps the icons too
+    assert all(not b.icon().isNull() for b, _ in window.tool_buttons)
+
+
+def test_details_panel_resizes_and_remembers(app, window):
+    sizes = window.splitter.sizes()
+    window.splitter.setSizes([sizes[0] - 60, sizes[1] + 60])
+    window.splitter.splitterMoved.emit(0, 1)
+    assert window.settings.value("details_width", type=int) == window.details.width() >= 280
+
+
+def test_add_link_skips_a_copied_link_already_in_the_list(app, window):
+    from PySide6.QtGui import QGuiApplication
+
+    QGuiApplication.clipboard().setText("https://example.com/c.zip")  # in ROWS
+    dialog = window.ask_add()
+    assert dialog.url.text() == ""
+    dialog.reject()
+    QGuiApplication.clipboard().setText("https://example.com/new.zip")
+    dialog = window.ask_add()
+    assert dialog.url.text() == "https://example.com/new.zip"
+    dialog.reject()
+
+
+def test_queue_actions_only_when_something_to_act_on(app, tmp_path):
+    from qt_fake import FakeClient
+
+    from ldm.qt.window import MainWindow
+
+    w = MainWindow(FakeClient([row(1, "a.pdf", "done"), row(2, "b.zip", "error")]),
+                   QSettings(str(tmp_path / "ui.ini"), QSettings.Format.IniFormat))
+    assert not w.pause_all_action.isEnabled() and not w.stop_queue_action.isEnabled()
+    assert not w.start_queue_action.isEnabled() and w.resume_all_action.isEnabled()  # the failed one
+    w.downloads.upsert(row(3, "c.iso", "running"))
+    assert w.pause_all_action.isEnabled()
+    w.close()
+
+
+def test_details_show_queue_place_and_checksum_link(app, window):
+    window.downloads.upsert(row(6, "f.zip", "queued", position=6))
+    window.table.select_id(6)
+
+    def facts():
+        grid = window.details.facts
+        return {grid.itemAtPosition(r, 0).widget().text(): grid.itemAtPosition(r, 1).widget()
+                for r in range(grid.rowCount()) if grid.itemAtPosition(r, 0)}
+
+    assert facts()["Queue"].text() == "Main queue, 1 of 1"
+    assert window.details.parts_label.text().endswith("connections") or window.details.parts_label.text() == "1 connection"
+    window.table.select_id(2)  # finished
+    link = facts()["Checksum"]
+    assert "Calculate" in link.text()
+    opened = []
+    window.show_checksum = opened.append
+    link.linkActivated.emit("checksum")
+    assert opened and opened[0].id == 2
+
+
+def test_paused_video_can_resume(app, window):
+    window.downloads.upsert(row(7, "talk", "paused", kind="media", quality="Best quality"))
+    window.table.select_id(7)
+    grid = window.details.facts
+    facts = {grid.itemAtPosition(r, 0).widget().text(): grid.itemAtPosition(r, 1).widget().text()
+             for r in range(grid.rowCount()) if grid.itemAtPosition(r, 0)}
+    assert facts["Can resume"] == "Yes" and facts["Type"] == "Video, through yt-dlp"
+    assert window.details.strip_box.isHidden()  # yt-dlp doesn't report connections
