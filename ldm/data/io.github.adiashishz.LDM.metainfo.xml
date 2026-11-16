@@ -61,6 +61,16 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.4.0" date="2026-11-16">
+      <description>
+        <ul>
+          <li>A new window, built with Qt: menus and search, a toolbar, a sidebar with categories, queues and a speed graph, and a resizable details panel with each download's connections</li>
+          <li>Every dialog redone: Add, Settings, Schedule, Batch download, Checksum, Torrent details and more</li>
+          <li>Light and dark, following the system or chosen in View → Appearance</li>
+          <li>Ubuntu 24.04 and Linux Mint 22 now use the Flatpak (they lack the Qt libraries LDM needs)</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-11-15">
       <description>
         <ul>

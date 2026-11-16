@@ -38,7 +38,7 @@ release with all the files. Nothing is public until you publish the draft.
    creates the draft release.
 
 6. **Check the draft** on GitHub (Releases): the notes, and that the files are there:
-   `.rpm` (and `.src.rpm`), three `.deb`, the `.flatpak`, `PKGBUILD` and `SRCINFO` for the AUR, the two
+   `.rpm` (and `.src.rpm`), two `.deb` (Debian 13, Ubuntu 26.04), the `.flatpak`, `PKGBUILD` and `SRCINFO` for the AUR, the two
    extension zips, and `SHA256SUMS`.
 
 7. **Publish it.** Publishing also rebuilds the website with links to the new files.
