@@ -1,4 +1,4 @@
-"""DaemonClient (Qt) against the daemon on a private bus."""
+"""DaemonClient (Qt) against the daemon, over D-Bus (a private bus) and over the local channel (its socket)."""
 
 import random
 import shutil
@@ -19,6 +19,18 @@ def app(qt_app):
     return qt_app
 
 
+@pytest.fixture(params=["dbus", "socket"])
+def transport(request):
+    return request.param
+
+
+def connect(transport, bus_address):
+    """A client of the test service over `transport` (the socket: the test's own runtime folder)."""
+    from ldm import channel
+
+    return DaemonClient(bus_address if transport == "dbus" else str(channel.socket_path()), transport=transport)
+
+
 def spin_until(condition, timeout=15.0):
     deadline = time.monotonic() + timeout
     while not condition():
@@ -36,10 +48,10 @@ def call(method, *args):
     return box[0]
 
 
-def test_client_drives_a_download(app, daemon, http_server, tmp_path):
+def test_client_drives_a_download(app, daemon, transport, http_server, tmp_path):
     data = random.Random(4).randbytes(1_000_000)
     cfg, url = http_server(data=data, delay=0.02)
-    client = DaemonClient(daemon)
+    client = connect(transport, daemon)
     spin_until(lambda: client.connected)
 
     added, states, progress = [], [], []
@@ -63,8 +75,8 @@ def test_client_drives_a_download(app, daemon, http_server, tmp_path):
     assert settings["max_parallel"] == 3
 
 
-def test_errors_and_settings(app, daemon):
-    client = DaemonClient(daemon)
+def test_errors_and_settings(app, daemon, transport):
+    client = connect(transport, daemon)
     spin_until(lambda: client.connected)
     _, error = call(client.pause, 99)
     assert (error.name, error.message) == ("NotFound", "no download with id 99")
@@ -77,8 +89,8 @@ def test_errors_and_settings(app, daemon):
     assert rules == [{"host": "example.com", "max_connections": 4, "max_downloads": 1, "include_subdomains": True}]
 
 
-def test_not_connected_without_daemon(app, bus_address):
-    client = DaemonClient(bus_address)
+def test_not_connected_without_daemon(app, bus_address, transport):
+    client = connect(transport, bus_address)
     changes = []
     client.connected_changed.connect(changes.append)
     _, error = call(client.list)
@@ -87,15 +99,15 @@ def test_not_connected_without_daemon(app, bus_address):
     assert error.name == "NotRunning"
 
 
-def test_follows_the_service_starting_and_stopping(app, bus_address, tmp_path):
-    """The window learns when the service appears on the bus and when it goes away."""
+def test_follows_the_service_starting_and_stopping(app, bus_address, transport, tmp_path):
+    """The window learns when the service appears (on the bus, or its socket) and when it goes away."""
     import asyncio
     import threading
 
     from ldm.daemon import serve
     from ldm.passwords import MemoryPasswords
 
-    client = DaemonClient(bus_address)
+    client = connect(transport, bus_address)
     changes = []
     client.connected_changed.connect(changes.append)
 
@@ -129,7 +141,7 @@ def test_no_session_bus(app, tmp_path):
     assert error.name == "NotRunning"
 
 
-def test_torrent_bytes_survive_the_round_trip(app, daemon, http_server, tmp_path):
+def test_torrent_bytes_survive_the_round_trip(app, daemon, transport, http_server, tmp_path):
     lt = pytest.importorskip("libtorrent")
     src = tmp_path / "pack"
     src.mkdir()
@@ -140,7 +152,7 @@ def test_torrent_bytes_survive_the_round_trip(app, daemon, http_server, tmp_path
     lt.set_piece_hashes(ct, str(tmp_path))
     data = lt.bencode(ct.generate())
     cfg, _ = http_server(data=b"", files={"/pack.torrent": data})
-    client = DaemonClient(daemon)
+    client = connect(transport, daemon)
     spin_until(lambda: client.connected)
     info, error = call(client.probe_torrent, f"{cfg.base}/pack.torrent", {})
     assert error is None and info["metadata"] == data

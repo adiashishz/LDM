@@ -22,6 +22,10 @@ def private_folders(tmp_path_factory, monkeypatch):
     folders = tmp_path_factory.mktemp("user-folders")
     monkeypatch.setenv("XDG_DOWNLOAD_DIR", str(folders / "Downloads"))
     monkeypatch.setenv("XDG_DOCUMENTS_DIR", str(folders / "Documents"))
+    # The local channel's socket: never next to the user's running service.
+    (folders / "runtime").mkdir(mode=0o700)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(folders / "runtime"))
+    monkeypatch.delenv("LDM_SOCKET", raising=False)
     # The daily yt-dlp check must not reach GitHub (nothing listens on port 9).
     monkeypatch.setenv("LDM_YTDLP_RELEASES", "http://127.0.0.1:9/releases")
     monkeypatch.setattr("ldm.ytdlp.RELEASES", "http://127.0.0.1:9/releases")
@@ -263,6 +267,14 @@ def daemon(bus_address, tmp_path):
     yield bus_address
     loop.call_soon_threadsafe(stop.set)
     thread.join(10)
+
+
+@pytest.fixture
+def service_socket(daemon):
+    """The running test service's local channel (a Unix socket in the test's own runtime folder)."""
+    from ldm import channel
+
+    return str(channel.socket_path())
 
 
 # --- proxies and DNS-over-HTTPS ---------------------------------------------------------

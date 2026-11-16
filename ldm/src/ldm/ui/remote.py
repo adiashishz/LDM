@@ -190,6 +190,136 @@ def _error(reply: Message) -> DaemonError:
                        message)
 
 
+class SocketRemote:
+    """The same as Remote, over the local channel (ldm.channel) instead of D-Bus: for systems without a
+    session bus, and on Linux when LDM_TRANSPORT=socket. Reconnects when the service starts again."""
+
+    RETRY = 1.0  # seconds between attempts while the service isn't running
+
+    def __init__(self, post: Post, on_connected: Callable[[bool], None],
+                 on_signal: Callable[[str, list[Any]], None], address: str | None = None):
+        from .. import channel
+
+        self.channel = channel
+        self.connected = False
+        self._post, self._on_connected, self._on_signal = post, on_connected, on_signal
+        self._closed = False
+        self._path = Path(address) if address else (channel.tcp_file() if channel.TCP else channel.socket_path())
+        self._writer: asyncio.StreamWriter | None = None
+        self._pending: dict[int, asyncio.Future] = {}
+        self._next_id = 1
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._loop.run_forever, name="ldm-channel", daemon=True)
+        self._thread.start()
+        self._task = asyncio.run_coroutine_threadsafe(self._run(), self._loop)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._loop.call_soon_threadsafe(self._task.cancel)
+        if self._writer is not None:
+            self._loop.call_soon_threadsafe(self._writer.close)
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join(5)
+
+    def call(self, method: str, signature: str, args: list[Any], callback: Callback | None,
+             timeout: float | None = DEFAULT_TIMEOUT) -> None:
+        if not self._closed:
+            asyncio.run_coroutine_threadsafe(self._call(method, unwrap(args), callback, timeout), self._loop)
+
+    def run(self, job: Callable[[MessageBus], Awaitable[Any]], timeout: float = 5.0) -> Any:
+        raise ConnectionError("no session bus on the local channel")
+
+    def submit(self, job: Callable[[MessageBus], Awaitable[Any]]) -> None:
+        pass  # D-Bus jobs (notifications through the bus) have no meaning here
+
+    def post(self, function: Callable[[], None]) -> None:
+        self._deliver(function)
+
+    # --- window's thread -------------------------------------------------------------------
+
+    def _deliver(self, function: Callable[[], None]) -> None:
+        self._post(lambda: None if self._closed else function())
+
+    def _set_connected(self, connected: bool) -> None:
+        if connected != self.connected:
+            self.connected = connected
+            self._on_connected(connected)
+
+    # --- channel thread --------------------------------------------------------------------
+
+    async def _open(self) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        limit = self.channel.MAX_LINE
+        if self.channel.TCP:
+            port, token = self.channel.read_tcp_file(self._path)
+            reader, writer = await asyncio.open_connection("127.0.0.1", port, limit=limit)
+            writer.write(self.channel.encode({"hello": token}))
+            return reader, writer
+        return await asyncio.open_unix_connection(str(self._path), limit=limit)
+
+    async def _run(self) -> None:
+        while not self._closed:
+            try:
+                reader, writer = await self._open()
+            except (OSError, ValueError, KeyError):
+                await asyncio.sleep(self.RETRY)
+                continue
+            self._writer = writer
+            self._deliver(lambda: self._set_connected(True))
+            try:
+                while line := await reader.readline():
+                    try:
+                        self._dispatch(self.channel.decode(line))
+                    except ValueError:
+                        log.info("ignored a message that isn't JSON")
+            except (ConnectionError, asyncio.LimitOverrunError, ValueError) as e:
+                log.info("the service's channel closed: %s", e)
+            self._writer = None
+            writer.close()
+            for future in self._pending.values():
+                if not future.done():
+                    future.set_exception(ConnectionError("the service went away"))
+            self._pending.clear()
+            self._deliver(lambda: self._set_connected(False))
+            await asyncio.sleep(self.RETRY)
+
+    def _dispatch(self, message: dict) -> None:
+        if "signal" in message:
+            name, args = message["signal"], message.get("args") or []
+            self._deliver(lambda: self._on_signal(name, args))
+        elif (future := self._pending.pop(message.get("id"), None)) is not None and not future.done():
+            future.set_result(message)
+
+    async def _call(self, method: str, args: list[Any], callback: Callback | None, timeout: float | None) -> None:
+        result, error = None, None
+        writer = self._writer
+        if writer is None:
+            error = not_running()
+        else:
+            call_id, self._next_id = self._next_id, self._next_id + 1
+            future = self._loop.create_future()
+            self._pending[call_id] = future
+            try:
+                writer.write(self.channel.encode({"id": call_id, "method": method, "params": args}))
+                reply = await asyncio.wait_for(future, timeout)
+            except asyncio.TimeoutError:
+                error = DaemonError("Timeout", "the download service did not answer")
+            except (ConnectionError, OSError):
+                error = not_running()
+            except TypeError as e:  # a value JSON can't carry
+                error = DaemonError("Failed", str(e))
+            else:
+                if "error" in reply:
+                    error = DaemonError(reply["error"].get("name", "Failed"), reply["error"].get("message", ""))
+                else:
+                    result = reply.get("result")
+            finally:
+                self._pending.pop(call_id, None)
+        if callback is not None:
+            self._deliver(lambda: callback(result, error))
+
+
 def start_daemon() -> None:
     """Start `ldm daemon` in its own session so it outlives the window. Raises OSError on failure."""
     log_dir = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "ldm"
