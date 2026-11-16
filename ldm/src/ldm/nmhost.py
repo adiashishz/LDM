@@ -12,6 +12,7 @@ UTF-8 JSON. Requests carry an "id"; replies echo it with "ok": true/false.
 
 import json
 import os
+import shlex
 import shutil
 import socket
 import struct
@@ -158,11 +159,19 @@ def channel_call(method: str, *params):
 def launcher(variable: str, name: str) -> list:
     """How to start `ldm` or `ldm-gui`: LDM_COMMAND / LDM_GUI_COMMAND (installers set these), else on PATH."""
     if os.environ.get(variable):
-        return os.environ[variable].split()
+        return split_command(os.environ[variable])
     found = shutil.which(name)
     if not found:
         raise HostError(f"can't start LDM: {name} not found")
     return [found]
+
+
+def split_command(command: str) -> list:
+    """A command line as its words; "quoted parts" keep their spaces (C:\\Program Files\\…)."""
+    if sys.platform != "win32":
+        return shlex.split(command)
+    return [word[1:-1] if len(word) > 1 and word[0] == word[-1] == '"' else word
+            for word in shlex.split(command, posix=False)]  # posix rules would eat the backslashes
 
 
 def start(arguments: list) -> None:

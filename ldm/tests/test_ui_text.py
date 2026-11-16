@@ -1,5 +1,6 @@
 """Display text and input checks shared by the windows (no toolkit needed)."""
 
+import sys
 from pathlib import Path
 
 from ldm.ui import text
@@ -25,6 +26,9 @@ def test_speed_limits():
 
 def test_short_path():
     home = str(Path.home())
+    if sys.platform == "win32":  # Windows users don't know "~": paths stay as they are
+        assert text.short_path(home + "\\Downloads") == home + "\\Downloads"
+        return
     assert text.short_path(home + "/Downloads") == "~/Downloads"
     assert text.short_path(home) == "~"
     assert text.short_path("/srv/files") == "/srv/files"

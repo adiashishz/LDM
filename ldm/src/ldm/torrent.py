@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Sequence
 from urllib.parse import unquote, urlsplit
+from urllib.request import url2pathname
 
 from . import __version__
 from .engine import DownloadError, ProgressCallback, new_client
@@ -177,7 +178,7 @@ async def read_source(url: str, headers: dict[str, str] | None = None, net: NetC
             response = await client.get(url)
             response.raise_for_status()
             return response.content
-    path = unquote(parts.path) if parts.scheme == "file" else url
+    path = url2pathname(parts.path) if parts.scheme == "file" else url  # Windows: /C:/x -> C:\x
     return Path(path).read_bytes()
 
 
@@ -241,9 +242,11 @@ class TorrentSession:
                 self._waiters.remove(entry)
 
     async def save_resume(self, handle) -> bytes | None:
+        """The torrent's resume data, after its pieces are written to disk (libtorrent 2.1 may still hold
+        downloaded pieces in memory when it reports the torrent finished)."""
         if not handle.is_valid() or not handle.status().has_metadata:
             return None
-        handle.save_resume_data(lt.save_resume_flags_t.save_info_dict)
+        handle.save_resume_data(lt.save_resume_flags_t.save_info_dict | lt.save_resume_flags_t.flush_disk_cache)
         try:
             alert = await self.wait_for(
                 lambda a: isinstance(a, (lt.save_resume_data_alert, lt.save_resume_data_failed_alert))

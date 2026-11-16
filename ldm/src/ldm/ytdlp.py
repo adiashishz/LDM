@@ -42,7 +42,7 @@ def user_copy() -> Path:
 
 def bundled_copy() -> Path | None:
     """The copy a distribution package ships in <data dir>/ldm/yt-dlp/ (searched in XDG_DATA_DIRS), if any."""
-    for data in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":"):
+    for data in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(os.pathsep):
         path = Path(data) / "ldm" / "yt-dlp" / ASSET
         if data and path.is_file():
             return path

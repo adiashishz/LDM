@@ -215,10 +215,10 @@ def test_headers_for_keeps_what_the_browser_sent():
 
 # Stands in for LDM's window on the local channel: registers, then writes the first Add request it gets.
 FAKE_WINDOW = textwrap.dedent("""
-    import json, os, socket, sys
-    path = os.path.join(os.environ["XDG_RUNTIME_DIR"], "ldm", "service.sock")
-    sock = socket.socket(socket.AF_UNIX)
-    sock.connect(path)
+    import json, sys
+    from ldm import nmhost
+    sock = nmhost.channel_open()
+    sock.settimeout(None)
     sock.sendall(b'{"id": 1, "method": "RegisterWindow", "params": []}\\n')
     for line in sock.makefile("rb"):
         message = json.loads(line)
@@ -278,3 +278,12 @@ def test_socket_starts_the_service(bus_address, http_server, tmp_path, monkeypat
     host.close()
     wait_for(lambda: "done" in ldm_list())
     # The started service ends with its bus (the bus_address fixture stops it).
+
+
+def test_launch_commands_keep_quoted_paths():
+    """LDM_COMMAND / LDM_GUI_COMMAND as installers write them: paths with spaces in quotes."""
+    if sys.platform == "win32":
+        assert nmhost.split_command(r'"C:\Program Files\LDM\ldm.exe" --db C:\x.db') == \
+            [r"C:\Program Files\LDM\ldm.exe", "--db", r"C:\x.db"]
+    else:
+        assert nmhost.split_command('"/opt/my apps/ldm" --db /x.db') == ["/opt/my apps/ldm", "--db", "/x.db"]

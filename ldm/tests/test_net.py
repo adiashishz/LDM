@@ -3,6 +3,7 @@
 import asyncio
 import os
 import stat
+import sys
 
 import pytest
 
@@ -229,7 +230,8 @@ def test_password_file_is_private(tmp_path):
     path = tmp_path / "passwords.json"
     store = FilePasswords(path)
     store.set("login", "example.com", "pw")
-    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    if sys.platform != "win32":  # no modes there
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
     assert FilePasswords(path).get("login", "example.com") == "pw"
     store.delete("login", "example.com")
     assert FilePasswords(path).get("login", "example.com") is None
