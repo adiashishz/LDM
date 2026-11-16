@@ -190,3 +190,33 @@ def test_window_with_the_real_service(app, daemon, http_server, tmp_path):
     assert (d.size, d.fraction, d.state_word) == (len(data), 1.0, "Done")
     assert w.sidebar.library["finished"].count == 1
     w.close()
+
+
+def test_toolbar_icons_survive_toggling(app, window):
+    """A toolbar button copies its action's icon whenever the action changes: the icons live on the actions."""
+    button = next(b for b, name in window.tool_buttons if name == "details")
+    for _ in range(2):
+        window.details_action.trigger()
+        assert not button.icon().isNull() and button.text() == "Details"
+    window.table.select_id(3)  # enabling and disabling actions keeps the icons too
+    assert all(not b.icon().isNull() for b, _ in window.tool_buttons)
+
+
+def test_details_panel_resizes_and_remembers(app, window):
+    sizes = window.splitter.sizes()
+    window.splitter.setSizes([sizes[0] - 60, sizes[1] + 60])
+    window.splitter.splitterMoved.emit(0, 1)
+    assert window.settings.value("details_width", type=int) == window.details.width() >= 280
+
+
+def test_add_link_skips_a_copied_link_already_in_the_list(app, window):
+    from PySide6.QtGui import QGuiApplication
+
+    QGuiApplication.clipboard().setText("https://example.com/c.zip")  # in ROWS
+    dialog = window.ask_add()
+    assert dialog.url.text() == ""
+    dialog.reject()
+    QGuiApplication.clipboard().setText("https://example.com/new.zip")
+    dialog = window.ask_add()
+    assert dialog.url.text() == "https://example.com/new.zip"
+    dialog.reject()

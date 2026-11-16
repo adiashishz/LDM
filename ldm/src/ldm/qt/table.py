@@ -15,7 +15,8 @@ from .theme import GROUP_COLORS, Colors
 
 ROW_HEIGHT = 36
 PAD = 10
-WIDTHS = {SIZE: 84, PROGRESS: 164, LEFT: 80, SPEED: 92, ADDED: 112}
+COLUMN = 104  # every column after Name is this wide, so the header reads evenly
+WIDTHS = dict.fromkeys((SIZE, PROGRESS, LEFT, SPEED, ADDED), COLUMN)
 RIGHT = {SIZE, LEFT, SPEED}
 
 
@@ -76,22 +77,22 @@ class RowDelegate(QStyledItemDelegate):
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, title)
 
     def _progress(self, painter: QPainter, rect: QRect, d: Download, c: Colors, selected: bool, font: QFont) -> None:
-        word_width = 66
-        track = QRectF(rect.left(), rect.center().y() - 2, max(rect.width() - word_width - 6, 10), 5)
+        # The bar above, the state word under it: the column stays as narrow as the others.
+        track = QRectF(rect.left(), rect.top() + 9, rect.width(), 4)
         path = QPainterPath()
-        path.addRoundedRect(track, 2.5, 2.5)
+        path.addRoundedRect(track, 2, 2)
         painter.fillPath(path, QColor(255, 255, 255, 90) if selected else QColor(c.track))
         if d.fraction > 0:
             fill = QPainterPath()
-            fill.addRoundedRect(QRectF(track.left(), track.top(), max(track.width() * d.fraction, 5), 5), 2.5, 2.5)
+            fill.addRoundedRect(QRectF(track.left(), track.top(), max(track.width() * d.fraction, 4), 4), 2, 2)
             painter.fillPath(fill, QColor("#FFFFFF") if selected else QColor(c.bar(d.tone)))
         small = QFont(font)
-        small.setPixelSize(12)
+        small.setPixelSize(11)
         painter.setFont(small)
         painter.setPen(QColor("#FFFFFF") if selected else QColor(c.red if d.tone == "bad" else c.dim))
-        word = QRect(rect.right() - word_width, rect.top(), word_width, rect.height())
+        word = QRect(rect.left(), rect.top() + 15, rect.width(), rect.height() - 17)
         painter.drawText(word, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                         painter.fontMetrics().elidedText(d.state_word, Qt.TextElideMode.ElideRight, word_width))
+                         painter.fontMetrics().elidedText(d.state_word, Qt.TextElideMode.ElideRight, rect.width()))
 
 
 class DownloadTable(QTableView):

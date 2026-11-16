@@ -33,7 +33,8 @@ PROBE_DELAY_MS = 600
 class AddDialog(Dialog):
     def __init__(self, parent: QWidget, client, url: str = "", name: str = "", headers: dict[str, str] | None = None,
                  kind: str = "", captures: list[dict[str, Any]] | None = None,
-                 on_show: Callable[[int], None] | None = None, on_added: Callable[[int], None] | None = None):
+                 on_show: Callable[[int], None] | None = None, on_added: Callable[[int], None] | None = None,
+                 known: list[str] | None = None):
         super().__init__(parent, "Grab videos" if kind == "media" and not url else "Add download", width=600,
                          height=720)
         self.client, self.on_show, self.on_added = client, on_show, on_added
@@ -158,8 +159,9 @@ class AddDialog(Dialog):
         if url:
             self._probe()
         else:
+            # A copied link, unless it is already in the list (e.g. the one just downloaded).
             clip = QGuiApplication.clipboard().text().strip()
-            if is_url(clip) or is_torrent_link(clip):
+            if (is_url(clip) or is_torrent_link(clip)) and clip not in set(known or ()):
                 self.url.set_text(clip)  # starts the check
         self._validate()
 

@@ -17,6 +17,7 @@ from ..ui.text import describe_window, short_path
 from .theme import Colors, icon
 
 PANEL_WIDTH = 320
+PANEL_MIN, PANEL_MAX = 280, 520
 MAX_SEGMENTS = 32
 
 # The main button per state: (label, action name, red)
@@ -66,17 +67,16 @@ class Bar(QWidget):
 
 
 class DetailsPanel(QFrame):
-    """`action(name)` asks the window to act on the shown download (pause, resume, open_file, …);
-    `hide_requested` closes the panel."""
+    """`action(name)` asks the window to act on the shown download (pause, resume, open_file, …)."""
 
     action = Signal(str)
-    hide_requested = Signal()
     more_requested = Signal(object)  # global position for the download's menu
 
     def __init__(self, colors: Callable[[], Colors]):
         super().__init__()
         self.setObjectName("details")
-        self.setFixedWidth(PANEL_WIDTH)
+        self.setMinimumWidth(PANEL_MIN)
+        self.setMaximumWidth(PANEL_MAX)
         self.colors = colors
         self.download: Download | None = None
         self.parts: list[dict[str, Any]] = []
@@ -88,17 +88,11 @@ class DetailsPanel(QFrame):
         head.setObjectName("detailshead")
         head.setFixedHeight(44)
         head_layout = QHBoxLayout(head)
-        head_layout.setContentsMargins(18, 0, 8, 0)
+        head_layout.setContentsMargins(18, 0, 18, 0)
         title = QLabel("Details")
         title.setStyleSheet("font-weight: 600")
         head_layout.addWidget(title)
         head_layout.addStretch(1)
-        self.hide_button = QToolButton()
-        self.hide_button.setToolTip("Hide details")
-        self.hide_button.setAccessibleName("Hide details")
-        self.hide_button.setFixedSize(30, 30)
-        self.hide_button.clicked.connect(self.hide_requested)
-        head_layout.addWidget(self.hide_button)
         outer.addWidget(head)
 
         self.empty = QLabel("Select a download to see its progress, connections and details.")
@@ -191,7 +185,6 @@ class DetailsPanel(QFrame):
 
     def restyle(self) -> None:
         c = self.colors()
-        self.hide_button.setIcon(icon("chevron-right", c.dim, 15, 2))
         self.more.setIcon(icon("more", c.fg, 18, 2.6))
         self.more.setStyleSheet(f"QToolButton {{ border: 1px solid {c.line}; background: {c.card}; }}")
         self.show_download(self.download)

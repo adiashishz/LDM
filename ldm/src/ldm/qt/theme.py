@@ -111,6 +111,13 @@ def icon(name: str, color: str, size: int = 20, width: float = 1.8) -> QIcon:
     return QIcon(svg_pixmap(svg, size))
 
 
+def tool_icon(name: str, color: str, disabled: str, size: int = 20) -> QIcon:
+    """A toolbar icon with its greyed-out look for when the action can't be used."""
+    result = icon(name, color, size)
+    result.addPixmap(icon(name, disabled, size).pixmap(size, size), QIcon.Mode.Disabled)
+    return result
+
+
 def logo(accent: str, size: int = 20) -> QPixmap:
     return svg_pixmap(LOGO.format(accent=accent), size)
 
@@ -198,6 +205,7 @@ QMainWindow, #central {{ background: {c.win}; }}
 #toolbar QToolButton#primary:hover {{ background: {QColor(c.accent).darker(110).name()}; }}
 #toolbar QToolButton#primary:disabled {{ background: {c.track}; color: {c.dim}; }}
 #toolsep {{ background: {c.line}; }}
+QSplitter::handle {{ background: transparent; }}
 #sidebar {{ background: {c.side}; border-right: 1px solid {c.line}; }}
 #sidebar QLabel#section {{ color: {c.dim}; font-size: 11px; font-weight: 600; }}
 #speedcard {{ background: {c.card}; border: 1px solid {c.line}; border-radius: 12px; }}

@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 from PySide6.QtCore import QSettings, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
-                               QMainWindow, QMenu, QMenuBar, QMessageBox, QStackedWidget, QToolButton,
+                               QMainWindow, QMenu, QMenuBar, QMessageBox, QSplitter, QStackedWidget, QToolButton,
                                QVBoxLayout, QWidget)
 
 from .. import __version__
@@ -28,12 +28,12 @@ from ..ui.item import CATEGORIES, LIBRARY, Download
 from ..ui.states import FINISH_ACTIONS, PAUSABLE, RESUMABLE
 from ..ui.text import is_url, limit_text, short_path
 from .add_dialog import AddDialog
-from .details import DetailsPanel
+from .details import PANEL_WIDTH, DetailsPanel
 from .model import DownloadsFilter, DownloadsModel, queue_label
 from .preferences import PreferencesDialog
-from .sidebar import Sidebar
+from .sidebar import SIDEBAR_WIDTH, Sidebar
 from .table import DownloadTable
-from .theme import Colors, colors_for, icon, logo, palette, stylesheet
+from .theme import Colors, colors_for, icon, logo, palette, stylesheet, tool_icon
 from .tools import (BatchDialog, ChecksumDialog, ImportLinksDialog, LogDialog, LoginDialog, PartsDialog,
                     ScheduleDialog, TorrentDetailsDialog)
 from .widgets import EmptyState, MessageBar, Toast
@@ -99,12 +99,21 @@ class MainWindow(QMainWindow):
         list_layout = QVBoxLayout(list_box)
         list_layout.setContentsMargins(8, 4, 8, 4)
         list_layout.addWidget(self.stack)
-        body.addWidget(list_box, 1)
         self.details = DetailsPanel(self.colors)
         self.details.action.connect(self._details_action)
-        self.details.hide_requested.connect(lambda: self.details_action.setChecked(False))
         self.details.more_requested.connect(self._row_menu)
-        body.addWidget(self.details)
+        # Dragging the edge resizes the details panel (within its limits); the width is remembered.
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setHandleWidth(4)
+        self.splitter.setChildrenCollapsible(False)
+        self.splitter.addWidget(list_box)
+        self.splitter.addWidget(self.details)
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 0)
+        width = self.settings.value("details_width", PANEL_WIDTH, type=int)
+        self.splitter.setSizes([max(self.width() - SIDEBAR_WIDTH - width, 400), width])
+        self.splitter.splitterMoved.connect(lambda *_: self.settings.setValue("details_width", self.details.width()))
+        body.addWidget(self.splitter, 1)
         column.addLayout(body, 1)
         column.addWidget(self._build_statusbar())
         self.setCentralWidget(central)
@@ -207,11 +216,9 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(16, 0, 12, 0)
         layout.setSpacing(4)
         self.logo = QLabel()
+        self.logo.setToolTip("LDM")
+        self.logo.setContentsMargins(0, 0, 10, 0)
         layout.addWidget(self.logo)
-        brand = QLabel("LDM")
-        brand.setObjectName("brand")
-        brand.setContentsMargins(8, 0, 14, 0)
-        layout.addWidget(brand)
         menubar = QMenuBar()
         menubar.setNativeMenuBar(False)  # the menus sit in the window's own bar, as in the design
         tasks = menubar.addMenu("&Tasks")
@@ -295,6 +302,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(10, 0, 10, 0)
         layout.setSpacing(2)
         self.tool_buttons: list[tuple[QToolButton, str]] = []
+        self.tool_icons: list[tuple[QAction, str, bool]] = []
         groups = [[(self.add_action, "add", "Add link"), (self.resume_action, "resume", "Resume"),
                    (self.pause_action, "pause", "Pause"), (self.pause_all_action, "pause-all", "Pause all"),
                    (self.delete_action, "delete", "Delete")],
@@ -317,8 +325,9 @@ class MainWindow(QMainWindow):
 
     def _tool_button(self, action: QAction, icon_name: str, label: str, primary: bool = False) -> QToolButton:
         button = QToolButton()
-        button.setDefaultAction(action)
-        button.setText(label)  # shorter than the menu text ("Add link…")
+        action.setIconText(label)  # the button's text: shorter than the menu's ("Add link…")
+        action.setIconVisibleInMenu(False)
+        button.setDefaultAction(action)  # the button shows the action's icon, so the icon lives on the action
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         button.setFixedHeight(52)
         button.setMinimumWidth(70)
@@ -328,6 +337,7 @@ class MainWindow(QMainWindow):
         if primary:
             button.setObjectName("primary")
         self.tool_buttons.append((button, icon_name))
+        self.tool_icons.append((action, icon_name, primary))
         return button
 
     def _build_statusbar(self) -> QWidget:
@@ -359,9 +369,8 @@ class MainWindow(QMainWindow):
         app.setPalette(palette(self.c))
         app.setStyleSheet(stylesheet(self.c))
         self.logo.setPixmap(logo(self.c.accent))
-        for button, icon_name in self.tool_buttons:
-            color = "#FFFFFF" if button.objectName() == "primary" else self.c.fg
-            button.setIcon(icon(icon_name, color if button.isEnabled() else self.c.dim))
+        for action, icon_name, primary in self.tool_icons:
+            action.setIcon(tool_icon(icon_name, "#FFFFFF" if primary else self.c.fg, self.c.dim))
         self.search_icon.setIcon(icon("search", self.c.dim, 14, 2))
         for widget in (self.sidebar, self.details, self.service_bar, self.offer_bar):
             widget.restyle()
@@ -510,10 +519,6 @@ class MainWindow(QMainWindow):
                 (self.login_action, connected and current is not None and current.state == "error"),
                 (self.export_links_action, len(self.downloads) > 0)):
             action.setEnabled(enabled)
-        if hasattr(self, "tool_buttons"):
-            for button, icon_name in self.tool_buttons:
-                color = "#FFFFFF" if button.objectName() == "primary" else self.c.fg
-                button.setIcon(icon(icon_name, color if button.isEnabled() else self.c.dim))
 
     def _update_status(self) -> None:
         downloads = list(self.downloads)
@@ -715,14 +720,15 @@ class MainWindow(QMainWindow):
         if not self._need_service():
             return None
         dialog = AddDialog(self, self.client, url, name=name, headers=headers, kind=kind, captures=captures,
-                           on_show=self.table.select_id)
+                           on_show=self.table.select_id, known=self.downloads.urls())
         dialog.open()
         return dialog
 
     def grab_videos(self) -> None:
         """The Add dialog in video mode: a page link (YouTube and other sites yt-dlp knows) or a stream."""
         clipboard = QGuiApplication.clipboard().text().strip()
-        self.ask_add(clipboard if is_url(clipboard) else "", kind="media")
+        fresh = is_url(clipboard) and clipboard not in self.downloads.urls()
+        self.ask_add(clipboard if fresh else "", kind="media")
 
     def request_download(self, url: str, name: str = "", headers: dict[str, str] | None = None,
                          kind: str = "", captures: list[dict] | None = None) -> None:
