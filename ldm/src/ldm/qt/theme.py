@@ -115,6 +115,14 @@ def logo(accent: str, size: int = 20) -> QPixmap:
     return svg_pixmap(LOGO.format(accent=accent), size)
 
 
+_current = LIGHT
+
+
+def current() -> Colors:
+    """The colours in use (for widgets that paint themselves)."""
+    return _current
+
+
 def system_is_dark() -> bool:
     hints = QGuiApplication.styleHints()
     return hints.colorScheme() == Qt.ColorScheme.Dark
@@ -122,8 +130,10 @@ def system_is_dark() -> bool:
 
 def colors_for(choice: str) -> Colors:
     """`choice`: "system", "light" or "dark"."""
+    global _current
     dark = system_is_dark() if choice == "system" else choice == "dark"
-    return DARK if dark else LIGHT
+    _current = DARK if dark else LIGHT
+    return _current
 
 
 def ui_font() -> QFont:
@@ -149,7 +159,27 @@ def palette(c: Colors) -> QPalette:
     return p
 
 
+def arrow_files(color: str) -> dict[str, str]:
+    """Small up/down arrow images for spin and combo boxes (Qt style sheets take images only from files)."""
+    from pathlib import Path
+
+    from PySide6.QtCore import QStandardPaths
+
+    folder = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation) or ".") / "icons"
+    folder.mkdir(parents=True, exist_ok=True)
+    files = {}
+    for name, points in (("up", "2,7 6,3 10,7"), ("down", "2,4 6,8 10,4")):
+        path = folder / f"arrow-{name}-{color.lstrip('#')}.svg"
+        if not path.exists():
+            path.write_text(f'<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12">'
+                            f'<polyline points="{points}" fill="none" stroke="{color}" stroke-width="1.6" '
+                            f'stroke-linecap="round" stroke-linejoin="round"/></svg>')
+        files[name] = path.as_posix()
+    return files
+
+
 def stylesheet(c: Colors) -> str:
+    arrows = arrow_files(c.dim)
     return f"""
 QMainWindow, #central {{ background: {c.win}; }}
 #topbar {{ background: {c.chrome}; }}
@@ -217,5 +247,43 @@ QScrollBar:vertical {{ background: transparent; width: 10px; margin: 0; }}
 QScrollBar::handle:vertical {{ background: {c.track}; border-radius: 4px; min-height: 30px; margin: 2px; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
+QDialog#dialog, #page, #pagebody {{ background: {c.side}; }}
+#footer {{ background: {c.chrome}; border-top: 1px solid {c.line}; }}
+#card {{ background: {c.card}; border: 1px solid {c.line}; border-radius: 10px; }}
+#rowline {{ background: {c.line}; }}
+#rowtitle {{ color: {c.fg}; }}
+#rowsub {{ color: {c.dim}; font-size: 12px; }}
+#cardtitle {{ color: {c.fg}; font-weight: 600; }}
+#foldbody {{ background: transparent; }}
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit {{ background: {c.field}; color: {c.fg};
+    border: 1px solid transparent; border-radius: 7px; padding: 5px 8px; selection-background-color: {c.accent}; }}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QPlainTextEdit:focus {{
+    border: 1px solid {c.accent}; }}
+QLineEdit[error="true"] {{ border: 1px solid {c.red}; }}
+QComboBox {{ padding-right: 26px; }}
+QComboBox::drop-down {{ border: 0; width: 24px; subcontrol-origin: padding; subcontrol-position: center right; }}
+QComboBox::down-arrow {{ image: url({arrows["down"]}); width: 12px; height: 12px; }}
+QSpinBox, QDoubleSpinBox {{ padding-right: 22px; }}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-origin: padding; subcontrol-position: top right;
+    width: 20px; border: 0; background: transparent; }}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-origin: padding; subcontrol-position: bottom right;
+    width: 20px; border: 0; background: transparent; }}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url({arrows["up"]}); width: 10px; height: 10px; }}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url({arrows["down"]}); width: 10px; height: 10px; }}
+QComboBox QAbstractItemView {{ background: {c.card}; color: {c.fg}; border: 1px solid {c.line};
+    selection-background-color: {c.press}; selection-color: {c.fg}; outline: 0; }}
+QPushButton {{ background: {c.card}; color: {c.fg}; border: 1px solid {c.line}; border-radius: 8px;
+    padding: 6px 14px; }}
+QPushButton:hover {{ background: {c.press}; }}
+QPushButton:disabled {{ color: {c.dim}; }}
+QPushButton#primary {{ background: {c.accent}; color: #FFFFFF; border: 0; font-weight: 600; }}
+QPushButton#primary:disabled {{ background: {c.track}; color: {c.dim}; }}
+QPushButton#day {{ padding: 5px 0; }}
+QPushButton#day:checked {{ background: {c.accent}; color: #FFFFFF; border: 0; }}
+#badge {{ font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9px; color: {c.dim}; }}
+#badge[tone="accent"] {{ color: {c.accent}; background: {c.field}; }}
+#badge[tone="good"] {{ color: {c.green}; background: {c.field}; }}
+#badge[tone="warn"] {{ color: {c.red}; background: {c.field}; }}
+QCheckBox {{ color: {c.fg}; spacing: 8px; }}
 QToolTip {{ background: {c.card}; color: {c.fg}; border: 1px solid {c.line}; padding: 4px 6px; }}
 """
