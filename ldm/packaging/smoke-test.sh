@@ -5,7 +5,7 @@
 # (the installed activation file) finishes.
 set -eu
 WORK=$(mktemp -d)
-trap 'kill "$SERVER" 2>/dev/null || true; rm -rf "$WORK"' EXIT
+trap 'kill "${SERVER:-}" 2>/dev/null || true; rm -rf "$WORK"' EXIT
 export HOME="$WORK/home" XDG_DOWNLOAD_DIR="$WORK/Downloads"
 mkdir -p "$HOME" "$XDG_DOWNLOAD_DIR" "$WORK/www"
 

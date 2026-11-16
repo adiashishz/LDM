@@ -94,12 +94,16 @@ def portal_proxies(url: str, timeout: float = 10.0) -> list[str]:
     try:
         from jeepney import DBusAddress, new_method_call
         from jeepney.io.blocking import open_dbus_connection
+        from jeepney.low_level import MessageFlag
     except ImportError:
         return []
     try:
         with open_dbus_connection(bus="SESSION") as connection:
             message = new_method_call(DBusAddress(PORTAL[1], bus_name=PORTAL[0], interface=PORTAL[2]),
                                       "Lookup", "s", (url,))
+            # Only a portal that runs already (it always does on a desktop and for a Flatpak): starting
+            # one where there is no desktop (a container, an SSH session) hangs until the timeout.
+            message.header.flags |= MessageFlag.no_auto_start
             reply = connection.send_and_get_reply(message, timeout=timeout)
     except Exception as e:  # no session bus or no portal
         log.debug("portal proxy lookup failed: %s", e)

@@ -294,6 +294,20 @@ jobs:
       - name: Install the bundle
         run: flatpak install -y --noninteractive --system dist/ldm.flatpak
 
+      - name: The window's libraries load with the app's own runtime
+        # As users run it (no --devel): PySide6 from the base app against the runtime's Qt.
+        run: |
+          flatpak run --command=python3 io.github.adiashishz.LDM -c \
+            'import PySide6, PySide6.QtCore, PySide6.QtWidgets, PySide6.QtSvg; print("PySide6", PySide6.__version__, "Qt", PySide6.QtCore.qVersion())'
+
+      - name: Install the current SDK
+        # The smoke test needs the SDK's dbus-run-session (--devel). The image's SDK can be older than the
+        # runtime the bundle brought, and the base app's PySide6 needs the current Qt: install the current SDK
+        # for this user (updating the image's own copy fails on its filesystem); flatpak looks there first.
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y --noninteractive flathub org.kde.Sdk//6.11
+
       - name: Smoke test inside the sandbox
         # The SDK (--devel) brings dbus-run-session; the app's own files are what's tested.
         run: |

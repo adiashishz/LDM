@@ -318,3 +318,25 @@ def test_system_proxy_from_the_portal(bus_address, monkeypatch):
     assert net.system_proxy("https://local.example/file") is None
     monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
     assert net.portal_proxies("https://example.com/") == []  # no portal: environment variables still apply
+
+
+@pytest.mark.skipif(__import__("shutil").which("dbus-daemon") is None, reason="dbus-daemon not installed")
+def test_portal_lookup_never_starts_a_portal(tmp_path, monkeypatch):
+    """Where the portal could be started but isn't running (a container), asking must not start it."""
+    import subprocess
+    import time
+
+    services = tmp_path / "data" / "dbus-1" / "services"
+    services.mkdir(parents=True)
+    (services / "org.freedesktop.portal.Desktop.service").write_text(
+        "[D-BUS Service]\nName=org.freedesktop.portal.Desktop\nExec=/bin/sleep 60\n")
+    bus = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--print-address"], stdout=subprocess.PIPE,
+                           text=True, env={**os.environ, "XDG_DATA_HOME": str(tmp_path / "data")})
+    try:
+        monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", bus.stdout.readline().strip())
+        started = time.monotonic()
+        assert net.portal_proxies("https://example.com/", timeout=5) == []
+        assert time.monotonic() - started < 2
+    finally:
+        bus.terminate()
+        bus.wait()
