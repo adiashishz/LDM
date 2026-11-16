@@ -12,9 +12,12 @@
 #   - Keeping the computer awake uses the Inhibit portal; suspend/power off when done is not offered.
 #   - The browser bridge is a launcher written by `ldm install-browser-integration` on the host.
 app-id: io.github.adiashishz.LDM
-runtime: org.gnome.Platform
-runtime-version: "51"
-sdk: org.gnome.Sdk
+# The window is Qt (PySide6): the KDE runtime with Qt's PySide base app on top.
+runtime: org.kde.Platform
+runtime-version: "6.11"
+sdk: org.kde.Sdk
+base: io.qt.PySide.BaseApp
+base-version: "6.11"
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.node24
 command: ldm-gui
@@ -39,6 +42,11 @@ finish-args:
   # Inhibit portal, and "suspend / power off when done" is not offered in the Flatpak.)
   - --system-talk-name=org.freedesktop.NetworkManager
   - --system-talk-name=org.freedesktop.UPower
+build-options:
+  env:
+    BASEAPP_REMOVE_WEBENGINE: "1"  # LDM doesn't use Qt WebEngine (a whole Chromium): the cleanup drops it
+cleanup-commands:
+  - /app/cleanup-BaseApp.sh  # drops PySide's tools, and Qt WebEngine (above)
 cleanup:
   - /include
   - /lib/pkgconfig

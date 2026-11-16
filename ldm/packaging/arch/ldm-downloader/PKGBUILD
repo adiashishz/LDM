@@ -4,16 +4,17 @@
 pkgname=ldm-downloader
 pkgver=0.3.0
 pkgrel=1
-pkgdesc="Download manager for files, videos and torrents, with a browser extension (GTK 4)"
+pkgdesc="Download manager for files, videos and torrents, with a browser extension (Qt)"
 arch=('any')
 url="https://github.com/adiashishz/LDM"
 license=('MIT')
-depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'python-httpx' 'python-socksio' 'python-dbus-fast'
+depends=('python' 'pyside6' 'qt6-svg' 'python-httpx' 'python-socksio' 'python-dbus-fast'
          'python-dnspython' 'python-secretstorage' 'python-cryptography' 'yt-dlp' 'ffmpeg' 'glib2'
-         'pango' 'python-httpcore' 'hicolor-icon-theme')
+         'python-httpcore' 'hicolor-icon-theme')
 makedepends=('python-build' 'python-installer' 'python-hatchling')
 checkdepends=('python-pytest' 'dbus' 'libtorrent-rasterbar')
-optdepends=('libtorrent-rasterbar: torrents'
+optdepends=('qt6-wayland: the window on Wayland without XWayland'
+            'libtorrent-rasterbar: torrents'
             'nodejs: YouTube (yt-dlp needs a JavaScript runtime)'
             'deno: YouTube (yt-dlp needs a JavaScript runtime)'
             'wl-clipboard: copied-link prompt on Wayland'
@@ -38,9 +39,9 @@ check() {
   local site=$(python -c "import site; print(site.getsitepackages()[0])")
   rm -rf test-install
   python -m installer --destdir=test-install dist/*.whl
-  # GUI tests need a display; everything else runs offline against local servers and private buses.
+  # Everything runs offline against local servers and private buses; the window is drawn offscreen.
   PATH="$PWD/test-install/usr/bin:$PATH" PYTHONPATH="$PWD/test-install$site" \
-    python -m pytest -k "not gui" -p no:cacheprovider
+    python -m pytest -p no:cacheprovider
 }
 
 package() {

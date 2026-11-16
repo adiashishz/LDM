@@ -1,4 +1,4 @@
-# Run LDM's tests on each supported distribution, with that distribution's GTK, libadwaita, Python
+# Run LDM's tests on each supported distribution, with that distribution's Qt (PySide6), Python
 # and Python packages. pip only fills in what the distribution lacks or ships too old, and the job lists
 # those packages: they are what the distribution package has to bundle or depend on differently.
 name: CI
@@ -32,7 +32,6 @@ jobs:
         include:
           - { name: Fedora 44,        image: "fedora:44",     family: fedora }
           - { name: Debian 13,        image: "debian:trixie", family: debian }
-          - { name: Ubuntu 24.04 LTS, image: "ubuntu:24.04",  family: debian }
           - { name: Ubuntu 26.04 LTS, image: "ubuntu:26.04",  family: debian }
           - { name: Arch Linux,       image: "archlinux:latest", family: arch }
     steps:
@@ -61,28 +60,20 @@ jobs:
         run: |
           runuser -u tester -- ldm/.venv/bin/python - <<'EOF'
           import sys
-          import gi
-          gi.require_version("Gtk", "4.0"); gi.require_version("Adw", "1")
-          from gi.repository import Adw, Gtk
-          print("Python    ", sys.version.split()[0])
-          print("GTK       ", ".".join(map(str, (Gtk.get_major_version(), Gtk.get_minor_version(), Gtk.get_micro_version()))))
-          print("libadwaita", ".".join(map(str, (Adw.get_major_version(), Adw.get_minor_version(), Adw.get_micro_version()))))
-          print("PyGObject ", gi.__version__)
-          try:
-              import PySide6
-              print("PySide6   ", PySide6.__version__)
-          except ImportError:
-              print("PySide6    (not packaged)")
+          import PySide6
+          from PySide6.QtCore import qVersion
+          print("Python ", sys.version.split()[0])
+          print("Qt     ", qVersion())
+          print("PySide6", PySide6.__version__)
           EOF
           echo "Installed by pip because the distribution's is missing or too old:"
           runuser -u tester -- ldm/.venv/bin/python -m pip list --local --exclude-editable --format=freeze | grep -v '^pip=' || echo "  (none)"
 
       - name: Tests
-        env:
-          GSK_RENDERER: cairo  # software rendering: the containers have no GL driver for Xvfb
+        # The window's tests draw it offscreen: no display needed.
         run: |
           cd ldm
-          runuser -u tester -- xvfb-run -a .venv/bin/python -m pytest -q -rs
+          runuser -u tester -- .venv/bin/python -m pytest -q -rs
 
       - name: Install the data files and validate them
         run: |
@@ -100,7 +91,6 @@ jobs:
       matrix:
         include:
           - { name: Debian 13,        image: "debian:trixie", id: debian13,    suffix: "~deb13" }
-          - { name: Ubuntu 24.04 LTS, image: "ubuntu:24.04",  id: ubuntu2404,  suffix: "~ubuntu24.04" }
           - { name: Ubuntu 26.04 LTS, image: "ubuntu:26.04",  id: ubuntu2604,  suffix: "~ubuntu26.04" }
     steps:
       - name: Install the packaging tools
@@ -136,7 +126,6 @@ jobs:
       matrix:
         include:
           - { name: Debian 13,        image: "debian:trixie", id: debian13 }
-          - { name: Ubuntu 24.04 LTS, image: "ubuntu:24.04",  id: ubuntu2404 }
           - { name: Ubuntu 26.04 LTS, image: "ubuntu:26.04",  id: ubuntu2604 }
     steps:
       - uses: actions/checkout@v4
@@ -227,15 +216,17 @@ jobs:
     name: Flatpak
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.11
       options: --privileged
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the Node.js SDK extension
+      - name: Install the PySide base app and the Node.js SDK extension
         # Installed explicitly: updating the SDK that ships in the image fails on its filesystem.
-        run: flatpak install -y --noninteractive --system flathub org.freedesktop.Sdk.Extension.node24//26.08
+        run: |
+          flatpak install -y --noninteractive --system flathub io.qt.PySide.BaseApp//6.11 \
+            org.freedesktop.Sdk.Extension.node24//25.08
 
       - name: Restore the build cache
         id: cache
@@ -287,7 +278,7 @@ jobs:
     needs: flatpak
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.11
       options: --privileged
     timeout-minutes: 20
     steps:

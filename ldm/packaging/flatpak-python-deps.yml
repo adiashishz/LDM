@@ -30,12 +30,12 @@ sources:
     sha256: 79def8d059362e7831389ed3be0ecdf58a89386e1271e35dd9f5af84e81bffd0
     only-arches: [aarch64]
   - type: file
-    url: https://files.pythonhosted.org/packages/3b/a7/ec412544064624f12681113debf1a991293e9632bd0125a03a8e652d00e8/dbus_fast-5.2.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
-    sha256: 7c66b094e96c221b877ccd6627bc3b9d808ac8317a8f6adc1cb2a0223e7d64e2
+    url: https://files.pythonhosted.org/packages/7c/8d/8faf59c288feabba6545998de9c7748c8f995ec953a7b6a07e2c7f84cba4/dbus_fast-5.2.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+    sha256: da7835ccc6e8cb2b54516558097156da6dbf6636c27033b427135bad693317fb
     only-arches: [x86_64]
   - type: file
-    url: https://files.pythonhosted.org/packages/f5/4c/cdb494b0aadaf99c970f6baca4a3156506b6ffe9a6061ea2c725b214fea5/dbus_fast-5.2.0-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl
-    sha256: 0a772708d25c11e980642781f603882e3dc51b5767be19075ffc5a484c4d3411
+    url: https://files.pythonhosted.org/packages/09/f6/5af4fe51007d99801affbac6e9a9231c5a75ba4d410e569ec5fa3987cf24/dbus_fast-5.2.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl
+    sha256: f0c3d3f153fbcdaae27409afe7ac42654ed768c8de2da35aa929ba4143935455
     only-arches: [aarch64]
   - type: file
     url: https://files.pythonhosted.org/packages/1e/0c/5346358b3a20275d256978c35203ddc2c8617f78c1b23795b79ba22ced6d/dnspython-2.9.2-py3-none-any.whl

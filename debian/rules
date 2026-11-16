@@ -4,14 +4,14 @@
 
 export PYBUILD_NAME = ldm
 export PYBUILD_SYSTEM = pyproject
-# GUI tests need a display; everything else runs offline against local servers and private buses.
+# Everything runs offline against local servers and private buses; the window is drawn offscreen.
 # The tests import yt-dlp: they use the bundled copy, the way the installed package does. (A custom
 # command, because debhelper clears XDG_DATA_DIRS from the environment.) pybuild points http_proxy at
 # a dead address to keep builds offline, which yt-dlp also applies to the tests' servers on 127.0.0.1:
 # the tests never use the internet (and build machines have none), so they run without it.
 export PYBUILD_TEST_CUSTOM = 1
 export PYBUILD_TEST_ARGS = cd {build_dir} && env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
-	XDG_DATA_DIRS=$(CURDIR)/debian/.ytdlp:/usr/share {interpreter} -m pytest -k "not gui" -p no:cacheprovider
+	XDG_DATA_DIRS=$(CURDIR)/debian/.ytdlp:/usr/share {interpreter} -m pytest -p no:cacheprovider
 
 DESTDIR = $(CURDIR)/debian/ldm-downloader
 

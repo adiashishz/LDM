@@ -5,10 +5,10 @@
     flatpak-python-deps.py RESOLVED.txt --build-only python3-build-deps > flatpak-build-deps.yml
 
 RESOLVED.txt lists the wheel files pip picks for the runtime's Python (PYTHON below: check it with
-`flatpak run --command=python3 org.gnome.Sdk//51 --version`), made with pip only (wheels only, so no
+`flatpak run --command=python3 org.kde.Sdk//6.11 --version`), made with pip only (wheels only, so no
 package code runs while resolving):
 
-    pip download --only-binary=:all: --python-version 3.14 --platform manylinux_2_28_x86_64 \\
+    pip download --only-binary=:all: --python-version 3.13 --platform manylinux_2_28_x86_64 \\
         --platform manylinux_2_17_x86_64 --platform manylinux2014_x86_64 --dest /tmp/dl \\
         "httpx[socks]" dbus-fast dnspython secretstorage cryptography "yt-dlp[default]"
     ls /tmp/dl > RESOLVED.txt
@@ -24,7 +24,7 @@ import sys
 import urllib.request
 
 WHEELS = {"cryptography", "dbus-fast"}
-PYTHON = "cp314"  # the runtime's Python: GNOME 51 has 3.14
+PYTHON = "cp313"  # the runtime's Python: KDE 6.11 (freedesktop 25.08) has 3.13
 ARCHES = {"x86_64": "x86_64", "aarch64": "aarch64"}
 
 

@@ -23,10 +23,9 @@ BuildRequires:  desktop-file-utils
 BuildRequires:  libappstream-glib
 %if %{with check}
 BuildRequires:  python3-pytest
-# pytest's settings and the GUI test modules import these even when the GUI tests are deselected.
-BuildRequires:  python3-gobject
-BuildRequires:  gtk4
-BuildRequires:  libadwaita
+# The window's tests draw it offscreen.
+BuildRequires:  python3-pyside6
+BuildRequires:  qt6-qtsvg
 BuildRequires:  dbus-daemon
 BuildRequires:  ffmpeg-free
 BuildRequires:  rb_libtorrent-python3
@@ -34,11 +33,10 @@ BuildRequires:  rb_libtorrent-python3
 
 # Python dependencies (httpx[socks], dbus-fast, yt-dlp[default], dnspython, secretstorage, cryptography) are generated
 # from pyproject.toml.
-Requires:       python3dist(pygobject)
-Requires:       gtk4
-Requires:       libadwaita
-# GTK's typelibs import cairo-1.0.typelib, which only this package ships (found on a clean install).
-Requires:       gobject-introspection
+# The window (Qt): PySide6, and Qt's SVG support for its icons.
+Requires:       python3-pyside6
+Requires:       qt6-qtsvg
+Recommends:     qt6-qtwayland
 Requires:       (ffmpeg-free or ffmpeg)
 # The browser bridge talks to the service with gdbus.
 Requires:       /usr/bin/gdbus
@@ -82,8 +80,8 @@ desktop-file-validate %{buildroot}%{_sysconfdir}/xdg/autostart/io.github.adiashi
 appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/io.github.adiashishz.LDM.metainfo.xml
 %if %{with check}
 cd ldm
-# GUI tests need a display; everything else runs offline against local servers and private buses.
-%pytest -k "not gui"
+# Everything runs offline against local servers and private buses; the window is drawn offscreen.
+%pytest
 %endif
 
 %post
