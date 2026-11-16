@@ -33,6 +33,11 @@ class DaemonClient(QObject, ServiceCalls):
     def connected(self) -> bool:
         return self._remote.connected
 
+    @property
+    def remote(self) -> Remote:
+        """The D-Bus connection itself, for the window's own place on the bus (ldm.qt.desktop)."""
+        return self._remote
+
     def close(self) -> None:
         self._remote.close()
 

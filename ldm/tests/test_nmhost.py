@@ -6,7 +6,6 @@ import os
 import random
 import shutil
 import signal
-import struct
 import subprocess
 import sys
 import textwrap
@@ -105,19 +104,25 @@ def test_ping_and_direct_add(daemon, http_server, tmp_path):
                                  for r in part_requests)
 
 
+# The window's own D-Bus side (what ldm-gui offers), without the window: the host's gdbus call must reach it.
 FAKE_GUI = textwrap.dedent("""
-    import sys
-    from gi.repository import Gio, GLib
-    app = Gio.Application(application_id="io.github.adiashishz.LDM", flags=Gio.ApplicationFlags.IS_SERVICE)
-    action = Gio.SimpleAction.new("add-request", GLib.VariantType.new("s"))
-    def got(_a, param):
-        open(sys.argv[1], "w").write(param.get_string())
-        app.quit()
-    action.connect("activate", got)
-    app.add_action(action)
-    app.set_inactivity_timeout(20000)
-    app.hold()
-    app.run([])
+    import asyncio, sys
+    from dbus_fast.aio import MessageBus
+    from ldm.ui.desktop import claim
+
+    async def main():
+        bus = await MessageBus().connect()
+        done = asyncio.get_running_loop().create_future()
+
+        def handler(name, arguments, platform_data):
+            if name == "add-request" and not done.done():
+                done.set_result(arguments[0])
+
+        assert await claim(bus, handler)
+        open(sys.argv[1], "w").write(await asyncio.wait_for(done, 20))
+        bus.disconnect()
+
+    asyncio.run(main())
 """)
 
 
