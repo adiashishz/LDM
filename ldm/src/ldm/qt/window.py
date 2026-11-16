@@ -220,7 +220,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.logo, 0, Qt.AlignmentFlag.AlignVCenter)
         brand = QLabel("LDM")  # as in the design: the name in bold between the logo and the menus
         brand.setObjectName("brand")
-        brand.setContentsMargins(8, 0, 14, 0)
+        brand.setContentsMargins(8, 0, 4, 0)  # the first menu adds its own 10px of padding
         layout.addWidget(brand, 0, Qt.AlignmentFlag.AlignVCenter)
         menubar = QMenuBar()
         menubar.setNativeMenuBar(False)  # the menus sit in the window's own bar, as in the design
