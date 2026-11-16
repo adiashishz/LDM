@@ -31,7 +31,7 @@ def test_file_priorities():
     assert file_priorities("3") == [0, 0, 0, 1]
 
 
-def test_schedule_commands_against_daemon(daemon, monkeypatch, capsys):
+def test_schedule_commands_against_daemon(daemon, cli_transport, monkeypatch, capsys):
     monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", daemon)  # the test daemon's private bus
     assert main(["settings", "schedule_start", "01:30"]) == 0
     assert main(["settings", "schedule_speed_limit", "2M"]) == 0

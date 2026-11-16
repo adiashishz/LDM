@@ -12,6 +12,7 @@ class FakeClient(QObject, ServiceCalls):
     state_changed = Signal("qulonglong", str, str)
     progress = Signal(object)
     connected_changed = Signal(bool)
+    add_request = Signal(object)
     connected = True
 
     def __init__(self, rows, **answers):

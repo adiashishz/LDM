@@ -1,5 +1,12 @@
 """The service on the local channel (ldm.channel): the same methods and signals as on D-Bus, for systems
-without a session bus (Windows, macOS) and, next to D-Bus, on Linux."""
+without a session bus (Windows, macOS) and, next to D-Bus, on Linux.
+
+Three more methods, for what D-Bus does by the window's own bus name:
+    RegisterWindow()          the caller is LDM's window: it gets the AddRequest signal
+    WindowOpen() -> bool      whether a window is connected (the browser bridge's "ping")
+    ShowAddDialog(request) -> int   sends {"signal": "AddRequest", "args": [request]} to the windows;
+                                    returns how many got it (0: start the window, then ask again)
+"""
 
 from __future__ import annotations
 
@@ -15,6 +22,8 @@ from .api import Api, error_name
 
 log = logging.getLogger(__name__)
 
+WINDOW_METHODS = {"RegisterWindow", "WindowOpen", "ShowAddDialog"}
+
 
 class AlreadyListening(Exception):
     """Another service answers on the channel already."""
@@ -29,6 +38,7 @@ class SocketService:
         self.server: asyncio.base_events.Server | None = None
         self.clients: set[asyncio.StreamWriter] = set()      # connected (on TCP: after the token)
         self.connections: set[asyncio.StreamWriter] = set()  # every open connection, to close on stop
+        self.windows: set[asyncio.StreamWriter] = set()      # connections of LDM's window (RegisterWindow)
         api.listeners.append(self._signal)
 
     async def start(self) -> None:
@@ -100,6 +110,7 @@ class SocketService:
         finally:
             self.clients.discard(writer)
             self.connections.discard(writer)
+            self.windows.discard(writer)
             for task in tasks:
                 task.cancel()
             writer.close()
@@ -118,7 +129,11 @@ class SocketService:
         try:
             if not isinstance(method, str) or not isinstance(params, list):
                 raise KeyError(method)
-            reply = {"id": call_id, "result": await self.api.call(method, params)}
+            if method in WINDOW_METHODS:
+                result = self._window_call(method, params, writer)
+            else:
+                result = await self.api.call(method, params)
+            reply = {"id": call_id, "result": result}
         except KeyError as e:
             reply = {"id": call_id, "error": {"name": "UnknownMethod", "message": f"no method {e.args[0]!r}"}}
         except Exception as e:  # noqa: BLE001 (every error goes back to the caller)
@@ -127,6 +142,19 @@ class SocketService:
                 log.exception("%s failed", method)
             reply = {"id": call_id, "error": {"name": name or "Failed", "message": str(e)}}
         self._send(writer, reply)
+
+    def _window_call(self, method: str, params: list, writer: asyncio.StreamWriter) -> object:
+        if method == "RegisterWindow":
+            self.windows.add(writer)
+            return True
+        if method == "WindowOpen":
+            return bool(self.windows)
+        request = params[0] if params else None
+        if not isinstance(request, dict) or not isinstance(request.get("url"), str):
+            raise ValueError("ShowAddDialog needs a request with a url")
+        for window in list(self.windows):
+            self._send(window, {"signal": "AddRequest", "args": [request]})
+        return len(self.windows)
 
     def _signal(self, name: str, args: list) -> None:
         message = {"signal": name, "args": args}

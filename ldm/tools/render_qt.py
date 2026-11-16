@@ -70,6 +70,7 @@ class FakeClient(QObject, ServiceCalls):
     state_changed = Signal("qulonglong", str, str)
     progress = Signal(object)
     connected_changed = Signal(bool)
+    add_request = Signal(object)
     connected = True
 
     def _call(self, method, signature, args, callback, timeout=None):

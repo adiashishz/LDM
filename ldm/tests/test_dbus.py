@@ -76,7 +76,7 @@ def test_second_daemon_refuses_to_start(daemon, tmp_path):
                           system_bus_address=daemon, manage_autostart=False))
 
 
-def test_cli_talks_to_daemon(daemon, http_server, tmp_path, capsys):
+def test_cli_talks_to_daemon(daemon, cli_transport, http_server, tmp_path, capsys):
     data = random.Random(8).randbytes(300_000)
     cfg, url = http_server(data=data)
     assert main(["settings", "max_parallel", "2"]) == 0
@@ -93,7 +93,7 @@ def test_cli_talks_to_daemon(daemon, http_server, tmp_path, capsys):
     assert "127.0.0.1: max_connections=0 max_downloads=1" in out
 
 
-def test_cli_without_daemon(bus_address, capsys):
+def test_cli_without_daemon(bus_address, cli_transport, capsys):
     assert main(["list"]) == 1
     assert "daemon is not running" in capsys.readouterr().out
 

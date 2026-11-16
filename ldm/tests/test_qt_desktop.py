@@ -128,3 +128,22 @@ def test_add_request_parsing():
     assert add_request(["not json"]) is None
     assert add_request(['{"filename": "no url"}']) is None
     assert add_request([]) is None
+
+
+def test_browser_request_reaches_the_window_over_the_socket(app, daemon, tmp_path, monkeypatch):
+    """Where there is no D-Bus (Windows, macOS): the browser bridge → the service → the window's Add dialog."""
+    from ldm import channel, nmhost
+    from ldm.qt.client import DaemonClient
+    from ldm.qt.window import MainWindow
+
+    monkeypatch.setenv("LDM_TRANSPORT", "socket")
+    client = DaemonClient(str(channel.socket_path()), transport="socket")
+    window = MainWindow(client, QSettings(str(tmp_path / "ui.ini"), QSettings.Format.IniFormat))
+    spin_until(app, lambda: client.connected)
+    spin_until(app, lambda: nmhost.channel_call("WindowOpen"))  # registered as the window
+    nmhost.add_dialog({"url": "https://example.com/over-socket.iso", "filename": "over-socket.iso"})
+    spin_until(app, lambda: add_dialogs(window))
+    dialog = add_dialogs(window)[0]
+    assert dialog.url.text() == "https://example.com/over-socket.iso" and dialog.name.text() == "over-socket.iso"
+    assert window.isVisible()
+    window.close()

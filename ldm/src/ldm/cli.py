@@ -14,13 +14,10 @@ from pathlib import Path
 
 from .engine import DownloadError, Downloader, LinkExpired, RemoteChanged
 from .format import human, parse_rate, progress_line
+from .service_client import DaemonNotRunning, ServiceClient, ServiceError, connect_service
 from .store import Store, default_db_path, default_download_dir
 
 FINAL_STATES = {"done", "error", "expired", "changed", "paused"}
-
-
-class DaemonNotRunning(Exception):
-    pass
 
 
 def print_progress(done: int, size: int | None, speed: float) -> None:
@@ -98,28 +95,7 @@ def cmd_daemon(args) -> int:
 
 # --- daemon client -------------------------------------------------------------------------
 
-async def connect():
-    from dbus_fast import DBusError
-    from dbus_fast.aio import MessageBus
-
-    from .dbus_service import BUS_NAME, INTERFACE, OBJECT_PATH
-
-    bus = await MessageBus().connect()
-    try:
-        introspection = await bus.introspect(BUS_NAME, OBJECT_PATH)
-    except DBusError as e:
-        bus.disconnect()
-        if e.type in ("org.freedesktop.DBus.Error.ServiceUnknown", "org.freedesktop.DBus.Error.NameHasNoOwner"):
-            raise DaemonNotRunning from e
-        raise
-    return bus, bus.get_proxy_object(BUS_NAME, OBJECT_PATH, introspection).get_interface(INTERFACE)
-
-
-def values(vardict) -> dict:
-    return {k: v.value for k, v in vardict.items()}
-
-
-async def wait_for(iface, download_id: int, show_progress: bool) -> str:
+async def wait_for(service: ServiceClient, download_id: int, show_progress: bool) -> str:
     finished = asyncio.get_running_loop().create_future()
 
     def on_state(i, state, error):
@@ -131,9 +107,9 @@ async def wait_for(iface, download_id: int, show_progress: bool) -> str:
             if i == download_id and show_progress:
                 print_progress(done, size if size >= 0 else None, speed)
 
-    iface.on_state_changed(on_state)
-    iface.on_progress(on_progress)
-    current = values(await iface.call_get(download_id))
+    service.on("StateChanged", on_state)
+    service.on("Progress", on_progress)
+    current = await service.call("Get", download_id)
     if current["state"] in FINAL_STATES:
         return current["state"]
     state, error = await finished
@@ -145,88 +121,83 @@ async def wait_for(iface, download_id: int, show_progress: bool) -> str:
 
 
 async def client(args) -> int:
-    from dbus_fast import Variant
-
-    bus, iface = await connect()
+    service = await connect_service()
     try:
         if args.command == "add":
-            options = {"connections": Variant("x", args.connections) if args.connections else None,
-                       "dir": Variant("s", str(args.dir.expanduser().resolve())) if args.dir else None,
-                       "name": Variant("s", args.name) if args.name else None,
-                       "headers": Variant("a{ss}", parse_headers(args.header)) if args.header else None,
-                       "speed_limit": Variant("x", args.limit) if args.limit else None,
-                       "start": Variant("b", not args.paused),
-                       "kind": Variant("s", "media") if args.media or args.quality or args.hls_key else None,
-                       "format": Variant("s", media_selector(args.quality)) if args.quality else None,
-                       "format_label": Variant("s", args.quality) if args.quality else None,
-                       "sequential": Variant("b", True) if args.sequential else None,
-                       "scheduled": Variant("b", True) if args.scheduled or schedule_window(args) else None,
-                       "hls_key": Variant("s", args.hls_key) if args.hls_key else None,
-                       **{k: Variant("s", v) for k, v in schedule_window(args).items()},
-                       "unmetered_only": Variant("b", True) if args.unmetered_only else None,
-                       "priorities": Variant("ax", file_priorities(args.files)) if args.files else None}
-            download_id = await iface.call_add(args.url, {k: v for k, v in options.items() if v is not None})
+            options = {"connections": args.connections if args.connections else None,
+                       "dir": str(args.dir.expanduser().resolve()) if args.dir else None,
+                       "name": args.name if args.name else None,
+                       "headers": parse_headers(args.header) if args.header else None,
+                       "speed_limit": args.limit if args.limit else None,
+                       "start": not args.paused,
+                       "kind": "media" if args.media or args.quality or args.hls_key else None,
+                       "format": media_selector(args.quality) if args.quality else None,
+                       "format_label": args.quality if args.quality else None,
+                       "sequential": True if args.sequential else None,
+                       "scheduled": True if args.scheduled or schedule_window(args) else None,
+                       "hls_key": args.hls_key if args.hls_key else None,
+                       **schedule_window(args),
+                       "unmetered_only": True if args.unmetered_only else None,
+                       "priorities": file_priorities(args.files) if args.files else None}
+            download_id = await service.call("Add", args.url, {k: v for k, v in options.items() if v is not None})
             print(f"download {download_id} added")
             if args.wait:
-                state = await wait_for(iface, download_id, show_progress=True)
-                d = values(await iface.call_get(download_id))
+                state = await wait_for(service, download_id, show_progress=True)
+                d = (await service.call("Get", download_id))
                 print(f"{state}: {Path(d['dir']) / d.get('name', '')}")
                 return 0 if state == "done" else 1
         elif args.command == "list":
-            for d in map(values, await iface.call_list()):
+            for d in (await service.call("List")):
                 size = human(d["size"]) if "size" in d else "?"
                 done = f"{d['done'] * 100 / d['size']:5.1f}%" if d.get("size") else "    -"
                 line = f"{d['id']:>4}  {d['state']:<8} {done} {size:>10}  {d.get('name') or d['url']}"
                 note = d.get("error") or d.get("waiting")
                 print(line + (f"  ({note})" if note else ""))
         elif args.command == "pause":
-            await iface.call_pause(args.id)
+            await service.call("Pause", args.id)
         elif args.command == "resume":
-            await iface.call_resume(args.id)
+            await service.call("Resume", args.id)
         elif args.command == "rm":
-            await iface.call_remove(args.id, args.delete)
+            await service.call("Remove", args.id, args.delete)
         elif args.command == "move":
-            await iface.call_move(args.id, args.position)
+            await service.call("Move", args.id, args.position)
         elif args.command == "set-url":
-            await iface.call_set_url(args.id, args.url)
+            await service.call("SetUrl", args.id, args.url)
         elif args.command == "limit":
-            await iface.call_set_speed_limit(args.id, args.rate)
+            await service.call("SetSpeedLimit", args.id, args.rate)
         elif args.command == "schedule":
-            await iface.call_set_schedule(args.id, args.state == "on", schedule_window(args))
+            await service.call("SetSchedule", args.id, args.state == "on", schedule_window(args))
         elif args.command == "settings":
             if args.key is None:
-                for key, value in sorted(values(await iface.call_get_settings()).items()):
+                for key, value in sorted((await service.call("GetSettings")).items()):
                     print(f"{key} = {value}")
             else:
-                value = parse_setting(args.key, args.value)
-                variant = (Variant("s", value) if isinstance(value, str) else
-                           Variant("b", value) if isinstance(value, bool) else Variant("x", value))
-                await iface.call_set_settings({args.key: variant})
+                await service.call("SetSettings", {args.key: parse_setting(args.key, args.value)})
         elif args.command == "host-rule":
             if args.remove:
-                await iface.call_remove_host_rule(args.host)
+                await service.call("RemoveHostRule", args.host)
             else:
-                await iface.call_set_host_rule(args.host, args.max_connections, args.max_downloads, not args.exact)
+                await service.call("SetHostRule", args.host, args.max_connections, args.max_downloads, not args.exact)
         elif args.command == "host-rules":
-            for r in map(values, await iface.call_list_host_rules()):
+            for r in (await service.call("ListHostRules")):
                 scope = "" if r["include_subdomains"] else " (exact)"
                 print(f"{r['host']}{scope}: max_connections={r['max_connections']} max_downloads={r['max_downloads']}")
         elif args.command == "login":
             if args.remove:
-                await iface.call_remove_login(args.host)
+                await service.call("RemoveLogin", args.host)
             else:
                 if not args.user:
                     raise SystemExit("ldm login HOST USER (or --remove)")
                 password = read_password(args.password_stdin, f"password for {args.user}@{args.host}: ")
-                await iface.call_set_login(args.host, args.user, password, not args.exact)
+                await service.call("SetLogin", args.host, args.user, password, not args.exact)
         elif args.command == "logins":
-            for r in map(values, await iface.call_list_logins()):
+            for r in (await service.call("ListLogins")):
                 print(f"{r['host']}{'' if r['include_subdomains'] else ' (exact)'}: {r['username']}")
         elif args.command == "proxy-password":
             password = read_password(args.password_stdin, "proxy password (empty to remove): ")
-            await iface.call_set_settings({"proxy_password": Variant("s", password)})
+            await service.call("SetSettings", {"proxy_password": password})
         elif args.command == "log":
-            for line in await iface.call_get_log(args.id):
+            for line in await service.call("GetLog", args.id):
                 print(line)
         elif args.command in ("batch", "import"):
             from .batch import expand, parse_link_list
@@ -240,66 +211,65 @@ async def client(args) -> int:
                     raise SystemExit(f"ldm batch: {e}")
             else:
                 links = parse_link_list(Path(args.file).expanduser().read_text())
-            options = {"start": Variant("b", not args.paused)}
+            options = {"start": not args.paused}
             if args.dir:
-                options["dir"] = Variant("s", str(args.dir.expanduser().resolve()))
+                options["dir"] = str(args.dir.expanduser().resolve())
             for link in links:
-                kind = {"kind": Variant("s", "torrent")} if link.startswith("magnet:") else {}
-                await iface.call_add(link, {**options, **kind})
+                kind = {"kind": "torrent"} if link.startswith("magnet:") else {}
+                await service.call("Add", link, {**options, **kind})
             print(f"{len(links)} downloads added")
         elif args.command == "backup":
             password = read_password(args.password_stdin, "password to encrypt the backup: ") if args.encrypt else ""
             target = str(Path(args.target).expanduser().resolve()) if args.target else ""
-            print(await iface.call_create_backup(target, password))
+            print(await service.call("CreateBackup", target, password))
         elif args.command == "restore":
             from .backup import is_encrypted
             source = Path(args.file).expanduser().resolve()
             password = (read_password(args.password_stdin, "backup password: ")
                         if is_encrypted(source.read_bytes()) else "")
-            counts = values(await iface.call_restore_backup(str(source), password))
+            counts = await service.call("RestoreBackup", str(source), password)
             print(", ".join(f"{n} {k.replace('_', ' ')}" for k, n in counts.items()) + " restored")
         elif args.command in ("pause-all", "resume-all"):
-            count = await (iface.call_pause_all() if args.command == "pause-all" else iface.call_resume_all())
+            count = await (service.call("PauseAll") if args.command == "pause-all" else service.call("ResumeAll"))
             print(f"{count} downloads {'paused' if args.command == 'pause-all' else 'resumed'}")
         elif args.command == "data-usage":
             if args.reset:
-                await iface.call_reset_data_usage()
-            s = values(await iface.call_get_settings())
+                await service.call("ResetDataUsage")
+            s = (await service.call("GetSettings"))
             limit = f" of {human(s['data_limit'])}" if s["data_limit"] else " (no limit)"
             print(f"used this session: {human(s['data_used'])}{limit}")
         elif args.command == "update-yt-dlp":
             print("checking for a newer yt-dlp…")
-            version = await iface.call_update_yt_dlp()
+            version = await service.call("UpdateYtDlp")
             print(f"yt-dlp {version} installed for this user" if version else "yt-dlp is up to date")
         elif args.command == "checksum":
-            print(await iface.call_checksum(args.id, args.algo))
+            print(await service.call("Checksum", args.id, args.algo))
         elif args.command == "rename":
-            print(await iface.call_rename(args.id, args.name))
+            print(await service.call("Rename", args.id, args.name))
         elif args.command == "mv":
-            print(await iface.call_move_to(args.id, str(args.folder.expanduser().resolve())))
+            print(await service.call("MoveTo", args.id, str(args.folder.expanduser().resolve())))
         elif args.command == "export-links":
-            rows = [values(r) for r in await iface.call_list()]
+            rows = await service.call("List")
             links = [r["url"] for r in rows if not args.state or r["state"] in args.state.split(",")]
             Path(args.file).expanduser().write_text("".join(f"{link}\n" for link in links))
             print(f"{len(links)} links written to {args.file}")
         elif args.command == "export-unfinished":
-            Path(args.file).expanduser().write_text(await iface.call_export_downloads(not args.all))
+            Path(args.file).expanduser().write_text(await service.call("ExportDownloads", not args.all))
             print(f"saved to {args.file}")
         elif args.command == "import-unfinished":
-            ids = await iface.call_import_downloads(Path(args.file).expanduser().read_text())
+            ids = await service.call("ImportDownloads", Path(args.file).expanduser().read_text())
             print(f"{len(ids)} downloads imported (paused — resume them with `ldm resume ID`)")
         elif args.command == "torrent-files":
             source = args.source if "://" in args.source or args.source.startswith("magnet:") \
                 else Path(args.source).resolve().as_uri()
-            info = values(await iface.call_probe_torrent(source, {}))
+            info = (await service.call("ProbeTorrent", source, {}))
             print(f"{info.get('name', '')}  ({human(info['size']) if 'size' in info else 'size unknown'})")
             for f in info.get("files", []):
-                f = values(f)
                 print(f"{f['index']:>5}  {human(f['size']):>10}  {f['path']}")
         elif args.command == "watch":
-            await watch(iface)
+            await watch(service)
     finally:
-        bus.disconnect()
+        await service.close()
     return 0
 
 
@@ -349,7 +319,7 @@ def parse_setting(key: str, text: str | None):
         return text
 
 
-async def watch(iface) -> None:
+async def watch(service: ServiceClient) -> None:
     def on_progress(batch):
         line = " | ".join(f"#{i} {progress_line(done, size if size >= 0 else None, speed)}"
                           for i, done, size, speed in batch)
@@ -358,8 +328,8 @@ async def watch(iface) -> None:
     def on_state(i, state, error):
         print(f"\n#{i} {state}" + (f": {error}" if error else ""))
 
-    iface.on_progress(on_progress)
-    iface.on_state_changed(on_state)
+    service.on("Progress", on_progress)
+    service.on("StateChanged", on_state)
     await asyncio.Event().wait()
 
 
@@ -520,13 +490,12 @@ def main(argv: list[str] | None = None) -> int:
             integration.install(Path.home(), args.browser, dry_run=args.dry_run,
                                 flatpak_override=args.flatpak_override)
         return 0
-    from dbus_fast import DBusError
     try:
         return asyncio.run(client(args))
     except DaemonNotRunning:
         print("the ldm daemon is not running — start it with: ldm daemon")
-    except DBusError as e:
-        print(f"error: {e.text}")
+    except ServiceError as e:
+        print(f"error: {e.message}")
     except KeyboardInterrupt:
         return 130
     return 1
