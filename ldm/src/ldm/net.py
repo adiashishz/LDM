@@ -73,7 +73,7 @@ def system_proxy(url: str) -> str | None:
         import gi
         gi.require_version("Gio", "2.0")
         from gi.repository import Gio
-    except (ImportError, ValueError):
+    except Exception:  # noqa: BLE001 (no PyGObject, no Gio typelib, or a bare `gi` folder another package left)
         found = portal_proxies(url)
     else:
         try:
