@@ -13,6 +13,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import paths
+
 FORMAT = "ldm-backup"
 VERSION = 1
 MAGIC = b"LDMBACKUP1\n"
@@ -26,8 +28,7 @@ class BackupError(Exception):
 
 
 def default_folder() -> Path:
-    documents = os.environ.get("XDG_DOCUMENTS_DIR") or str(Path.home() / "Documents")
-    return Path(documents) / "LDM Backups"
+    return paths.documents_dir() / "LDM Backups"
 
 
 def file_name(encrypted: bool, when: float | None = None) -> str:
