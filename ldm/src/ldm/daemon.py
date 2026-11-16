@@ -1,8 +1,9 @@
-"""The ldm background service: owns all downloads and serves them on the session bus."""
+"""The ldm background service: owns all downloads and serves them on the session bus and the local channel."""
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import signal
 from pathlib import Path
 from typing import Any
@@ -10,7 +11,9 @@ from typing import Any
 from dbus_fast import NameFlag, RequestNameReply
 from dbus_fast.aio import MessageBus
 
+from .api import Api
 from .dbus_service import BUS_NAME, OBJECT_PATH, ManagerInterface
+from .socket_service import AlreadyListening, SocketService
 from .manager import Manager
 from .finish import Finisher
 from .notify import Notifier
@@ -18,6 +21,8 @@ from .tray import Tray
 from .store import Store, default_db_path
 from .integration import set_autostart
 from .system import SleepInhibitor, SystemMonitor
+
+log = logging.getLogger(__name__)
 
 
 class AlreadyRunning(Exception):
@@ -27,11 +32,12 @@ class AlreadyRunning(Exception):
 async def serve(*, bus_address: str | None = None, db_path: Path | None = None,
                 stop: asyncio.Event | None = None, ready: asyncio.Event | None = None,
                 manager_options: dict[str, Any] | None = None, system_bus_address: str | None = None,
-                manage_autostart: bool = True) -> bool:
+                manage_autostart: bool = True, socket_path: Path | None = None) -> bool:
     """Run until `stop` is set (default: SIGINT/SIGTERM). Running downloads resume on next start.
 
     `system_bus_address` replaces the system bus (NetworkManager, UPower, logind) — tests use a private one;
-    `manage_autostart` lets the "autostart" setting enable/disable the systemd user unit.
+    `manage_autostart` lets the "autostart" setting enable/disable the systemd user unit;
+    `socket_path` is where the local channel listens (default: ldm.channel's place for this user).
     Returns True when the service should start again (to load a newly fetched yt-dlp)."""
     monitor = SystemMonitor(system_bus_address)
     await monitor.start()
@@ -42,11 +48,18 @@ async def serve(*, bus_address: str | None = None, db_path: Path | None = None,
         manager.on_autostart = set_autostart
     bus = await MessageBus(bus_address=bus_address).connect()
     try:
-        bus.export(OBJECT_PATH, ManagerInterface(manager))
+        api = Api(manager)
+        bus.export(OBJECT_PATH, ManagerInterface(api))
         await Notifier(bus, manager).start()
         reply = await bus.request_name(BUS_NAME, NameFlag.DO_NOT_QUEUE)
         if reply not in (RequestNameReply.PRIMARY_OWNER, RequestNameReply.ALREADY_OWNER):
             raise AlreadyRunning(f"{BUS_NAME} is already owned on this bus")
+        # The same methods on the local channel too (what Windows and macOS have instead of D-Bus).
+        listener = SocketService(api, socket_path)
+        try:
+            await listener.start()
+        except (AlreadyListening, OSError) as e:
+            log.warning("the local channel is not available (D-Bus still is): %s", e)
         if stop is None:
             stop = asyncio.Event()
             loop = asyncio.get_running_loop()
@@ -85,6 +98,7 @@ async def serve(*, bus_address: str | None = None, db_path: Path | None = None,
             for task in (stopped, bus_lost):
                 task.cancel()
             tray.close()
+            await listener.close()
             await manager.shutdown()
         return restart
     finally:
