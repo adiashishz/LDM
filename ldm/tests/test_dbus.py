@@ -2,9 +2,9 @@
 
 import asyncio
 import random
-import shutil
 
 import pytest
+from conftest import needs_dbus
 from dbus_fast import DBusError, Variant
 from dbus_fast.aio import MessageBus
 
@@ -12,7 +12,7 @@ from ldm.cli import main
 from ldm.daemon import AlreadyRunning, serve
 from ldm.dbus_service import BUS_NAME, INTERFACE, OBJECT_PATH
 
-pytestmark = pytest.mark.skipif(shutil.which("dbus-daemon") is None, reason="dbus-daemon not installed")
+pytestmark = needs_dbus
 
 
 async def client(address):
@@ -91,11 +91,6 @@ def test_cli_talks_to_daemon(daemon, cli_transport, http_server, tmp_path, capsy
     assert "done" in out and "test.bin" in out
     assert "max_parallel = 2" in out
     assert "127.0.0.1: max_connections=0 max_downloads=1" in out
-
-
-def test_cli_without_daemon(bus_address, cli_transport, capsys):
-    assert main(["list"]) == 1
-    assert "daemon is not running" in capsys.readouterr().out
 
 
 def test_probe_over_dbus(daemon, http_server):

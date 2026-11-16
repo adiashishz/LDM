@@ -7,10 +7,13 @@ import sys
 from pathlib import Path
 
 import pytest
+from conftest import linux_only
 
 from ldm import integration, sandbox
 from ldm.manager import InvalidArgument, Manager
 from ldm.store import Store
+
+pytestmark = linux_only  # Flatpak and the Linux desktop's files
 
 ROOT = Path(__file__).resolve().parents[1]
 

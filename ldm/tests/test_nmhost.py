@@ -14,11 +14,12 @@ from pathlib import Path
 
 import pytest
 
+from conftest import HAS_DBUS
 from ldm import busnames, nmhost
 
 HOST = Path(nmhost.__file__)
-needs_dbus = pytest.mark.skipif(shutil.which("dbus-daemon") is None or shutil.which("gdbus") is None,
-                                reason="dbus-daemon/gdbus not installed")
+needs_dbus = pytest.mark.skipif(not HAS_DBUS or shutil.which("gdbus") is None,
+                                reason="needs a D-Bus session bus and gdbus (Linux)")
 
 
 def test_bus_names_match_package():

@@ -6,8 +6,11 @@ import shutil
 from pathlib import Path
 
 import pytest
+from conftest import linux_only
 
 from ldm import integration
+
+pytestmark = linux_only  # Flatpak and the Linux desktop's files
 
 EXTENSION = Path(__file__).resolve().parents[2] / "extension"
 

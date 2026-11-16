@@ -1,7 +1,6 @@
 """The Qt dialogs, drawn offscreen against a fake service; and the Add dialog once against the real one."""
 
 import random
-import shutil
 import time
 
 import pytest
@@ -9,7 +8,7 @@ import pytest
 pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QWidget  # noqa: E402
 
-from qt_fake import FakeClient  # noqa: E402
+from qt_fake import FakeClient, real_client  # noqa: E402
 
 MB = 1024 * 1024
 PROBE = {"size": 10 * MB, "resumable": True, "content_type": "application/zip", "filename": "server-name.zip"}
@@ -175,13 +174,11 @@ def test_checksum_compares_with_the_clipboard(app, parent):
     assert "doesn't hold" in dialog.result.subtitle.text()
 
 
-@pytest.mark.skipif(shutil.which("dbus-daemon") is None, reason="dbus-daemon not installed")
 def test_add_dialog_with_the_real_service(app, parent, daemon, http_server, tmp_path):
-    from ldm.qt.client import DaemonClient
 
     data = random.Random(9).randbytes(300_000)
     cfg, url = http_server(data=data)
-    client = DaemonClient(daemon)
+    client = real_client(daemon)
     spin_until(app, lambda: client.connected)
     added = []
     dialog = add_dialog(parent, client, url, on_added=added.append)

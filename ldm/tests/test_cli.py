@@ -2,6 +2,7 @@ import random
 
 import pytest
 
+from conftest import use_service
 from ldm.cli import file_priorities, main, parse_rate
 
 
@@ -31,8 +32,13 @@ def test_file_priorities():
     assert file_priorities("3") == [0, 0, 0, 1]
 
 
+def test_cli_without_daemon(session_bus, cli_transport, capsys):
+    assert main(["list"]) == 1
+    assert "daemon is not running" in capsys.readouterr().out
+
+
 def test_schedule_commands_against_daemon(daemon, cli_transport, monkeypatch, capsys):
-    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", daemon)  # the test daemon's private bus
+    use_service(monkeypatch, daemon)  # the test daemon's private bus, or its channel
     assert main(["settings", "schedule_start", "01:30"]) == 0
     assert main(["settings", "schedule_speed_limit", "2M"]) == 0
     assert main(["add", "http://127.0.0.1:9/night.iso", "--scheduled", "--unmetered-only", "--paused"]) == 0
@@ -50,7 +56,7 @@ def test_schedule_commands_against_daemon(daemon, cli_transport, monkeypatch, ca
 def test_login_and_log_commands(daemon, http_server, monkeypatch, capsys):
     import io
     import random
-    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", daemon)
+    use_service(monkeypatch, daemon)
     data = random.Random(3).randbytes(100_000)
     cfg, url = http_server(data=data, auth=("digest", "ann", "s3cret"))
     monkeypatch.setattr("sys.stdin", io.StringIO("s3cret\n"))
@@ -71,7 +77,7 @@ def test_login_and_log_commands(daemon, http_server, monkeypatch, capsys):
 
 
 def test_batch_import_and_export_commands(daemon, monkeypatch, capsys, tmp_path):
-    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", daemon)
+    use_service(monkeypatch, daemon)
     assert main(["batch", "http://127.0.0.1:9/img*.jpg", "--from", "8", "--to", "10", "--pad", "2", "--paused"]) == 0
     links = tmp_path / "links.txt"
     links.write_text("# list\nhttp://127.0.0.1:9/a.zip\nhttp://127.0.0.1:9/b.zip\n")
@@ -93,7 +99,7 @@ def test_batch_import_and_export_commands(daemon, monkeypatch, capsys, tmp_path)
 
 def test_backup_restore_and_session_commands(daemon, monkeypatch, capsys, tmp_path):
     import io
-    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", daemon)
+    use_service(monkeypatch, daemon)
     assert main(["add", "http://127.0.0.1:9/keep.iso", "--paused"]) == 0
     monkeypatch.setattr("sys.stdin", io.StringIO("pw\n"))
     assert main(["backup", str(tmp_path / "b"), "--encrypt", "--password-stdin"]) == 0

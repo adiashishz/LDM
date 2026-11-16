@@ -1,7 +1,6 @@
 """DaemonClient (Qt) against the daemon, over D-Bus (a private bus) and over the local channel (its socket)."""
 
 import random
-import shutil
 import time
 
 import pytest
@@ -9,9 +8,8 @@ import pytest
 pytest.importorskip("PySide6")
 from PySide6.QtCore import QCoreApplication  # noqa: E402
 
+from conftest import HAS_DBUS  # noqa: E402
 from ldm.qt.client import DaemonClient  # noqa: E402
-
-pytestmark = pytest.mark.skipif(shutil.which("dbus-daemon") is None, reason="dbus-daemon not installed")
 
 
 @pytest.fixture
@@ -21,6 +19,8 @@ def app(qt_app):
 
 @pytest.fixture(params=["dbus", "socket"])
 def transport(request):
+    if request.param == "dbus" and not HAS_DBUS:
+        pytest.skip("needs a D-Bus session bus (Linux)")
     return request.param
 
 
@@ -28,7 +28,7 @@ def connect(transport, bus_address):
     """A client of the test service over `transport` (the socket: the test's own runtime folder)."""
     from ldm import channel
 
-    return DaemonClient(bus_address if transport == "dbus" else str(channel.socket_path()), transport=transport)
+    return DaemonClient(bus_address if transport == "dbus" else str(channel.address()), transport=transport)
 
 
 def spin_until(condition, timeout=15.0):
@@ -89,8 +89,8 @@ def test_errors_and_settings(app, daemon, transport):
     assert rules == [{"host": "example.com", "max_connections": 4, "max_downloads": 1, "include_subdomains": True}]
 
 
-def test_not_connected_without_daemon(app, bus_address, transport):
-    client = connect(transport, bus_address)
+def test_not_connected_without_daemon(app, session_bus, transport):
+    client = connect(transport, session_bus)
     changes = []
     client.connected_changed.connect(changes.append)
     _, error = call(client.list)
@@ -99,7 +99,7 @@ def test_not_connected_without_daemon(app, bus_address, transport):
     assert error.name == "NotRunning"
 
 
-def test_follows_the_service_starting_and_stopping(app, bus_address, transport, tmp_path):
+def test_follows_the_service_starting_and_stopping(app, session_bus, transport, tmp_path):
     """The window learns when the service appears (on the bus, or its socket) and when it goes away."""
     import asyncio
     import threading
@@ -107,7 +107,7 @@ def test_follows_the_service_starting_and_stopping(app, bus_address, transport, 
     from ldm.daemon import serve
     from ldm.passwords import MemoryPasswords
 
-    client = connect(transport, bus_address)
+    client = connect(transport, session_bus)
     changes = []
     client.connected_changed.connect(changes.append)
 
@@ -116,9 +116,10 @@ def test_follows_the_service_starting_and_stopping(app, bus_address, transport, 
 
     async def run():
         started = asyncio.Event()
-        task = asyncio.create_task(serve(bus_address=bus_address, db_path=tmp_path / "daemon.db", stop=stop,
+        task = asyncio.create_task(serve(bus_address=session_bus, db_path=tmp_path / "daemon.db", stop=stop,
                                          ready=started, manager_options={"passwords": MemoryPasswords()},
-                                         system_bus_address=bus_address, manage_autostart=False))
+                                         system_bus_address=session_bus, manage_autostart=False,
+                                         dbus=HAS_DBUS))
         await started.wait()
         ready.set()
         await task

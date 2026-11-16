@@ -1,7 +1,6 @@
 """The Qt window, drawn offscreen: model, filters, sidebar, details, actions; and once against a real service."""
 
 import random
-import shutil
 import time
 
 import pytest
@@ -10,7 +9,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QSettings, Qt  # noqa: E402
 
 from ldm.qt.model import ADDED, NAME, DownloadsFilter, DownloadsModel, queue_key  # noqa: E402
-from qt_fake import FakeClient  # noqa: E402
+from qt_fake import FakeClient, real_client  # noqa: E402
 
 MB = 1024 * 1024
 
@@ -172,15 +171,13 @@ def test_service_bar_and_theme(app, window):
     assert not window.c.dark
 
 
-@pytest.mark.skipif(shutil.which("dbus-daemon") is None, reason="dbus-daemon not installed")
 def test_window_with_the_real_service(app, daemon, http_server, tmp_path):
     """A download added through the service shows up in the window, progresses and finishes."""
-    from ldm.qt.client import DaemonClient
     from ldm.qt.window import MainWindow
 
     data = random.Random(7).randbytes(600_000)
     cfg, url = http_server(data=data, delay=0.02)
-    client = DaemonClient(daemon)
+    client = real_client(daemon)
     w = MainWindow(client, QSettings(str(tmp_path / "ui.ini"), QSettings.Format.IniFormat))
     spin_until(app, lambda: client.connected)
     client.add(url, {"dir": str(tmp_path / "out"), "connections": 2}, None)

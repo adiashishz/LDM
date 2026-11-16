@@ -10,7 +10,6 @@ import pytest
 pytest.importorskip("PySide6")
 from PySide6.QtCore import QSettings  # noqa: E402
 
-pytestmark = pytest.mark.skipif(shutil.which("dbus-daemon") is None, reason="dbus-daemon not installed")
 
 
 @pytest.fixture
@@ -28,7 +27,7 @@ def spin_until(app, condition, timeout=15.0):
 
 
 @pytest.fixture
-def ldm_window(app, daemon, tmp_path):
+def ldm_window(app, bus_address, daemon, tmp_path):
     """The window as `ldm-gui` starts it: its client, its place on the bus, then the window (hidden)."""
     from ldm.qt.client import DaemonClient
     from ldm.qt.desktop import Desktop
@@ -137,7 +136,7 @@ def test_browser_request_reaches_the_window_over_the_socket(app, daemon, tmp_pat
     from ldm.qt.window import MainWindow
 
     monkeypatch.setenv("LDM_TRANSPORT", "socket")
-    client = DaemonClient(str(channel.socket_path()), transport="socket")
+    client = DaemonClient(str(channel.address()), transport="socket")
     window = MainWindow(client, QSettings(str(tmp_path / "ui.ini"), QSettings.Format.IniFormat))
     spin_until(app, lambda: client.connected)
     spin_until(app, lambda: nmhost.channel_call("WindowOpen"))  # registered as the window
