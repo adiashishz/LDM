@@ -66,17 +66,51 @@ def with_login(proxy: str, user: str, password: str | None) -> str:
 
 
 def system_proxy(url: str) -> str | None:
-    """The desktop's proxy for `url` (GNOME/KDE settings through Gio), or None for a direct connection.
-    Blocking (a PAC script may be fetched): call it from a thread."""
+    """The desktop's proxy for `url` (GNOME/KDE settings, PAC scripts), or None for a direct connection.
+    GLib's resolver where PyGObject is installed, else the desktop portal's (the Flatpak, and systems
+    without PyGObject). Blocking (a PAC script may be fetched): call it from a thread."""
     try:
         import gi
         gi.require_version("Gio", "2.0")
         from gi.repository import Gio
-        _keep_running_without_bus(Gio)
-        found = Gio.ProxyResolver.get_default().lookup(url, None)
-    except Exception as e:  # no gi, or the resolver failed: environment variables still apply
-        log.debug("system proxy lookup failed: %s", e)
-        return None
+    except (ImportError, ValueError):
+        found = portal_proxies(url)
+    else:
+        try:
+            _keep_running_without_bus(Gio)
+            found = Gio.ProxyResolver.get_default().lookup(url, None)
+        except Exception as e:  # the resolver failed: environment variables still apply
+            log.debug("system proxy lookup failed: %s", e)
+            return None
+    return _first_usable(found)
+
+
+PORTAL = ("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop", "org.freedesktop.portal.ProxyResolver")
+
+
+def portal_proxies(url: str, timeout: float = 10.0) -> list[str]:
+    """Ask the desktop portal's proxy resolver (org.freedesktop.portal.ProxyResolver) on the session bus.
+    [] when there is no portal: environment variables still apply."""
+    try:
+        from jeepney import DBusAddress, new_method_call
+        from jeepney.io.blocking import open_dbus_connection
+    except ImportError:
+        return []
+    try:
+        with open_dbus_connection(bus="SESSION") as connection:
+            message = new_method_call(DBusAddress(PORTAL[1], bus_name=PORTAL[0], interface=PORTAL[2]),
+                                      "Lookup", "s", (url,))
+            reply = connection.send_and_get_reply(message, timeout=timeout)
+    except Exception as e:  # no session bus or no portal
+        log.debug("portal proxy lookup failed: %s", e)
+        return []
+    if reply.header.message_type.name == "error":
+        log.debug("portal proxy lookup failed: %s", reply.body)
+        return []
+    return list(reply.body[0])
+
+
+def _first_usable(found: Iterable[str] | None) -> str | None:
     for proxy in found or []:
         if proxy.startswith("direct://"):
             return None

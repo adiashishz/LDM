@@ -281,3 +281,40 @@ def test_system_proxy_lookup_does_not_tie_the_process_to_the_bus(bus_address):
     bus.wait()
     assert child.stdout.readline().strip() == "alive"
     assert child.wait(10) == 0
+
+
+@pytest.mark.skipif(__import__("shutil").which("dbus-daemon") is None, reason="dbus-daemon not installed")
+def test_system_proxy_from_the_portal(bus_address, monkeypatch):
+    """Without PyGObject (the Flatpak), the desktop's proxy comes from the portal's resolver."""
+    import builtins
+    import threading
+
+    from dbus_fast.aio import MessageBus
+    from dbus_fast.service import ServiceInterface, method
+
+    class ProxyResolver(ServiceInterface):
+        def __init__(self):
+            super().__init__("org.freedesktop.portal.ProxyResolver")
+
+        @method()
+        def Lookup(self, uri: "s") -> "as":  # noqa: N802, F821
+            return ["direct://"] if "local" in uri else ["socks://10.0.0.1:1080", "direct://"]
+
+    loop, ready = asyncio.new_event_loop(), threading.Event()
+
+    async def serve():
+        bus = await MessageBus(bus_address=bus_address).connect()
+        bus.export("/org/freedesktop/portal/desktop", ProxyResolver())
+        await bus.request_name("org.freedesktop.portal.Desktop")
+        ready.set()
+        await asyncio.Event().wait()
+
+    threading.Thread(target=loop.run_until_complete, args=(serve(),), daemon=True).start()
+    assert ready.wait(10)
+    real_import = builtins.__import__
+    monkeypatch.setattr(builtins, "__import__", lambda name, *a, **k: (
+        (_ for _ in ()).throw(ImportError(name)) if name == "gi" else real_import(name, *a, **k)))
+    assert net.system_proxy("https://example.com/file") == "socks5://10.0.0.1:1080"
+    assert net.system_proxy("https://local.example/file") is None
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
+    assert net.portal_proxies("https://example.com/") == []  # no portal: environment variables still apply
