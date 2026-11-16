@@ -6,7 +6,8 @@ import hashlib
 import shutil
 from pathlib import Path
 
-from .engine import unique_path
+from .engine import unique_path, windows_name
+from .paths import WINDOWS
 
 ALGORITHMS = ("md5", "sha1", "sha256")
 HEX_LENGTHS = {32: "md5", 40: "sha1", 64: "sha256"}
@@ -38,6 +39,8 @@ def check_name(name: str) -> str:
     name = name.strip()
     if not name or name in (".", "..") or "/" in name or "\0" in name:
         raise ValueError("not a valid file name")
+    if WINDOWS and windows_name(name) != name:
+        raise ValueError('not a valid file name on Windows (no <>:"/\\|?*, no trailing dot)')
     return name
 
 

@@ -59,7 +59,7 @@ class FilePasswords(MemoryPasswords):
         for (kind, key), value in self.items.items():
             data.setdefault(kind, {})[key] = value
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0), 0o600)
         with os.fdopen(fd, "w") as f:
             json.dump(data, f)
 
