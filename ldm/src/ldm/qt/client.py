@@ -24,6 +24,7 @@ class DaemonClient(QObject, ServiceCalls):
     state_changed = Signal("qulonglong", str, str)  # id, state, error
     progress = Signal(object)                        # [(id, done, size|-1, speed)]
     connected_changed = Signal(bool)
+    add_request = Signal(object)  # the browser's Add request (local channel), as {"url", "filename", …}
 
     _posted = Signal(object)  # a callable from the D-Bus thread, run on this object's thread
 
@@ -34,8 +35,11 @@ class DaemonClient(QObject, ServiceCalls):
         self._posted.connect(self._run_posted, Qt.ConnectionType.QueuedConnection)
         self.transport = transport or os.environ.get("LDM_TRANSPORT") or (
             "dbus" if sys.platform.startswith("linux") else "socket")
-        kind = SocketRemote if self.transport == "socket" else Remote
-        self._remote = kind(self._posted.emit, self.connected_changed.emit, self._on_signal, address)
+        if self.transport == "socket":
+            self._remote = SocketRemote(self._posted.emit, self.connected_changed.emit, self._on_signal, address,
+                                        register_window=True)
+        else:
+            self._remote = Remote(self._posted.emit, self.connected_changed.emit, self._on_signal, address)
 
     @property
     def connected(self) -> bool:
@@ -66,6 +70,8 @@ class DaemonClient(QObject, ServiceCalls):
             self.state_changed.emit(*args)
         elif name == "Progress":
             self.progress.emit([tuple(entry) for entry in args[0]])
+        elif name == "AddRequest" and args and isinstance(args[0], dict):
+            self.add_request.emit(args[0])
 
     def _call(self, method: str, signature: str, args: list[Any], callback: Callback | None,
               timeout: float | None = DEFAULT_TIMEOUT) -> None:

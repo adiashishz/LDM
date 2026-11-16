@@ -88,13 +88,9 @@ class Desktop(QObject):
     def present(self, token: str | None = None) -> None:
         """Show the window and bring it to the front. On Wayland the compositor decides; the activation token
         from the caller (if any) is what lets it."""
-        window = self.window
         if token:
             os.environ["XDG_ACTIVATION_TOKEN"] = token  # read by Qt's Wayland support when activating
-        window.show()
-        window.setWindowState(window.windowState() & ~Qt.WindowState.WindowMinimized)
-        window.raise_()
-        window.activateWindow()
+        self.window.present()
 
     def _when_connected(self, kind: str, value: Any) -> None:
         if self.client.connected:
@@ -104,13 +100,10 @@ class Desktop(QObject):
         QTimer.singleShot(REQUEST_TIMEOUT_MS, lambda: self._give_up(kind, value))
 
     def _run(self, kind: str, value: Any) -> None:
-        window = self.window
         if kind == "link":
-            window.request_download(value)
+            self.window.request_download(value)
         else:
-            window.request_download(value.get("url", ""), name=value.get("filename") or "",
-                                    headers=value.get("headers") or {}, kind=value.get("kind") or "",
-                                    captures=value.get("captures") or [])
+            self.window.show_request(value)
 
     def _give_up(self, kind: str, value: Any) -> None:
         if (kind, value) in self.pending:

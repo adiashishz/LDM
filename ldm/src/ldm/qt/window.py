@@ -133,6 +133,7 @@ class MainWindow(QMainWindow):
         client.removed.connect(self.downloads.remove)
         client.state_changed.connect(self._state_changed)
         client.progress.connect(self.downloads.apply_progress)
+        client.add_request.connect(self.show_request)  # from the browser, over the local channel
         self._timers = []
         for seconds, callback in ((1, self._tick), (2, self._refresh_torrents), (30, self._load_service_settings)):
             timer = QTimer(self, interval=seconds * 1000)
@@ -776,6 +777,20 @@ class MainWindow(QMainWindow):
             self.toast("Already in your list", "Add again", add)
 
         self.client.find_duplicates(url, checked)
+
+    def present(self) -> None:
+        """Show the window and bring it to the front (as far as the desktop allows)."""
+        self.show()
+        self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized)
+        self.raise_()
+        self.activateWindow()
+
+    def show_request(self, request: dict) -> None:
+        """A download from the browser: {"url", "filename", "headers", "kind", "captures"}."""
+        self.present()
+        self.request_download(request.get("url", ""), name=request.get("filename") or "",
+                              headers=request.get("headers") or {}, kind=request.get("kind") or "",
+                              captures=request.get("captures") or [])
 
     def _download_offered(self) -> None:
         self.offer_bar.hide()

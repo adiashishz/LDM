@@ -197,10 +197,13 @@ class SocketRemote:
     RETRY = 1.0  # seconds between attempts while the service isn't running
 
     def __init__(self, post: Post, on_connected: Callable[[bool], None],
-                 on_signal: Callable[[str, list[Any]], None], address: str | None = None):
+                 on_signal: Callable[[str, list[Any]], None], address: str | None = None,
+                 register_window: bool = False):
+        """`register_window`: this is LDM's window, which takes the browser's Add requests (AddRequest)."""
         from .. import channel
 
         self.channel = channel
+        self.register_window = register_window
         self.connected = False
         self._post, self._on_connected, self._on_signal = post, on_connected, on_signal
         self._closed = False
@@ -266,6 +269,8 @@ class SocketRemote:
                 await asyncio.sleep(self.RETRY)
                 continue
             self._writer = writer
+            if self.register_window:  # its reply (id 0) is ignored
+                writer.write(self.channel.encode({"id": 0, "method": "RegisterWindow", "params": []}))
             self._deliver(lambda: self._set_connected(True))
             try:
                 while line := await reader.readline():
