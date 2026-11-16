@@ -109,6 +109,7 @@ def main() -> None:
     for _ in range(20):
         window.sidebar.add_speed(sum(r["speed"] for r in SAMPLE) * (0.6 + 0.4 * (_ % 5) / 5))
     window.table.selectRow(0)
+    window.table.setFocus()  # no text cursor in the search field
     window._tick()
     for theme in ("light", "dark"):
         window.set_theme(theme)

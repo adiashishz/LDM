@@ -1,4 +1,4 @@
-"""`ldm-gui --qt` (for now): LDM's new window, a client of the background service.
+"""`ldm-gui`: LDM's window, a client of the background service (closing it never stops downloads).
 
     ldm-gui [LINK…]                   open the window (links: http(s), magnet: or .torrent files)
     ldm-gui --gapplication-service    started by D-Bus activation: wait hidden for a call from the desktop
@@ -25,7 +25,7 @@ SERVICE_WAIT_MS = 20_000  # started by D-Bus activation but never asked to show:
 
 
 def main(argv: list[str] | None = None) -> int:
-    argv = [a for a in (argv if argv is not None else sys.argv) if a != "--qt"]
+    argv = list(argv if argv is not None else sys.argv)
     service = SERVICE_FLAG in argv
     links = [a for a in argv[1:] if not a.startswith("--")]
     QCoreApplication.setOrganizationName("LDM")

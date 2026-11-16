@@ -14,14 +14,13 @@ Issues = "https://github.com/adiashishz/LDM/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.4"]
-gui = ["PyGObject>=3.50"]  # usually the distro package (python3-gobject)
-qt = ["PySide6-Essentials>=6.8"]  # the new window (QtCore, QtGui, QtWidgets, QtSvg); usually the distro package
+gui = ["PySide6-Essentials>=6.8"]  # the window (QtCore, QtGui, QtWidgets, QtSvg); usually the distro package
 
 [project.scripts]
 ldm = "ldm.cli:main"
 
 [project.gui-scripts]
-ldm-gui = "ldm.gui:main"
+ldm-gui = "ldm.qt.app:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ldm"]  # the project is named ldm-downloader, the package ldm
@@ -32,8 +31,3 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-filterwarnings = [
-    # raised inside PyGObject itself, not ldm
-    "ignore::DeprecationWarning:gi.*",
-    "ignore::gi.PyGIDeprecationWarning",
-]

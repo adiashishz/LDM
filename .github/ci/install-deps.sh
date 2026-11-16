@@ -7,34 +7,27 @@ set -eu
 case "$1" in
 fedora)
     dnf install -y --setopt=install_weak_deps=False \
-        python3 python3-gobject gobject-introspection gtk4 libadwaita python3-pyside6 \
+        python3 python3-pyside6 qt6-qtsvg \
         python3-httpx python3-socksio python3-dbus-fast python3-dns python3-secretstorage python3-cryptography \
         yt-dlp ffmpeg-free rb_libtorrent-python3 \
-        glib2 dbus-daemon xdg-utils desktop-file-utils \
-        xorg-x11-server-Xvfb xorg-x11-xauth util-linux
+        glib2 dbus-daemon xdg-utils desktop-file-utils util-linux
     ;;
 debian)  # Debian and Ubuntu
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
     apt-get install -y --no-install-recommends \
-        python3 python3-venv python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 \
+        python3 python3-venv \
+        python3-pyside6.qtcore python3-pyside6.qtgui python3-pyside6.qtwidgets python3-pyside6.qtsvg qt6-svg-plugins \
         python3-httpx python3-socksio python3-dbus-fast python3-dnspython python3-secretstorage python3-cryptography \
         yt-dlp ffmpeg python3-libtorrent \
-        libglib2.0-bin dbus-daemon xdg-utils desktop-file-utils \
-        xvfb xauth ca-certificates
-    # PySide6 (the Qt window): Debian 13 and Ubuntu 26.04 have it, Ubuntu 24.04 doesn't (Flatpak there).
-    if apt-cache show python3-pyside6.qtwidgets >/dev/null 2>&1; then
-        apt-get install -y --no-install-recommends \
-            python3-pyside6.qtcore python3-pyside6.qtgui python3-pyside6.qtwidgets python3-pyside6.qtsvg
-    fi
+        libglib2.0-bin dbus-daemon xdg-utils desktop-file-utils ca-certificates
     ;;
 arch)
     pacman -Syu --noconfirm --needed \
-        python python-gobject gtk4 libadwaita pyside6 qt6-svg \
+        python pyside6 qt6-svg \
         python-httpx python-socksio python-dbus-fast python-dnspython python-secretstorage python-cryptography \
         yt-dlp ffmpeg libtorrent-rasterbar \
-        glib2 dbus xdg-utils desktop-file-utils \
-        xorg-server-xvfb xorg-xauth
+        glib2 dbus xdg-utils desktop-file-utils
     ;;
 *)
     echo "usage: $0 fedora|debian|arch" >&2

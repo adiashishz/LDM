@@ -312,11 +312,15 @@ def doh_server():
 
 @pytest.fixture(scope="session")
 def qt_app():
-    """One QApplication for every Qt test, drawn offscreen and on Qt's own event loop: the GTK tests leave
-    GTK work on GLib's default context, which Qt would otherwise run (and crash on)."""
+    """One QApplication for every Qt test, drawn offscreen and on Qt's own event loop (not GLib's, which
+    other tests' GLib work, such as the proxy lookup, could leave sources on)."""
     pytest.importorskip("PySide6")
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
     os.environ["QT_NO_GLIB"] = "1"
     from PySide6.QtWidgets import QApplication
 
-    return QApplication.instance() or QApplication([])
+    from ldm.qt.theme import ui_font
+
+    app = QApplication.instance() or QApplication([])
+    app.setFont(ui_font())  # the bundled Inter, as the app uses: the same text widths on every system
+    return app

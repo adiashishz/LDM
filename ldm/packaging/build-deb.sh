@@ -2,9 +2,9 @@
 # Build the LDM .deb from the committed tree (git HEAD), like build-rpm.sh, then lint it.
 #
 #   build-deb.sh [SUFFIX DISTRIBUTION]     e.g.  build-deb.sh '~deb13' trixie
-#                                                build-deb.sh '~ubuntu24.04' noble
+#                                                build-deb.sh '~ubuntu26.04' resolute
 #
-# SUFFIX goes after the Debian revision (0.2.0-1~ubuntu24.04), so each release gets its own build:
+# SUFFIX goes after the Debian revision (0.2.0-1~ubuntu26.04), so each release gets its own build:
 # the Python version in Depends comes from the system it was built on.
 # Output goes to $DEB_OUT (default ~/debbuild): the two source tarballs, the source package and the .deb.
 #
