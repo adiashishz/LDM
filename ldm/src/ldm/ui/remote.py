@@ -15,7 +15,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from dbus_fast import Message, MessageFlag, MessageType
 from dbus_fast.aio import MessageBus
@@ -80,6 +80,29 @@ class Remote:
         if self._closed:
             return
         asyncio.run_coroutine_threadsafe(self._call(method, signature, args, callback, timeout), self._loop)
+
+    def run(self, job: Callable[[MessageBus], Awaitable[Any]], timeout: float = 5.0) -> Any:
+        """Run `job(bus)` on the D-Bus thread and wait for its result. Raises ConnectionError without a bus."""
+        self._ready.result(timeout)
+        if self._bus is None or self._closed:
+            raise ConnectionError("no session bus")
+        return asyncio.run_coroutine_threadsafe(job(self._bus), self._loop).result(timeout)
+
+    def submit(self, job: Callable[[MessageBus], Awaitable[Any]]) -> None:
+        """Run `job(bus)` on the D-Bus thread without waiting (errors are logged)."""
+        async def run() -> None:
+            if self._bus is not None:
+                try:
+                    await job(self._bus)
+                except Exception:  # noqa: BLE001 (a notification or reply that couldn't be sent)
+                    log.info("D-Bus job failed", exc_info=True)
+
+        if not self._closed:
+            asyncio.run_coroutine_threadsafe(run(), self._loop)
+
+    def post(self, function: Callable[[], None]) -> None:
+        """Run `function` on the window's thread (from the D-Bus thread)."""
+        self._deliver(function)
 
     # --- window's thread -------------------------------------------------------------------
 
