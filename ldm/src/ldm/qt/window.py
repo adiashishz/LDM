@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, Q
                                QMainWindow, QMenu, QMenuBar, QMessageBox, QSizePolicy, QSplitter, QStackedWidget, QToolButton,
                                QVBoxLayout, QWidget)
 
-from .. import __version__
+from .. import __version__, paths
 from ..batch import parse_link_list
 from ..clipboard import Offer
 from ..format import human, parse_rate
@@ -134,6 +134,8 @@ class MainWindow(QMainWindow):
         client.state_changed.connect(self._state_changed)
         client.progress.connect(self.downloads.apply_progress)
         client.add_request.connect(self.show_request)  # from the browser, over the local channel
+        client.show_requested.connect(self.present)
+        client.quit_requested.connect(QApplication.quit)
         self._timers = []
         for seconds, callback in ((1, self._tick), (2, self._refresh_torrents), (30, self._load_service_settings)):
             timer = QTimer(self, interval=seconds * 1000)
@@ -401,8 +403,9 @@ class MainWindow(QMainWindow):
         except OSError as e:
             self.toast(f"Could not start the download service: {e}")
             return
+        log = short_path(str(paths.log_dir() / "daemon.log"))
         QTimer.singleShot(5000, lambda: self.client.connected or self.toast(
-            "The download service did not start — see ~/.local/state/ldm/daemon.log"))
+            f"The download service did not start — see {log}"))
 
     def _load_service_settings(self) -> None:
         if self.client.connected:

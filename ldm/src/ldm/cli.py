@@ -1,6 +1,6 @@
 """Command-line interface.
 
-Most commands talk to the daemon (`ldm daemon`) over D-Bus. `ldm get` downloads in the
+Most commands talk to the daemon (`ldm daemon`) over D-Bus on Linux, the local channel elsewhere. `ldm get` downloads in the
 foreground without a daemon (Ctrl-C pauses; `ldm get --resume ID` continues).
 """
 
@@ -87,7 +87,16 @@ def cmd_daemon(args) -> int:
     except AlreadyRunning:
         print("the ldm daemon is already running")
         return 1
-    if restart:  # same process id, so systemd keeps tracking it
+    if restart and sys.platform == "win32":  # no exec there: a new detached service, then this one ends
+        import subprocess
+
+        from .ui.remote import detached
+        logs = {"stdout": sys.stdout, "stderr": sys.stderr} if sys.stdout and sys.stderr else {}  # the same log
+        for stream in logs.values():
+            stream.flush()
+        subprocess.Popen([sys.executable, "-m", "ldm", *sys.argv[1:]], stdin=subprocess.DEVNULL, **logs,
+                         **detached())
+    elif restart:  # same process id, so systemd keeps tracking it
         import os
         os.execv(sys.executable, [sys.executable, "-m", "ldm", *sys.argv[1:]])
     return 0

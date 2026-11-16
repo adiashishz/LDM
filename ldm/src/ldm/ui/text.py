@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -61,6 +62,8 @@ def short_path(path: str) -> str:
     """For display: ~ for the home folder, and a folder's real location rather than the document portal's
     path for it (folders chosen inside a Flatpak)."""
     path, home = host_path(path), str(Path.home())
+    if sys.platform == "win32":  # "~" means nothing to Windows users
+        return path
     return "~" + path[len(home):] if path == home or path.startswith(home + "/") else path
 
 

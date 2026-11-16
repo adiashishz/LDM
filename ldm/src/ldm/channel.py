@@ -48,6 +48,11 @@ def tcp_file() -> Path:
     return Path(os.environ.get("LDM_SOCKET") or runtime_folder() / "service.json")
 
 
+def address() -> Path:
+    """This system's address of the service: the socket, or on Windows the file with its port and token."""
+    return tcp_file() if TCP else socket_path()
+
+
 def private_folder(path: Path) -> None:
     """The user's own folder for the channel (on Windows, LocalAppData is private already; chmod is harmless)."""
     path.mkdir(parents=True, exist_ok=True)

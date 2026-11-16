@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Callable
+from typing import Awaitable, Callable
 
 from dbus_fast import Message, MessageType, Variant
 from dbus_fast.aio import MessageBus
@@ -19,6 +19,43 @@ log = logging.getLogger(__name__)
 
 COUNTDOWN = 60.0
 ACTIONS = {"suspend": ("Suspend", "Suspending"), "poweroff": ("PowerOff", "Powering off")}
+
+
+class LocalFinisher:
+    """Without D-Bus (Windows, macOS): "quit" closes the windows on the local channel, then the service;
+    suspend and power off use `power` (the system's own calls) after the countdown, when there is one."""
+
+    def __init__(self, close_windows: Callable[[], object], stop: Callable[[], None],
+                 power: Callable[[str], Awaitable[None]] | None = None, countdown: float = COUNTDOWN):
+        self.close_windows, self.stop, self.power, self.countdown = close_windows, stop, power, countdown
+        self._pending: asyncio.Task | None = None
+
+    def run(self, action: str) -> None:
+        if action == "quit":
+            self.close_windows()
+            self.stop()
+        elif action in ACTIONS and self.power is None:
+            log.warning("all downloads finished, but %s isn't available on this system", action)
+        elif action in ACTIONS and self._pending is None:
+            self._pending = asyncio.get_running_loop().create_task(self._count_down(action))
+
+    def cancel(self, *_) -> None:
+        if self._pending is not None:
+            self._pending.cancel()
+            self._pending = None
+
+    async def _count_down(self, action: str) -> None:
+        try:
+            await asyncio.sleep(self.countdown)
+            await self.power(action)
+            log.info("all downloads finished: %s", action)
+        except asyncio.CancelledError:
+            log.info("%s cancelled", action)
+            raise
+        except Exception as e:
+            log.warning("could not %s: %s", action, e)
+        finally:
+            self._pending = None
 
 
 class Finisher:

@@ -25,6 +25,8 @@ class DaemonClient(QObject, ServiceCalls):
     progress = Signal(object)                        # [(id, done, size|-1, speed)]
     connected_changed = Signal(bool)
     add_request = Signal(object)  # the browser's Add request (local channel), as {"url", "filename", …}
+    show_requested = Signal()     # the service asks the window to come forward (local channel)
+    quit_requested = Signal()     # … or to close (all downloads finished, "quit" chosen)
 
     _posted = Signal(object)  # a callable from the D-Bus thread, run on this object's thread
 
@@ -72,6 +74,10 @@ class DaemonClient(QObject, ServiceCalls):
             self.progress.emit([tuple(entry) for entry in args[0]])
         elif name == "AddRequest" and args and isinstance(args[0], dict):
             self.add_request.emit(args[0])
+        elif name == "Show":
+            self.show_requested.emit()
+        elif name == "Quit":
+            self.quit_requested.emit()
 
     def _call(self, method: str, signature: str, args: list[Any], callback: Callback | None,
               timeout: float | None = DEFAULT_TIMEOUT) -> None:

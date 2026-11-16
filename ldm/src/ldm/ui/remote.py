@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import subprocess
 import sys
 import threading
@@ -20,6 +19,7 @@ from typing import Any, Awaitable, Callable
 from dbus_fast import Message, MessageFlag, MessageType
 from dbus_fast.aio import MessageBus
 
+from .. import paths
 from ..busnames import BUS_NAME, ERROR_PREFIX, INTERFACE, OBJECT_PATH
 from ..variants import to_vardict, unwrap
 
@@ -207,7 +207,7 @@ class SocketRemote:
         self.connected = False
         self._post, self._on_connected, self._on_signal = post, on_connected, on_signal
         self._closed = False
-        self._path = Path(address) if address else (channel.tcp_file() if channel.TCP else channel.socket_path())
+        self._path = Path(address) if address else channel.address()
         self._writer: asyncio.StreamWriter | None = None
         self._pending: dict[int, asyncio.Future] = {}
         self._next_id = 1
@@ -327,12 +327,20 @@ class SocketRemote:
 
 def start_daemon() -> None:
     """Start `ldm daemon` in its own session so it outlives the window. Raises OSError on failure."""
-    log_dir = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "ldm"
+    log_dir = paths.log_dir()
     log_dir.mkdir(parents=True, exist_ok=True)
     with open(log_dir / "daemon.log", "ab") as log_file:
         process = subprocess.Popen([sys.executable, "-m", "ldm", "daemon"], stdin=subprocess.DEVNULL,
-                                   stdout=log_file, stderr=log_file, start_new_session=True)
+                                   stdout=log_file, stderr=log_file, **detached())
     threading.Thread(target=process.wait, name="ldm-daemon-reaper", daemon=True).start()  # reap on exit
+
+
+def detached() -> dict[str, Any]:
+    """Popen options for a process that outlives its starter (on Windows: without a console window)."""
+    if sys.platform == "win32":
+        return {"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+                | subprocess.CREATE_NO_WINDOW}
+    return {"start_new_session": True}
 
 
 class ServiceCalls:

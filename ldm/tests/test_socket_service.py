@@ -3,7 +3,9 @@ and the token on Windows' TCP channel (tried here on Linux too)."""
 
 import asyncio
 import os
+import random
 import stat
+import sys
 
 import pytest
 
@@ -13,6 +15,9 @@ from ldm.manager import Manager
 from ldm.passwords import MemoryPasswords
 from ldm.socket_service import AlreadyListening, SocketService
 from ldm.store import Store
+
+
+unix_only = pytest.mark.skipif(sys.platform == "win32", reason="Unix sockets (Windows uses TCP)")
 
 
 def run(coroutine):
@@ -46,6 +51,7 @@ def test_both_channels_offer_the_same_methods():
     assert dbus_methods == METHODS
 
 
+@unix_only
 def test_calls_errors_and_privacy(tmp_path):
     path = tmp_path / "rt" / "ldm" / "service.sock"
 
@@ -70,6 +76,7 @@ def test_calls_errors_and_privacy(tmp_path):
     assert not path.exists()  # removed when the service stops
 
 
+@unix_only
 def test_socket_is_private_and_one_service_only(tmp_path):
     path = tmp_path / "rt" / "ldm" / "service.sock"
 
@@ -115,5 +122,64 @@ def test_tcp_channel_needs_the_token(tmp_path, monkeypatch):
 
     refused, listed, file_mode = run(scenario())
     assert refused == b"" and listed == {"id": 1, "result": []}
-    assert file_mode == 0o600  # the token: readable by the user only
+    if sys.platform != "win32":  # (Windows: LocalAppData is the user's own; modes don't apply)
+        assert file_mode == 0o600  # the token: readable by the user only
     assert not path.exists()  # removed when the service stops
+
+
+def test_service_without_dbus(tmp_path, http_server):
+    """Windows and macOS: the service on the local channel only. A second one refuses to start, and when
+    all downloads finished with "quit" chosen, the window is told to close and the service stops."""
+    from ldm.daemon import AlreadyRunning, serve
+    from ldm.service_client import connect_service
+
+    data = random.Random(21).randbytes(80_000)
+    cfg, url = http_server(data=data)
+    options = {"passwords": MemoryPasswords()}
+
+    async def scenario():
+        ready = asyncio.Event()
+        service = asyncio.create_task(serve(db_path=tmp_path / "a.db", stop=asyncio.Event(), ready=ready,
+                                            manager_options=options, manage_autostart=False, dbus=False))
+        await ready.wait()
+        with pytest.raises(AlreadyRunning):
+            await serve(db_path=tmp_path / "b.db", stop=asyncio.Event(), manager_options=options,
+                        manage_autostart=False, dbus=False)
+        window = await connect_service("socket")
+        told = asyncio.Event()
+        window.on("Quit", told.set)
+        assert await window.call("RegisterWindow") is True
+        await window.call("SetSettings", {"finish_action": "quit"})
+        await window.call("Add", url, {"dir": str(tmp_path / "out")})
+        await asyncio.wait_for(told.wait(), 15)
+        stopped = await asyncio.wait_for(service, 15)
+        await window.close()
+        return stopped
+
+    assert run(scenario()) is False  # stopped, not restarting
+    assert (tmp_path / "out" / "test.bin").read_bytes() == data
+
+
+def test_local_finisher():
+    """Without D-Bus: "quit" closes the windows, then the service; suspend and power off wait for the
+    countdown, which a starting download cancels; without the system's power calls they do nothing."""
+    from ldm.finish import LocalFinisher
+
+    async def scenario():
+        events = []
+
+        async def power(action):
+            events.append(action)
+
+        finisher = LocalFinisher(lambda: events.append("windows"), lambda: events.append("stop"), power,
+                                 countdown=0.05)
+        finisher.run("quit")
+        finisher.run("suspend")
+        finisher.cancel()
+        await asyncio.sleep(0.1)
+        finisher.run("poweroff")
+        await asyncio.sleep(0.1)
+        LocalFinisher(lambda: None, lambda: None).run("suspend")  # logged, nothing else
+        return events
+
+    assert run(scenario()) == ["windows", "stop", "poweroff"]

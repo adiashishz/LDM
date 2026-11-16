@@ -6,6 +6,9 @@ Three more methods, for what D-Bus does by the window's own bus name:
     WindowOpen() -> bool      whether a window is connected (the browser bridge's "ping")
     ShowAddDialog(request) -> int   sends {"signal": "AddRequest", "args": [request]} to the windows;
                                     returns how many got it (0: start the window, then ask again)
+
+The service itself also sends the windows "Show" (bring the window forward) and "Quit" (close it, e.g. when
+all downloads finished and the setting says quit).
 """
 
 from __future__ import annotations
@@ -33,7 +36,7 @@ class SocketService:
     def __init__(self, api: Api, path: Path | None = None):
         self.api = api
         self.tcp = channel.TCP
-        self.path = path or (channel.tcp_file() if self.tcp else channel.socket_path())
+        self.path = path or channel.address()
         self.token = ""
         self.server: asyncio.base_events.Server | None = None
         self.clients: set[asyncio.StreamWriter] = set()      # connected (on TCP: after the token)
@@ -85,6 +88,8 @@ class SocketService:
         except (OSError, ValueError, KeyError, asyncio.TimeoutError):
             return False
         writer.close()
+        with contextlib.suppress(OSError):
+            await writer.wait_closed()
         return True
 
     # --- clients --------------------------------------------------------------------------------
@@ -152,8 +157,12 @@ class SocketService:
         request = params[0] if params else None
         if not isinstance(request, dict) or not isinstance(request.get("url"), str):
             raise ValueError("ShowAddDialog needs a request with a url")
+        return self.tell_windows("AddRequest", [request])
+
+    def tell_windows(self, name: str, args: list | None = None) -> int:
+        """A signal for LDM's windows only (AddRequest, Show, Quit); returns how many windows got it."""
         for window in list(self.windows):
-            self._send(window, {"signal": "AddRequest", "args": [request]})
+            self._send(window, {"signal": name, "args": args or []})
         return len(self.windows)
 
     def _signal(self, name: str, args: list) -> None:

@@ -6,6 +6,16 @@ from ldm.store import DEFAULT_SETTINGS
 from ldm.ui.remote import ServiceCalls
 
 
+def real_client(daemon):
+    """A DaemonClient of the test service (the `daemon` fixture): on its bus, or on the local channel."""
+    from ldm import channel
+    from ldm.qt.client import DaemonClient
+
+    if daemon:
+        return DaemonClient(daemon, transport="dbus")
+    return DaemonClient(str(channel.address()), transport="socket")
+
+
 class FakeClient(QObject, ServiceCalls):
     added = Signal("qulonglong")
     removed = Signal("qulonglong")
@@ -13,6 +23,8 @@ class FakeClient(QObject, ServiceCalls):
     progress = Signal(object)
     connected_changed = Signal(bool)
     add_request = Signal(object)
+    show_requested = Signal()
+    quit_requested = Signal()
     connected = True
 
     def __init__(self, rows, **answers):
