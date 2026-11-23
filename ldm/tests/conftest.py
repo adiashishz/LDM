@@ -76,6 +76,7 @@ class ServerConfig:
     deny: set[str] = field(default_factory=set)              # paths answered with 403
     require: dict[str, str] = field(default_factory=dict)    # headers that must match exactly, else 403
     bytes_sent: int = 0
+    sending: int = 0                # responses whose body is being sent right now
     active_ranges: int = 0          # bounded range requests being served right now
     max_active_ranges: int = 0
     range_limit: int = 0            # more simultaneous range requests than this get HTTP 429 ...
@@ -181,11 +182,14 @@ class _Handler(BaseHTTPRequestHandler):
             if cfg.drops > 0 and length > cfg.drop_after:
                 cfg.drops -= 1
                 cut = cfg.drop_after
+        with cfg.lock:
+            cfg.sending += 1
         try:
             self._send_body(cfg, data, start, length, cut)
         finally:
-            if bounded:
-                with cfg.lock:
+            with cfg.lock:
+                cfg.sending -= 1
+                if bounded:
                     cfg.active_ranges -= 1
 
     def _send_body(self, cfg: ServerConfig, data: bytes, start: int, length: int, cut: int | None) -> None:
@@ -229,6 +233,15 @@ def _authorized(auth: tuple[str, str, str], method: str, header: str) -> bool:
     ha1, ha2 = md5(f"{user}:ldm:{password}"), md5(f"{method}:{fields.get('uri')}")
     expected = md5(f"{ha1}:{DIGEST_NONCE}:{fields.get('nc')}:{fields.get('cnonce')}:auth:{ha2}")
     return fields.get("username") == user and fields.get("response") == expected
+
+
+def quiet(cfg: ServerConfig, timeout: float = 10) -> None:
+    """Wait until the server sends nothing (a stopped download's connections have noticed it's gone), so
+    `bytes_sent` counts only what comes next."""
+    deadline = time.monotonic() + timeout
+    while cfg.sending:
+        assert time.monotonic() < deadline, "the server is still sending"
+        time.sleep(0.01)
 
 
 @pytest.fixture
