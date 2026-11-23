@@ -6,7 +6,8 @@ A download manager for Linux: fast multi-part downloads that survive restarts, v
 torrents, a scheduler, and a browser extension that hands your downloads to it. Built with
 Qt (PySide6) and Python, inspired by 1DM for Android and IDM.
 
-Downloads run in a small background service, so closing the window never stops them.
+Downloads run in a small background service, so closing the window never stops them. A preview for
+Windows 10 and 11 is available too.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="ldm/data/screenshots/main-dark.png">
@@ -25,7 +26,7 @@ Downloads run in a small background service, so closing the window never stops t
 - **Scheduler and conditions:** a default time window plus per-download times, "only on unmetered
   connections", battery limit, data-usage limit, keep the computer awake, and suspend or power off
   when everything is done.
-- **Browser extension** for Firefox, Chrome and Brave: takes over browser downloads with their
+- **Browser extension** for Firefox, Chrome, Brave and Edge: takes over browser downloads with their
   cookies, finds the videos and files on a page (including a same-site crawler), and opens LDM's
   confirmation dialog.
 - **Desktop integration:** notifications, start at login, tray icon (where the desktop has a tray),
@@ -89,6 +90,25 @@ As a Flatpak, LDM saves to your Downloads folder; choosing another folder in LDM
 dialog) gives it access to that folder. Start at login goes through your desktop's background apps setting.
 Brave from Flathub can't reach a Flatpak LDM; use Firefox, Chrome, Chromium or Brave from your distribution.
 
+## Install on Windows 10 or 11 (preview)
+
+Download `LDM-Setup-<version>.exe` from the [latest release](https://github.com/adiashishz/LDM/releases/latest)
+and run it. It installs LDM for your user only (no administrator rights) into
+`%LOCALAPPDATA%\Programs\LDM`, with yt-dlp, FFmpeg and Node.js included, and sets up:
+
+- the browser bridge for Firefox, Chrome, Edge, Brave and Chromium (load the extension as described under
+  [Browser extension](#browser-extension); Edge uses the Chrome zip);
+- magnet links and `.torrent` files: LDM takes them if no other program does, otherwise choose LDM in
+  *Settings → Apps → Default apps*;
+- starting the download service at login, with LDM's icon in the tray (Show LDM, Pause All, Resume All, Quit);
+- the `ldm` command in new terminals.
+
+The installer isn't signed yet, so Windows may say "Windows protected your PC": choose **More info**, then
+**Run anyway**. Downloads, settings and the download list are kept in `%LOCALAPPDATA%\LDM` (logs in its
+`Logs` folder) and stay when you uninstall LDM (*Settings → Apps → LDM → Uninstall*). Windows support is
+new: please [report problems](https://github.com/adiashishz/LDM/issues). Not on Windows yet: pausing on
+metered connections, and the copied-link prompt outside LDM's window.
+
 ## Install from source (Fedora)
 
 LDM uses the distribution's Qt (PySide6), so the virtual environment is built on the system Python:
@@ -118,7 +138,7 @@ cd extension && python3 build.py            # dist/firefox and dist/chromium
 
 - **Firefox:** `about:debugging` → This Firefox → Load Temporary Add-on → `dist/firefox/manifest.json`
   (or the `ldm-firefox-*.zip` from the release). Firefox removes temporary add-ons when it restarts.
-- **Chrome / Brave:** the extensions page → Developer mode → Load unpacked → `dist/chromium`
+- **Chrome / Brave / Edge:** the extensions page → Developer mode → Load unpacked → `dist/chromium`
   (or a folder with the release's `ldm-chromium-*.zip` unzipped into it).
 - Brave as a Flatpak also needs D-Bus access (the installer prints the `flatpak override` command).
 
@@ -147,6 +167,9 @@ More commands are in [`ldm/README.md`](ldm/README.md).
 - `ldm/packaging/io.github.adiashishz.LDM.yml`: Flatpak manifest (KDE 6.11 runtime with Qt's PySide base;
   ffmpeg, libtorrent and Node.js built in). Python dependencies are pinned in `flatpak-python-deps.yml` by `flatpak-python-deps.py`;
   CI builds it, runs `flatpak-builder-lint` and the smoke test inside the sandbox.
+- `ldm/packaging/windows/`: the Windows installer. `build.py` (run on Windows) bundles LDM with PyInstaller,
+  including yt-dlp, FFmpeg (LGPL build) and Node.js at pinned versions, and makes the Inno Setup installer;
+  CI builds it, then installs, uses and uninstalls it with `smoke-test.py`.
 - `extension/sign-firefox.sh`: signs the Firefox add-on for permanent installs.
 
 Releases: see [RELEASING.md](RELEASING.md).
