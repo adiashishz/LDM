@@ -115,6 +115,26 @@ def bundle() -> Path:
     return WORK / "dist" / "LDM"
 
 
+def report(bundle: Path, top: int = 25) -> None:
+    """Where the bundle's space goes: its size, the largest folders under _internal and the largest files."""
+    files = [(path.stat().st_size, path) for path in bundle.rglob("*") if path.is_file()]
+    total = sum(size for size, _ in files)
+    folders: dict[str, int] = {}
+    for size, path in files:
+        rel = path.relative_to(bundle).parts
+        depth = 3 if rel[:2] == ("_internal", "PySide6") else 2 if rel[0] == "_internal" else 1
+        key = "/".join(rel[:depth])
+        folders[key] = folders.get(key, 0) + size
+    mb = lambda n: f"{n / 1e6:8.1f} MB"  # noqa: E731
+    print(f"bundle: {mb(total)} in {len(files)} files")
+    print("largest folders:")
+    for key, size in sorted(folders.items(), key=lambda item: -item[1])[:top]:
+        print(f"  {mb(size)}  {key}")
+    print("largest files:")
+    for size, path in sorted(files, reverse=True)[:top]:
+        print(f"  {mb(size)}  {path.relative_to(bundle)}")
+
+
 def installer(source: Path) -> Path:
     iscc = next((path for path in INNO if path.exists()), None) or shutil.which("iscc")
     if not iscc:
@@ -136,8 +156,10 @@ def main() -> int:
     icon()
     source = bundle()
     print(f"bundle: {source}")
+    report(source)
     if not args.no_installer:
-        print(f"installer: {installer(source)}")
+        setup = installer(source)
+        print(f"installer: {setup} ({setup.stat().st_size / 1e6:.1f} MB)")
     return 0
 
 
