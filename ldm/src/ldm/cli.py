@@ -466,9 +466,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("daemon", help="run the download service")
     sub.add_parser("clipboard-watch", help="offer copied links in a notification (where the desktop allows it)")
     p = sub.add_parser("install-browser-integration",
-                       help="install the browser bridge, D-Bus activation and desktop file")
-    p.add_argument("--browser", action="append", choices=["firefox", "chrome", "chromium", "brave", "brave-flatpak"],
-                   help="limit to these browsers (default: the ones found)")
+                       help="install the browser bridge, D-Bus activation and desktop file (Windows: "
+                            "the bridge, magnet links and .torrent files)")
+    p.add_argument("--browser", action="append",
+                   choices=["firefox", "chrome", "chromium", "edge", "brave"] if sys.platform == "win32"
+                   else ["firefox", "chrome", "chromium", "brave", "brave-flatpak"],
+                   help="limit to these browsers (default: the ones found; on Windows all of them)")
     p.add_argument("--uninstall", action="store_true")
     p.add_argument("--dry-run", action="store_true", help="only show what would be written")
     p.add_argument("--flatpak-override", action="store_true",
@@ -497,6 +500,13 @@ def main(argv: list[str] | None = None) -> int:
             return asyncio.run(run_watcher())
         except KeyboardInterrupt:
             return 130
+    if args.command == "install-browser-integration" and sys.platform == "win32":
+        from . import winintegration
+        if args.uninstall:
+            winintegration.uninstall(args.browser)
+        else:
+            winintegration.install(args.browser, dry_run=args.dry_run)
+        return 0
     if args.command == "install-browser-integration":
         from . import integration
         if args.uninstall:

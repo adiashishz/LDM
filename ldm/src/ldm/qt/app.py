@@ -3,7 +3,8 @@
     ldm-gui [LINK…]                   open the window (links: http(s), magnet: or .torrent files)
     ldm-gui --gapplication-service    started by D-Bus activation: wait hidden for a call from the desktop
 
-Only one window runs: a second start hands its links to the open window and exits.
+Only one window runs: a second start hands its links to the open window and exits (Linux: through D-Bus;
+Windows and macOS: ldm.qt.single).
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     app.setFont(ui_font())
     client = DaemonClient(os.environ.get("LDM_BUS_ADDRESS"))
 
-    desktop = None
+    desktop = single = None
     if sys.platform.startswith("linux"):
         from .desktop import Desktop
 
@@ -48,12 +49,22 @@ def main(argv: list[str] | None = None) -> int:
             forwarded = desktop.forward([to_uri(link) for link in links], token)
             client.close()
             return 0 if forwarded else 1
+    else:  # Windows, macOS: one window per user through a local server
+        from .single import SingleInstance
+
+        single = SingleInstance()
+        if single.forward([to_uri(link) for link in links]):  # a window is open: it takes over this start
+            client.close()
+            return 0
+        single.listen()
 
     window = MainWindow(client)
     if desktop is not None:
         desktop.window = window
     else:  # nothing starts the service on demand here: the window does (a second one would refuse to run)
         QTimer.singleShot(SERVICE_START_MS, lambda: client.connected or window.start_daemon())
+    if single is not None:
+        single.received.connect(lambda uris: open_links(window, uris))
     if not service:
         window.show()
     elif desktop is not None:
@@ -64,6 +75,13 @@ def main(argv: list[str] | None = None) -> int:
         else:
             window.request_download(to_uri(link))
     return app.exec()
+
+
+def open_links(window: MainWindow, uris: list[str]) -> None:
+    """Links from a second start (Windows, macOS): bring the window forward and add each one."""
+    window.present()
+    for uri in uris:
+        window.request_download(uri)
 
 
 def to_uri(link: str) -> str:

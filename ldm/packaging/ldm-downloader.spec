@@ -95,6 +95,7 @@ cd ldm
 %doc README.md
 %{_bindir}/ldm
 %{_bindir}/ldm-gui
+%{_bindir}/ldm-nmhost
 %{_datadir}/applications/io.github.adiashishz.LDM.desktop
 %{_metainfodir}/io.github.adiashishz.LDM.metainfo.xml
 %{_datadir}/icons/hicolor/scalable/apps/io.github.adiashishz.LDM.svg

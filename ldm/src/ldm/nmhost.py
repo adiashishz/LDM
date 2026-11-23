@@ -157,9 +157,15 @@ def channel_call(method: str, *params):
 
 
 def launcher(variable: str, name: str) -> list:
-    """How to start `ldm` or `ldm-gui`: LDM_COMMAND / LDM_GUI_COMMAND (installers set these), else on PATH."""
+    """How to start `ldm` or `ldm-gui`: LDM_COMMAND / LDM_GUI_COMMAND (installers set these), next to this
+    bridge's Python (a venv, or Windows' Scripts folder, which isn't on PATH), else on PATH."""
     if os.environ.get(variable):
         return split_command(os.environ[variable])
+    folder = os.path.dirname(sys.executable)
+    program = name + (".exe" if sys.platform == "win32" else "")
+    for beside in (os.path.join(folder, program), os.path.join(folder, "Scripts", program)):  # Scripts: pip on Windows
+        if os.path.isfile(beside):
+            return [beside]
     found = shutil.which(name)
     if not found:
         raise HostError(f"can't start LDM: {name} not found")

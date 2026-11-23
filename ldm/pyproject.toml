@@ -21,6 +21,7 @@ gui = ["PySide6-Essentials>=6.8"]  # the window (QtCore, QtGui, QtWidgets, QtSvg
 
 [project.scripts]
 ldm = "ldm.cli:main"
+ldm-nmhost = "ldm.nmhost:main"  # the browser bridge (Windows browsers start a program, not a script)
 
 [project.gui-scripts]
 ldm-gui = "ldm.qt.app:main"
