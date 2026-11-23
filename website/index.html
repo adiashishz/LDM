@@ -11,17 +11,17 @@
 <meta property="og:image" content="{{SITE}}/screenshot.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cantarell:wght@400;700&amp;family=Source+Code+Pro:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
 <style>
-  /* GNOME's own look, so LDM's page feels like the app: Cantarell, warm greys, Adwaita blue. */
+  /* The app's look: Inter (the font LDM's window uses), quiet greys and a blue accent. */
   :root {
     --bg: #f6f5f4; --card: #ffffff; --fg: #241f31; --fg-2: #3d3846; --dim: #5e5c64;
     --line: rgba(0, 0, 6, .10); --shadow: 0 0 0 1px rgba(0, 0, 6, .07), 0 1px 3px rgba(0, 0, 6, .06);
     --accent: #1c71d8; --accent-fg: #ffffff; --link: #1a5fb4;
     --pill: #e3e1de; --term: #241f31; --term-fg: #f6f5f4; --term-button: #3d3846;
     --code-bg: #f0eeec;
-    --sans: Cantarell, "Noto Sans", "Segoe UI", system-ui, sans-serif;
-    --mono: "Source Code Pro", "Noto Sans Mono", ui-monospace, monospace;
+    --sans: Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Menlo, monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -38,26 +38,25 @@
   a { color: var(--link); }
   .wrap { max-width: 860px; margin: 0 auto; padding-left: max(16px, 4vw); padding-right: max(16px, 4vw); }
   h1, h2, h3 { line-height: 1.15; text-wrap: balance; }
-  h2 { margin: 0; font-size: 30px; }
+  h2 { margin: 0; font-size: 30px; letter-spacing: -.4px; }
   code { font-family: var(--mono); font-size: .85em; background: var(--code-bg); padding: 2px 6px; border-radius: 4px; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   header { max-width: 1120px; margin: 0 auto; padding: 14px max(16px, 4vw); display: flex; align-items: center;
            justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
-  .brand { display: flex; align-items: center; gap: 10px; color: var(--fg); text-decoration: none; font-weight: 700; font-size: 18px; }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--fg); text-decoration: none; font-weight: 700; font-size: 18px; letter-spacing: -.2px; }
   nav { display: flex; gap: 2px; flex-wrap: wrap; }
-  nav a { padding: 8px 12px; border-radius: 8px; color: var(--fg-2); text-decoration: none; font-weight: 700; font-size: 15px; }
+  nav a { padding: 8px 12px; border-radius: 8px; color: var(--fg-2); text-decoration: none; font-weight: 600; font-size: 15px; }
   nav a:hover { background: var(--pill); }
 
   .hero { padding-top: 48px; text-align: center; }
   .hero .wrap { display: flex; flex-direction: column; align-items: center; gap: 18px; }
-  .hero h1 { margin: 0; font-size: 52px; letter-spacing: -.5px; }
+  .hero h1 { margin: 0; font-size: 52px; letter-spacing: -1.5px; }
   .hero .tagline { margin: 0; font-size: 24px; color: var(--fg-2); text-wrap: balance; }
-  .hero .meta { margin: 0; font-size: 14px; color: var(--dim); }
   .hero-icon { width: 128px; height: 128px; filter: drop-shadow(0 6px 14px rgba(26, 95, 180, .25)); }
   .buttons { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
   .button { display: inline-flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 28px; border-radius: 999px;
-            font-weight: 700; text-decoration: none; }
+            font-weight: 600; text-decoration: none; }
   .button.primary { background: var(--accent); color: var(--accent-fg); }
   .button.secondary { background: var(--pill); color: var(--fg); }
   .shot { max-width: 1000px; margin: 48px auto 0; padding: 0 max(16px, 4vw); }
@@ -84,20 +83,20 @@
   .panel p { margin: 0; color: var(--dim); font-size: 15px; }
   .downloads { display: flex; gap: 10px; flex-wrap: wrap; }
   .downloads a { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; border-radius: 10px;
-                 background: var(--accent); color: var(--accent-fg); font-weight: 700; text-decoration: none; font-size: 15px; }
+                 background: var(--accent); color: var(--accent-fg); font-weight: 600; text-decoration: none; font-size: 15px; }
   .terminal { display: flex; align-items: center; gap: 10px; background: var(--term); color: var(--term-fg); border-radius: 8px;
               padding: 10px 10px 10px 16px; }
   .terminal code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; background: none; padding: 0; font-size: 14px; }
   .terminal button { flex: none; min-height: 36px; padding: 0 14px; border: 0; border-radius: 6px; background: var(--term-button);
                      color: var(--term-fg); font: 700 14px var(--sans); cursor: pointer; }
 
-  .stores { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .stores { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }  /* 2 × 2 */
   .stores a { display: flex; flex-direction: column; gap: 2px; padding: 16px 18px; color: var(--fg); text-decoration: none; }
   .stores span { font-size: 14px; color: var(--dim); }
 
   .questions { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
   .questions details { padding: 18px 0; border-bottom: 1px solid var(--line); }
-  .questions summary { font-weight: 700; font-size: 18px; cursor: pointer; }
+  .questions summary { font-weight: 600; font-size: 18px; cursor: pointer; }
   .questions p { margin: 10px 0 0; color: var(--dim); }
 
   footer { max-width: 1120px; margin: 96px auto 0; padding: 28px max(16px, 4vw) 44px; border-top: 1px solid var(--line);
@@ -134,7 +133,6 @@
         </a>
         <a class="button secondary" href="{{REPO}}">Source code</a>
       </div>
-      <p class="meta">Version {{VERSION}} · Fedora, Debian, Ubuntu, Arch, Flatpak and Windows (preview) · MIT license</p>
     </div>
     <div class="shot">
       <picture>
