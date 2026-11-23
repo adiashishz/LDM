@@ -3,15 +3,17 @@
 #   ldm-service.exe  the download service (no console; at login, and started by the window and the bridge)
 #   ldm.exe          the command line
 #   ldm-nmhost.exe   the browser bridge (the browsers talk to it over stdin/stdout)
-# and in _internal: yt-dlp (its official zipimport build, so LDM's "update yt-dlp" can replace it) and the
-# tools folder (ffmpeg, ffprobe and node). build.py prepares those and runs this with LDM_BUILD set.
+# and in _internal: yt-dlp (its official zipimport build, so LDM's "update yt-dlp" can replace it). build.py
+# prepares it, runs this with LDM_BUILD set, and then copies the tools folder (ffmpeg, ffprobe and node) in
+# itself: through PyInstaller, ffmpeg's libraries would be analysed and collected a second time.
 #
 # yt-dlp is analysed from the pip copy, so the bundle gets what it needs (standard library modules, its
 # extras), and then its own modules are left out: the zip is what LDM imports, and updates.
 #
 # Size: the Python modules are files in _internal (noarchive), so the four programs share one copy instead of
-# each carrying its own archive; Qt's software OpenGL (the window is plain widgets) and Qt's translations
-# (LDM's text is English) are left out. build.py prints what's left, largest first.
+# each carrying its own archive; Qt's software OpenGL (the window is plain widgets), Qt's translations
+# (LDM's text is English), Pillow's AVIF and WebP plugins (the tray icon is PNG/ICO) and setuptools (unused)
+# are left out. build.py prints what's left, largest first.
 import os
 from pathlib import Path
 
@@ -37,9 +39,10 @@ DATAS = (
     + collect_data_files("certifi")
     + collect_data_files("yt_dlp_ejs")   # the JavaScript yt-dlp runs with node for YouTube
     + [(str(WORK / "yt-dlp" / "yt-dlp"), "yt-dlp")]
-    + [(str(path), "tools") for path in sorted((WORK / "tools").iterdir())]
 )
-EXCLUDES = ["tkinter", "dbus_fast", "secretstorage", "gi"]
+EXCLUDES = ["tkinter", "dbus_fast", "secretstorage", "gi",
+            "PIL._avif", "PIL.AvifImagePlugin", "PIL._webp", "PIL.WebPImagePlugin",  # Pillow skips missing plugins
+            "setuptools", "pkg_resources"]
 LEFT_OUT_BINARIES = {"opengl32sw.dll"}  # Qt's software OpenGL renderer
 
 
