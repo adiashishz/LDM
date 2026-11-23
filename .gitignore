@@ -15,3 +15,6 @@ __pycache__/
 # Extension build output
 extension/dist/
 node_modules/
+
+# Windows installer build output (ldm/packaging/windows/build.py)
+/build/

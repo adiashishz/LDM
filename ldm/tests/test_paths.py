@@ -79,3 +79,37 @@ def test_seek_write_puts_parts_in_place(tmp_path):
     finally:
         os.close(fd)
     assert path.read_bytes() == b"ab\nc\r\n\r\n"
+
+
+def test_the_installers_bundle(monkeypatch, tmp_path):
+    """In the Windows installer's bundle, LDM's programs are .exe files side by side: the service is started
+    as ldm-service.exe, and yt-dlp is the bundle's zip."""
+    import subprocess
+    import sys
+
+    from ldm import winsys, ytdlp
+    from ldm.ui import remote
+
+    monkeypatch.setattr(paths, "FROZEN", True)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "ldm-gui.exe"))
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path / "_internal"), raising=False)
+    assert paths.program("ldm-service") == tmp_path / "ldm-service.exe"
+    assert winsys.service_command() == [str(tmp_path / "ldm-service.exe")]
+
+    started = []
+
+    class Process:
+        def __init__(self, command, **options):
+            started.append(command)
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(subprocess, "Popen", Process)
+    remote.start_daemon()  # the window starts the service
+    assert started == [[str(tmp_path / "ldm-service.exe")]]
+
+    assert ytdlp.bundled_copy() is None
+    (tmp_path / "_internal" / "yt-dlp").mkdir(parents=True)
+    (tmp_path / "_internal" / "yt-dlp" / "yt-dlp").write_bytes(b"zip")
+    assert ytdlp.bundled_copy() == tmp_path / "_internal" / "yt-dlp" / "yt-dlp"

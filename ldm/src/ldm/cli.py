@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -76,6 +77,27 @@ def cmd_get(args) -> int:
     return run_download(store, download_id)
 
 
+def cmd_version() -> int:
+    """What this LDM uses: for bug reports, and the installers' smoke tests."""
+    import platform
+    import shutil
+
+    from . import __version__, media, ytdlp
+
+    print(f"LDM {__version__} (Python {platform.python_version()}, {sys.platform})")
+    copy = ytdlp.user_copy() if ytdlp.user_version() == media.YTDLP_VERSION else ytdlp.bundled_copy()
+    print(f"yt-dlp {media.YTDLP_VERSION}" + (f" ({copy})" if copy and ytdlp.zip_version(copy) else ""))
+    try:
+        import libtorrent
+        print(f"libtorrent {libtorrent.__version__}")
+    except ImportError as e:
+        print(f"libtorrent: not available ({e})")
+    print(f"ffmpeg: {shutil.which('ffmpeg') or 'not found'}")
+    runtime = media.find_js_runtime()
+    print(f"JavaScript runtime: {f'{runtime[0]} ({runtime[1]})' if runtime else 'none'}")
+    return 0
+
+
 def cmd_daemon(args) -> int:
     import logging
 
@@ -100,15 +122,48 @@ def cmd_daemon(args) -> int:
         logs = {"stdout": sys.stdout, "stderr": sys.stderr} if sys.stdout and sys.stderr else {}  # the same log
         for stream in logs.values():
             stream.flush()
-        subprocess.Popen([sys.executable, "-m", "ldm", *sys.argv[1:]], stdin=subprocess.DEVNULL, **logs,
-                         **detached())
+        from . import paths
+
+        again = [sys.executable] if paths.FROZEN else [sys.executable, "-m", "ldm"]  # (the bundle: ldm.exe…)
+        subprocess.Popen([*again, *sys.argv[1:]], stdin=subprocess.DEVNULL, **logs, **detached())
     elif restart:  # same process id, so systemd keeps tracking it
-        import os
         os.execv(sys.executable, [sys.executable, "-m", "ldm", *sys.argv[1:]])
     return 0
 
 
 # --- daemon client -------------------------------------------------------------------------
+
+QUIT_WAIT = 30.0  # seconds `ldm quit` waits for the service to end (it saves every download's progress first)
+
+
+def wait_for_exit(pid: int, timeout: float) -> bool:
+    """Whether the process ended within `timeout` seconds (it needn't be our child)."""
+    if sys.platform == "win32":
+        import ctypes
+
+        SYNCHRONIZE, WAIT_OBJECT_0 = 0x00100000, 0
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(SYNCHRONIZE, False, pid)
+        if not handle:  # gone already
+            return True
+        try:
+            return kernel32.WaitForSingleObject(handle, int(timeout * 1000)) == WAIT_OBJECT_0
+        finally:
+            kernel32.CloseHandle(handle)
+    import time
+
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:  # another user's process with this id: ours has ended
+            return True
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.1)
+
 
 async def wait_for(service: ServiceClient, download_id: int, show_progress: bool) -> str:
     finished = asyncio.get_running_loop().create_future()
@@ -244,6 +299,13 @@ async def client(args) -> int:
                         if is_encrypted(source.read_bytes()) else "")
             counts = await service.call("RestoreBackup", str(source), password)
             print(", ".join(f"{n} {k.replace('_', ' ')}" for k, n in counts.items()) + " restored")
+        elif args.command == "quit":
+            pid = await service.call("Quit")
+            # (a service in this very process is a test's: nothing to wait for)
+            if pid != os.getpid() and not await asyncio.to_thread(wait_for_exit, pid, QUIT_WAIT):
+                print(f"the ldm service (process {pid}) is still stopping")
+                return 1
+            print("the ldm service stopped")
         elif args.command in ("pause-all", "resume-all"):
             count = await (service.call("PauseAll") if args.command == "pause-all" else service.call("ResumeAll"))
             print(f"{count} downloads {'paused' if args.command == 'pause-all' else 'resumed'}")
@@ -438,6 +500,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("restore", help="restore a backup (downloads already in the list are kept)")
     p.add_argument("file")
     p.add_argument("--password-stdin", action="store_true", help="read the password from stdin")
+    sub.add_parser("quit", help="stop the download service and close LDM's windows (downloads continue "
+                               "when it starts again)")
     sub.add_parser("pause-all", help="pause every download that runs or waits")
     sub.add_parser("resume-all", help="resume paused downloads and retry failed ones")
     p = sub.add_parser("data-usage", help="data downloaded since the service started (data_limit setting)")
@@ -464,6 +528,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("source")
     sub.add_parser("watch", help="show live progress")
     sub.add_parser("daemon", help="run the download service")
+    sub.add_parser("version", help="LDM's version and the yt-dlp, libtorrent, ffmpeg and JavaScript runtime it uses")
     sub.add_parser("clipboard-watch", help="offer copied links in a notification (where the desktop allows it)")
     p = sub.add_parser("install-browser-integration",
                        help="install the browser bridge, D-Bus activation and desktop file (Windows: "
@@ -491,6 +556,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_get(args)
     if args.command == "daemon":
         return cmd_daemon(args)
+    if args.command == "version":
+        return cmd_version()
     if args.command == "clipboard-watch":
         import logging
 
@@ -518,6 +585,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return asyncio.run(client(args))
     except DaemonNotRunning:
+        if args.command == "quit":
+            print("the ldm service isn't running")
+            return 0
         print("the ldm daemon is not running — start it with: ldm daemon")
     except ServiceError as e:
         print(f"error: {e.message}")

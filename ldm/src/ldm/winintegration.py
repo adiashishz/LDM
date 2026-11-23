@@ -62,7 +62,7 @@ def manifest_files(bridge: Path, folder: Path) -> dict[Path, str]:
             for kind in ("firefox", "chromium")}
 
 
-def entries(selected: list[str], folder: Path, gui: list[str], icon: Path | None,
+def entries(selected: list[str], folder: Path, gui: list[str], icon: Path | str | None,
             base: str = "Software") -> Entries:
     """What `install` writes to the registry."""
     found: Entries = {}
@@ -222,7 +222,8 @@ def install(selected: list[str] | None = None, dry_run: bool = False, log: Calla
     folder = folder or paths.data_dir() / "native-host"
     bridge, gui = program("ldm-nmhost"), _gui()
     files = manifest_files(bridge, folder)
-    icon = None if dry_run else write_icon(folder)
+    # The installer's ldm-gui.exe carries LDM's icon; a pip install gets an .ico in LDM's data folder.
+    icon = None if dry_run else f"{paths.program('ldm-gui')},0" if paths.FROZEN else write_icon(folder)
     found = entries(chosen, folder, gui, icon, base)
     for path, content in files.items():
         log(f"{'would write' if dry_run else 'wrote'} {path}")

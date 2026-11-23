@@ -172,6 +172,15 @@ def launcher(variable: str, name: str) -> list:
     return [found]
 
 
+def service_command() -> list:
+    """How to start the service: `ldm daemon` (launcher), or the Windows installer's `ldm-service.exe` beside
+    this bridge (no console window, and it keeps a log)."""
+    beside = os.path.join(os.path.dirname(sys.executable), "ldm-service.exe")
+    if sys.platform == "win32" and not os.environ.get("LDM_COMMAND") and os.path.isfile(beside):
+        return [beside]
+    return launcher("LDM_COMMAND", "ldm") + ["daemon"]
+
+
 def split_command(command: str) -> list:
     """A command line as its words; "quoted parts" keep their spaces (C:\\Program Files\\…)."""
     if sys.platform != "win32":
@@ -192,7 +201,7 @@ def service_call(method: str, *params):
     try:
         return channel_call(method, *params)
     except OSError:
-        start(launcher("LDM_COMMAND", "ldm") + ["daemon"])
+        start(service_command())
     deadline = time.monotonic() + START_WAIT
     while True:
         try:

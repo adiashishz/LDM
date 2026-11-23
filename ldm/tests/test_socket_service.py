@@ -186,3 +186,27 @@ def test_local_finisher():
         return events
 
     assert run(scenario()) == ["windows", "stop", "poweroff"]
+
+
+def test_quit_closes_the_windows_and_stops_the_service(tmp_path):
+    """`ldm quit` and the installer: the service answers with its process id, tells the windows, and ends."""
+    from ldm.daemon import serve
+    from ldm.service_client import connect_service
+
+    async def scenario():
+        ready = asyncio.Event()
+        service = asyncio.create_task(serve(db_path=tmp_path / "a.db", stop=asyncio.Event(), ready=ready,
+                                            manager_options={"passwords": MemoryPasswords()},
+                                            manage_autostart=False, dbus=False, desktop=False))
+        await ready.wait()
+        window = await connect_service("socket")
+        told = asyncio.Event()
+        window.on("Quit", told.set)
+        await window.call("RegisterWindow")
+        assert await window.call("Quit") == os.getpid()
+        await asyncio.wait_for(told.wait(), 5)
+        stopped = await asyncio.wait_for(service, 15)
+        await window.close()
+        return stopped
+
+    assert run(scenario()) is False
