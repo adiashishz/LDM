@@ -15,7 +15,7 @@ from typing import Callable
 from dbus_fast import Message, MessageType, Variant
 from dbus_fast.aio import MessageBus
 
-from .format import human
+from .format import NOTICE_STATES, notice_text
 from .manager import Manager
 
 log = logging.getLogger(__name__)
@@ -23,7 +23,6 @@ log = logging.getLogger(__name__)
 GUI_ID = "io.github.adiashishz.LDM"
 GUI_PATH = "/io/github/adiashishz/LDM"
 NOTIFICATIONS = ("org.freedesktop.Notifications", "/org/freedesktop/Notifications", "org.freedesktop.Notifications")
-NOTIFY_STATES = {"done", "seeding", "error", "expired"}
 
 
 def open_path(path: str) -> None:
@@ -55,7 +54,7 @@ class Notifier:
         self.manager.on_state = on_state
 
     def on_state(self, download_id: int, state: str, error: str) -> None:
-        if state not in NOTIFY_STATES or (state == "done" and download_id in self._notified):
+        if state not in NOTICE_STATES or (state == "done" and download_id in self._notified):
             return
         if state == "seeding":
             self._notified.add(download_id)
@@ -72,14 +71,8 @@ class Notifier:
             if gui_running:
                 return
             d = self.manager.store.get(download_id)
-            name = d.name or d.url
-            if state in ("done", "seeding"):
-                summary, body = "Download finished", f"{name} — {human(d.size or 0)}"
-                actions = ["default", "Show in LDM", "open", "Open"]
-            elif state == "expired":
-                summary, body, actions = "Link expired", f"{name}: set a new link in LDM", ["default", "Show in LDM"]
-            else:
-                summary, body, actions = "Download failed", f"{name}: {error}" if error else name, ["default", "Show in LDM"]
+            summary, body = notice_text(state, d.name or d.url, d.size, error)
+            actions = ["default", "Show in LDM"] + (["open", "Open"] if state in ("done", "seeding") else [])
             reply = await self._call(*NOTIFICATIONS, "Notify", "susssasa{sv}i",
                                      ["LDM", 0, GUI_ID, summary, body, actions,
                                       {"desktop-entry": Variant("s", GUI_ID)}, -1])

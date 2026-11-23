@@ -79,3 +79,26 @@ def status_text(state: str, done: int, size: int | None, speed: float = 0.0, err
     if state == "changed":
         return "File changed on server — resuming starts over"
     return STATE_LABELS.get(state, state)
+
+
+def summary_text(running: int, done: int, total: int, speed: float) -> str:
+    """The tray's tooltip: what runs, overall progress and speed."""
+    if not running:
+        return "No downloads running"
+    parts = [f"{running} downloading"]
+    if total:
+        parts.append(f"{done * 100 // total}%")
+    parts.append(f"{human(speed)}/s")
+    return " · ".join(parts)
+
+
+NOTICE_STATES = {"done", "seeding", "error", "expired"}  # states the service tells the user about
+
+
+def notice_text(state: str, name: str, size: int | None, error: str = "") -> tuple[str, str]:
+    """A notification's title and text for a download that finished, failed or whose link expired."""
+    if state in ("done", "seeding"):
+        return "Download finished", f"{name} — {human(size or 0)}"
+    if state == "expired":
+        return "Link expired", f"{name}: set a new link in LDM"
+    return "Download failed", f"{name}: {error}" if error else name

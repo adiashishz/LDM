@@ -6,6 +6,7 @@ import pytest
 
 from ldm.manager import Manager, SizeMismatch
 from ldm.store import Store
+from test_engine import requested_bytes
 
 FINAL = {"done", "error", "expired", "changed", "paused"}
 
@@ -204,20 +205,27 @@ def test_restart_recovery(tmp_path, http_server):
     cfg, url = http_server(data=data, delay=0.01)
     manager = new_manager(tmp_path)
 
+    def saved(i):
+        return sum(p.done for p in manager.store.load_parts(i))
+
     async def first_run():
         i = manager.add(url, connections=2)
-        await asyncio.sleep(0.2)
+        deadline = time.monotonic() + 10  # some progress saved (a slow machine takes longer than 0.2 s)
+        while not saved(i) and time.monotonic() < deadline:
+            await asyncio.sleep(0.02)
         return i
 
     i = run(manager, first_run)  # shutdown mid-download
     assert manager.store.get(i).state == "queued"
-    assert sum(p.done for p in manager.store.load_parts(i)) > 0
+    assert 0 < saved(i) < len(data)
 
-    cfg.delay, cfg.bytes_sent = 0, 0
+    # Counted from what the second run asks for (the first run's server threads may still be writing).
+    earlier = len(cfg.requests)
+    cfg.delay = 0
     second = new_manager(tmp_path)
     run(second, lambda: wait_state(second, i, "done"))
     assert second.store.get(i).dest.read_bytes() == data
-    assert cfg.bytes_sent < len(data)
+    assert sum(requested_bytes(headers, len(data)) for headers in cfg.requests[earlier:]) < len(data)
 
 
 def test_crashed_running_state_is_requeued(tmp_path, http_server):

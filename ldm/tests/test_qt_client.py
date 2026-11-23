@@ -119,7 +119,7 @@ def test_follows_the_service_starting_and_stopping(app, session_bus, transport, 
         task = asyncio.create_task(serve(bus_address=session_bus, db_path=tmp_path / "daemon.db", stop=stop,
                                          ready=started, manager_options={"passwords": MemoryPasswords()},
                                          system_bus_address=session_bus, manage_autostart=False,
-                                         dbus=HAS_DBUS))
+                                         dbus=HAS_DBUS, desktop=False))
         await started.wait()
         ready.set()
         await task

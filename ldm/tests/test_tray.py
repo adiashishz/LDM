@@ -8,7 +8,7 @@ from dbus_fast import Message, MessageType, Variant
 from dbus_fast.aio import MessageBus
 from dbus_fast.service import ServiceInterface, method
 
-from ldm.tray import ITEM_PATH, MENU_PATH, Tray, summary_text
+from ldm.tray import ITEM_PATH, MENU_PATH, Tray
 
 from test_notify import FakeGui, until
 
@@ -23,11 +23,6 @@ class FakeWatcher(ServiceInterface):
     @method()
     def RegisterStatusNotifierItem(self, service: "s"):
         self.items.append(service)
-
-
-def test_summary_text():
-    assert summary_text(0, 0, 0, 0.0) == "No downloads running"
-    assert summary_text(3, 450, 1000, 2 * 1024 * 1024) == "3 downloading · 45% · 2.0 MiB/s"
 
 
 def test_tray_registers_shows_progress_and_runs_menu_items(bus_address):

@@ -7,7 +7,9 @@ license = "MIT"
 authors = [{ name = "Aditya Ashish" }]
 dependencies = ["httpx[socks]>=0.26", "yt-dlp[default]>=2026.1", "dnspython>=2.6", "cryptography>=41",
                 # the Linux desktop: D-Bus (the service, notifications, tray) and the Secret Service keyring
-                "dbus-fast>=2.20; sys_platform == 'linux'", "secretstorage>=3.3; sys_platform == 'linux'"]
+                "dbus-fast>=2.20; sys_platform == 'linux'", "secretstorage>=3.3; sys_platform == 'linux'",
+                # Windows: the tray icon and its notifications
+                "pystray>=0.19; sys_platform == 'win32'", "Pillow>=10; sys_platform == 'win32'"]
 
 [project.urls]
 Homepage = "https://github.com/adiashishz/LDM"

@@ -1,4 +1,5 @@
-"""Passwords for site logins and the proxy: the desktop keyring (Secret Service), else a private file.
+"""Passwords for site logins and the proxy: the desktop keyring (Secret Service; on Windows Credential
+Manager), else a private file.
 
 Items are looked up by (kind, key): ("login", host) or ("proxy", "proxy"). The calls block (the
 keyring may ask to be unlocked), so the manager runs them in a thread and keeps the values in memory.
@@ -9,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -100,8 +102,13 @@ class KeyringPasswords:
 
 
 def open_store(fallback: Path):
-    """The keyring if a Secret Service is running, else the private file next to the database."""
+    """Windows Credential Manager, or the keyring if a Secret Service is running; else the private file next
+    to the database."""
     try:
+        if sys.platform == "win32":
+            from .winsys import CredentialPasswords
+
+            return CredentialPasswords()
         return KeyringPasswords()
     except Exception as e:  # not installed, no session bus, no keyring daemon
         log.info("no keyring available, saving passwords in %s: %s", fallback, e)

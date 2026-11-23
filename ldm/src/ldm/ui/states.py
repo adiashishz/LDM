@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 from .. import sandbox
 
 # List views: name -> states shown (None = all)
@@ -19,3 +21,5 @@ RESUMABLE = {"paused", "error", "changed"}
 FINISH_ACTIONS = [("Do Nothing", "nothing"), ("Quit LDM", "quit"), ("Suspend", "suspend"), ("Power Off", "poweroff")]
 if sandbox.flatpak():  # a Flatpak can't suspend or power off the computer (no portal for it)
     FINISH_ACTIONS = FINISH_ACTIONS[:2]
+elif sys.platform == "win32":  # Windows' word for it
+    FINISH_ACTIONS[2] = ("Sleep", "suspend")

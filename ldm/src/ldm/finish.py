@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 from typing import TYPE_CHECKING, Awaitable, Callable
 
 if TYPE_CHECKING:  # dbus-fast is Linux only: LocalFinisher works without it
@@ -19,15 +20,20 @@ log = logging.getLogger(__name__)
 
 COUNTDOWN = 60.0
 ACTIONS = {"suspend": ("Suspend", "Suspending"), "poweroff": ("PowerOff", "Powering off")}
+# LocalFinisher's countdown announcement, in the system's words
+COUNTDOWN_TEXT = {"suspend": "Going to sleep" if sys.platform == "win32" else "Suspending", "poweroff": "Powering off"}
 
 
 class LocalFinisher:
     """Without D-Bus (Windows, macOS): "quit" closes the windows on the local channel, then the service;
-    suspend and power off use `power` (the system's own calls) after the countdown, when there is one."""
+    suspend and power off use `power` (the system's own calls) after the countdown, when there is one.
+    `announce` tells the user: "Powering off in 60 seconds" when the countdown starts, None when it ends."""
 
     def __init__(self, close_windows: Callable[[], object], stop: Callable[[], None],
-                 power: Callable[[str], Awaitable[None]] | None = None, countdown: float = COUNTDOWN):
+                 power: Callable[[str], Awaitable[None]] | None = None, countdown: float = COUNTDOWN,
+                 announce: Callable[[str | None], None] | None = None):
         self.close_windows, self.stop, self.power, self.countdown = close_windows, stop, power, countdown
+        self.announce = announce or (lambda text: None)
         self._pending: asyncio.Task | None = None
 
     def run(self, action: str) -> None:
@@ -45,8 +51,12 @@ class LocalFinisher:
             self._pending = None
 
     async def _count_down(self, action: str) -> None:
+        announced = True
         try:
+            self.announce(f"{COUNTDOWN_TEXT[action]} in {int(self.countdown)} seconds")
             await asyncio.sleep(self.countdown)
+            announced = False
+            self.announce(None)  # before: sleep returns only once the computer wakes up
             await self.power(action)
             log.info("all downloads finished: %s", action)
         except asyncio.CancelledError:
@@ -56,6 +66,8 @@ class LocalFinisher:
             log.warning("could not %s: %s", action, e)
         finally:
             self._pending = None
+            if announced:
+                self.announce(None)
 
 
 class Finisher:

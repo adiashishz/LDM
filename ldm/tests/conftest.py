@@ -286,7 +286,7 @@ def daemon(request, tmp_path):
                                          stop=stop, ready=started, manager_options=options,
                                          system_bus_address=bus_address,  # never the real system bus
                                          manage_autostart=False,           # nor the user's systemd
-                                         dbus=HAS_DBUS))
+                                         dbus=HAS_DBUS, desktop=False))    # nor Windows' tray or power
         await started.wait()
         ready.set()
         await task
