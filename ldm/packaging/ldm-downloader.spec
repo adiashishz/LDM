@@ -2,7 +2,7 @@
 %bcond check 1
 
 Name:           ldm-downloader
-Version:        0.4.0
+Version:        0.5.0
 Release:        1%{?dist}
 Summary:        Download manager for files, videos and torrents
 License:        MIT
@@ -118,6 +118,12 @@ cd ldm
 %{_datadir}/ldm/
 
 %changelog
+* Mon Nov 23 2026 Aditya Ashish <adiashishz@gmail.com> - 0.5.0-1
+- LDM for Windows 10 and 11, as a preview: an installer for your user (no administrator rights) with yt-dlp, FFmpeg and Node.js included, a tray icon, notifications, and start at login
+- On Windows, the browser extension works in Firefox, Chrome, Edge and Brave, magnet links and .torrent files open in LDM, and the ldm command works in any terminal
+- New commands: ldm quit stops the download service and closes the window; ldm version shows which yt-dlp, libtorrent, FFmpeg and JavaScript runtime LDM uses
+- A torrent counts as finished only once all its data is written to disk
+
 * Mon Nov 16 2026 Aditya Ashish <adiashishz@gmail.com> - 0.4.0-1
 - A new window, built with Qt: menus and search, a toolbar, a sidebar with categories, queues and a speed graph, and a resizable details panel with each download's connections
 - Every dialog redone: Add, Settings, Schedule, Batch download, Checksum, Torrent details and more
