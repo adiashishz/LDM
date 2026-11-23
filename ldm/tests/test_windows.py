@@ -6,6 +6,7 @@ The logic runs everywhere with fakes; the tests marked windows_only make the rea
 import asyncio
 import subprocess
 import sys
+import threading
 import uuid
 
 import pytest
@@ -110,11 +111,16 @@ def test_tray_tooltip_menu_and_countdown():
     progress = [(0, 0, 0, 0.0)]
     enabled = [True]
     actions = []
+    threads = set()
+
+    def tray_enabled():  # reads the settings database: only in the service's thread
+        threads.add(threading.get_ident())
+        return enabled[0]
 
     async def scenario():
         tray = WindowsTray(lambda: progress[0], lambda: actions.append("show"), lambda: actions.append("pause"),
                            lambda: actions.append("resume"), lambda: actions.append("quit"),
-                           enabled=lambda: enabled[0], make_icon=FakeIcon)
+                           enabled=tray_enabled, make_icon=FakeIcon)
         tray.on_cancel = lambda: actions.append("cancel")
         await tray.start()
         icon = tray.icon
@@ -149,6 +155,7 @@ def test_tray_tooltip_menu_and_countdown():
 
     icon = asyncio.run(scenario())
     assert actions == ["show", "pause", "resume", "quit", "cancel"]
+    assert threads == {threading.get_ident()}
     assert icon.notes == [("All downloads finished",
                            "Powering off in 60 seconds. To cancel, choose Cancel in LDM's tray menu."),
                           ("Download finished", "a.iso")]

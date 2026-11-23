@@ -79,13 +79,15 @@ class WindowsTray:
         except Exception as e:  # no pystray or Pillow, no taskbar (a service session): run without the icon
             log.warning("no tray icon: %s", e)
             return
-        self._thread = threading.Thread(target=self._run, name="ldm-tray", daemon=True)
+        shown = self.enabled()  # read here: the settings live in the service's thread (SQLite)
+        self._thread = threading.Thread(target=self._run, args=(shown,), name="ldm-tray", daemon=True)
         self._thread.start()
         self._task = self._loop.create_task(self._keep_updated())
 
-    def _run(self) -> None:
+    def _run(self, shown: bool) -> None:
+        """The icon's own thread: only the icon's work here, nothing of the service's."""
         try:
-            self.icon.run(setup=lambda icon: setattr(icon, "visible", self.enabled()))
+            self.icon.run(setup=lambda icon: setattr(icon, "visible", shown))
         except Exception as e:
             log.warning("the tray icon stopped: %s", e)
 
