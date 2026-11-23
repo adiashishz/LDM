@@ -1,4 +1,8 @@
 import random
+import subprocess
+import sys
+import threading
+import time
 
 import pytest
 
@@ -113,3 +117,35 @@ def test_backup_restore_and_session_commands(daemon, monkeypatch, capsys, tmp_pa
     assert capsys.readouterr().out == "used this session: 0 B (no limit)\n"
     assert main(["resume-all"]) == 0 and main(["pause-all"]) == 0
     assert "1 downloads paused" in capsys.readouterr().out
+
+
+def test_quit_command(daemon, cli_transport, capsys):
+    assert main(["quit"]) == 0
+    assert "the ldm service stopped" in capsys.readouterr().out
+    deadline = time.monotonic() + 15
+    while main(["list"]) != 1:  # gone (nothing starts it again: the test bus has no activation files)
+        assert time.monotonic() < deadline, "the service still answers"
+        time.sleep(0.1)
+    assert main(["quit"]) == 0
+    assert "isn't running" in capsys.readouterr().out
+
+
+def test_wait_for_exit():
+    from ldm.cli import wait_for_exit
+
+    # The real parent (here: this test) collects it when it ends, as for the service `ldm quit` waits for.
+    quick = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.3)"])
+    threading.Thread(target=quick.wait, daemon=True).start()
+    assert wait_for_exit(quick.pid, 10)
+    slow = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        assert not wait_for_exit(slow.pid, 0.3)
+    finally:
+        slow.kill()
+        slow.wait()
+
+
+def test_version_command(capsys):
+    assert main(["version"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("LDM ") and "\nyt-dlp 20" in out and "ffmpeg: " in out and "JavaScript runtime: " in out

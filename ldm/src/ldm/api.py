@@ -8,6 +8,7 @@ listener.
 from __future__ import annotations
 
 import inspect
+import os
 from typing import Any, Callable
 
 from .engine import DownloadError
@@ -40,6 +41,7 @@ class Api:
     def __init__(self, manager: Manager):
         self.manager = manager
         self.listeners: list[Listener] = []
+        self.on_quit: Callable[[], None] | None = None  # the service stops (set by ldm.daemon)
         manager.on_added = lambda download_id: self._emit("Added", [download_id])
         manager.on_removed = lambda download_id: self._emit("Removed", [download_id])
         manager.on_state = lambda download_id, state, error: self._emit("StateChanged", [download_id, state, error])
@@ -180,6 +182,14 @@ class Api:
     def GetLog(self, download_id: int) -> list[str]:  # noqa: N802
         """Diagnostics for one download (requests, responses, retries) since the service started."""
         return self.manager.get_log(download_id)
+
+    def Quit(self) -> int:  # noqa: N802
+        """Stop the service and close LDM's windows; running downloads continue when it starts again.
+        Returns the service's process id, so the caller can wait for it to end (installers)."""
+        if self.on_quit is None:
+            raise InvalidArgument("this service can't be stopped from outside")
+        self.on_quit()
+        return os.getpid()
 
 
 METHODS = {name for name, _ in inspect.getmembers(Api, inspect.isfunction) if name[0].isupper()}

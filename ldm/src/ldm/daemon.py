@@ -21,6 +21,9 @@ from .conditions import Conditions
 log = logging.getLogger(__name__)
 
 
+QUIT_DELAY = 0.2  # seconds between answering Quit and stopping
+
+
 class AlreadyRunning(Exception):
     pass
 
@@ -131,6 +134,9 @@ async def serve(*, bus_address: str | None = None, db_path: Path | None = None,
         else:
             finisher = LocalFinisher(lambda: listener.tell_windows("Quit"), stop.set)
         manager.on_all_finished = finisher.run
+        # `ldm quit`, the installer: as "quit when all downloads finished" (close the windows, then stop),
+        # after the caller has its answer.
+        api.on_quit = lambda: asyncio.get_running_loop().call_later(QUIT_DELAY, finisher.run, "quit")
         manager.on_started = finisher.cancel
         await manager.start()
         if manage_autostart:  # e.g. installed from a package: enable the unit the first time

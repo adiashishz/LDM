@@ -339,8 +339,10 @@ def start_daemon() -> None:
     """Start `ldm daemon` in its own session so it outlives the window. Raises OSError on failure."""
     log_dir = paths.log_dir()
     log_dir.mkdir(parents=True, exist_ok=True)
+    # The installer's bundle has the service as a program of its own (sys.executable is ldm-gui.exe there).
+    command = [str(paths.program("ldm-service"))] if paths.FROZEN else [sys.executable, "-m", "ldm", "daemon"]
     with open(log_dir / "daemon.log", "ab") as log_file:
-        process = subprocess.Popen([sys.executable, "-m", "ldm", "daemon"], stdin=subprocess.DEVNULL,
+        process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
                                    stdout=log_file, stderr=log_file, **detached())
     threading.Thread(target=process.wait, name="ldm-daemon-reaper", daemon=True).start()  # reap on exit
 

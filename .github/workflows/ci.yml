@@ -112,6 +112,52 @@ jobs:
         working-directory: ldm
         run: python -m pytest -q -rs
 
+  windows-installer:
+    name: Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install LDM and the build tools
+        # yt-dlp's extras (yt-dlp-ejs among them) as the bundled yt-dlp release expects them.
+        run: |
+          $ytdlp = (Select-String -Path debian/yt-dlp.pin -Pattern '^version=(.+)$').Matches[0].Groups[1].Value
+          python -m pip install -q "./ldm[gui]" "yt-dlp[default]==$ytdlp" libtorrent pyinstaller==6.22.3
+
+      - name: Install Inno Setup if the image lacks it
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+
+      - name: Cache the downloads (ffmpeg, Node.js, yt-dlp)
+        uses: actions/cache@v4
+        with:
+          path: build/windows/downloads
+          key: windows-downloads-${{ hashFiles('ldm/packaging/windows/build.py', 'debian/yt-dlp.pin') }}
+
+      - name: Build the bundle and the installer
+        run: python ldm/packaging/windows/build.py
+
+      - name: Install, use and uninstall it
+        run: python ldm/packaging/windows/smoke-test.py (Get-Item build/windows/LDM-Setup-*.exe).FullName
+
+      - name: Logs
+        if: failure()
+        run: |
+          Get-Content "$env:TEMP\ldm-install.log" -Tail 60 -ErrorAction SilentlyContinue
+          Get-Content "$env:LOCALAPPDATA\LDM\Logs\daemon.log" -Tail 200 -ErrorAction SilentlyContinue
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: build/windows/LDM-Setup-*.exe
+
   deb:
     name: .deb for ${{ matrix.name }}
     runs-on: ubuntu-latest

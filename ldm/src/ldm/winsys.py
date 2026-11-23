@@ -238,7 +238,12 @@ def _pythonw() -> str:
 
 
 def service_command() -> list[str]:
-    """How Windows starts the service at login: without a console window (its log goes to LDM's log folder)."""
+    """How Windows starts the service at login: without a console window (its log goes to LDM's log folder).
+    The installer's bundle has `ldm-service.exe` for it."""
+    from . import paths
+
+    if paths.FROZEN:
+        return [str(paths.program("ldm-service"))]
     return [_pythonw(), "-m", "ldm", "daemon"]
 
 

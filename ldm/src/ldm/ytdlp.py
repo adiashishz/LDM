@@ -41,7 +41,11 @@ def user_copy() -> Path:
 
 
 def bundled_copy() -> Path | None:
-    """The copy a distribution package ships in <data dir>/ldm/yt-dlp/ (searched in XDG_DATA_DIRS), if any."""
+    """The copy a distribution package ships in <data dir>/ldm/yt-dlp/ (searched in XDG_DATA_DIRS), or the
+    Windows installer in its bundle, if any."""
+    if paths.FROZEN:
+        path = paths.bundle_folder() / "yt-dlp" / ASSET
+        return path if path.is_file() else None
     for data in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(os.pathsep):
         path = Path(data) / "ldm" / "yt-dlp" / ASSET
         if data and path.is_file():
@@ -56,6 +60,8 @@ def version_key(version: str | None) -> tuple[int, ...]:
 
 def installed_version() -> str | None:
     """The yt-dlp installed with Python (distribution package or pip), without importing it."""
+    if paths.FROZEN:  # the installer's bundle has yt-dlp only as its zip (bundled_copy)
+        return None
     try:
         return importlib.metadata.version("yt-dlp")
     except importlib.metadata.PackageNotFoundError:

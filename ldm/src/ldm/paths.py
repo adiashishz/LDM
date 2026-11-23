@@ -17,6 +17,19 @@ from pathlib import Path
 
 WINDOWS = sys.platform == "win32"
 MACOS = sys.platform == "darwin"
+# The Windows installer's bundle (PyInstaller): LDM's programs are .exe files side by side, and what they
+# bring along (yt-dlp, ffmpeg, Node.js) is in its folder.
+FROZEN = bool(getattr(sys, "frozen", False))
+
+
+def program(name: str) -> Path:
+    """One of the bundle's programs: ldm-gui, ldm-service (the service without a window), ldm, ldm-nmhost."""
+    return Path(sys.executable).with_name(f"{name}.exe")
+
+
+def bundle_folder() -> Path:
+    """The bundle's files (yt-dlp, the tools folder with ffmpeg and node)."""
+    return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
 
 # Windows' known folders (KNOWNFOLDERID); Downloads and Documents can be moved, e.g. to another drive.
 DOWNLOADS_ID = "374DE290-123F-4565-9164-39C4925E467B"

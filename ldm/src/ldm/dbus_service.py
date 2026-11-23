@@ -190,6 +190,12 @@ class ManagerInterface(ServiceInterface):
         return self.api.ResumeAll()
 
     @method()
+    def Quit(self) -> "u":
+        """Stop the service and close LDM's windows; returns its process id."""
+        with _errors():
+            return self.api.Quit()
+
+    @method()
     def ResetDataUsage(self):
         """Start a new data-usage session; downloads held by the data limit continue."""
         self.api.ResetDataUsage()

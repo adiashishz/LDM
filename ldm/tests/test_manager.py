@@ -4,9 +4,9 @@ import time
 
 import pytest
 
+from conftest import quiet
 from ldm.manager import Manager, SizeMismatch
 from ldm.store import Store
-from test_engine import requested_bytes
 
 FINAL = {"done", "error", "expired", "changed", "paused"}
 
@@ -210,8 +210,8 @@ def test_restart_recovery(tmp_path, http_server):
 
     async def first_run():
         i = manager.add(url, connections=2)
-        deadline = time.monotonic() + 10  # some progress saved (a slow machine takes longer than 0.2 s)
-        while not saved(i) and time.monotonic() < deadline:
+        deadline = time.monotonic() + 10  # a quarter saved (a slow machine takes longer than 0.2 s)
+        while saved(i) < len(data) // 4 and time.monotonic() < deadline:
             await asyncio.sleep(0.02)
         return i
 
@@ -219,13 +219,14 @@ def test_restart_recovery(tmp_path, http_server):
     assert manager.store.get(i).state == "queued"
     assert 0 < saved(i) < len(data)
 
-    # Counted from what the second run asks for (the first run's server threads may still be writing).
-    earlier = len(cfg.requests)
-    cfg.delay = 0
+    # Counted once the first run's connections are gone; the server stays paced, so a connection cut short
+    # (a part split between two connections) wastes a chunk or two, not a whole range.
+    quiet(cfg)
+    cfg.bytes_sent = 0
     second = new_manager(tmp_path)
     run(second, lambda: wait_state(second, i, "done"))
     assert second.store.get(i).dest.read_bytes() == data
-    assert sum(requested_bytes(headers, len(data)) for headers in cfg.requests[earlier:]) < len(data)
+    assert cfg.bytes_sent < len(data)
 
 
 def test_crashed_running_state_is_requeued(tmp_path, http_server):
