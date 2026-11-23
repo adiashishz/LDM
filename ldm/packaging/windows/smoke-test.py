@@ -69,6 +69,14 @@ def until(condition, timeout: float, what: str) -> None:
         time.sleep(0.25)
 
 
+class QuietServer(http.server.ThreadingHTTPServer):
+    """LDM closes some connections early on purpose (its probe reads only the headers): not an error."""
+
+    def handle_error(self, request, client_address) -> None:
+        if not isinstance(sys.exc_info()[1], ConnectionError):
+            super().handle_error(request, client_address)
+
+
 def bridge(*messages: dict) -> list[dict]:
     """Talk to ldm-nmhost.exe as a browser does: 32-bit length, then JSON."""
     data = b"".join(struct.pack("<I", len(body)) + body for body in (json.dumps(m).encode() for m in messages))
@@ -121,7 +129,7 @@ def downloads(env: dict, work: Path) -> subprocess.Popen:
     (work / "www" / "file.bin").write_bytes(data)
     (work / "www" / "other.bin").write_bytes(data[::-1])
     handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(work / "www"))
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    server = QuietServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_address[1]}"
 
@@ -156,13 +164,13 @@ def uninstall() -> None:
     step("uninstall")
     subprocess.run([str(APP / "unins000.exe"), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"], check=True,
                    timeout=300)
-    # The uninstaller runs on from a copy of itself: wait for the files to go.
+    # The uninstaller runs on from a copy of itself, and removes the PATH entry after the files: wait for each.
     until(lambda: not (APP / "ldm.exe").exists(), 120, "the programs are removed")
-    assert value(rf"Software\Mozilla\NativeMessagingHosts\{HOST}") is None, "the bridge is still registered"
-    assert value(r"Software\Classes\LDM.magnet") is None, "magnet links are still registered"
-    assert value(RUN_KEY, "LDM") is None, "LDM still starts at login"
-    assert value(r"Software\RegisteredApplications", "LDM") is None
-    assert not on_path(), f"LDM's folder is still on the user's PATH: {value('Environment', 'Path')}"
+    until(lambda: value(rf"Software\Mozilla\NativeMessagingHosts\{HOST}") is None, 60, "the bridge is unregistered")
+    until(lambda: value(r"Software\Classes\LDM.magnet") is None, 60, "magnet links are unregistered")
+    until(lambda: value(RUN_KEY, "LDM") is None, 60, "LDM no longer starts at login")
+    until(lambda: value(r"Software\RegisteredApplications", "LDM") is None, 60, "the Default apps entry is gone")
+    until(lambda: not on_path(), 60, f"LDM's folder leaves the user's PATH ({value('Environment', 'Path')})")
 
 
 def main() -> int:
