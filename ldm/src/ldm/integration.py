@@ -95,9 +95,14 @@ LAUNCHER_NAME = "ldm-nmhost"
 
 def host_manifest(browser: Browser) -> dict:
     script = LAUNCHER_NAME if sandbox.flatpak() else "ldm_nmhost.py"
-    manifest = {"name": HOST_NAME, "description": "ldm download manager bridge",
-                "path": str(browser.host_dir / script), "type": "stdio"}
-    if browser.kind == "firefox":
+    return bridge_manifest(browser.kind, browser.host_dir / script)
+
+
+def bridge_manifest(kind: str, program: Path) -> dict:
+    """The native messaging manifest for Firefox ("firefox") or the Chromium family: `program` is the bridge."""
+    manifest = {"name": HOST_NAME, "description": "ldm download manager bridge", "path": str(program),
+                "type": "stdio"}
+    if kind == "firefox":
         manifest["allowed_extensions"] = [FIREFOX_EXTENSION_ID]
     else:
         manifest["allowed_origins"] = [f"chrome-extension://{CHROME_EXTENSION_ID}/"]

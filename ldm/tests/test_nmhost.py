@@ -287,3 +287,16 @@ def test_launch_commands_keep_quoted_paths():
             [r"C:\Program Files\LDM\ldm.exe", "--db", r"C:\x.db"]
     else:
         assert nmhost.split_command('"/opt/my apps/ldm" --db /x.db') == ["/opt/my apps/ldm", "--db", "/x.db"]
+
+
+def test_launcher_finds_ldm_beside_its_python(tmp_path, monkeypatch):
+    """Windows' pip puts ldm.exe / ldm-gui.exe in a Scripts folder that isn't on PATH: the bridge looks next
+    to its own Python, and in the Scripts folder there."""
+    exe = ".exe" if sys.platform == "win32" else ""
+    monkeypatch.delenv("LDM_GUI_COMMAND", raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / f"python{exe}"))
+    (tmp_path / "Scripts").mkdir()
+    (tmp_path / "Scripts" / f"ldm-gui{exe}").write_text("")
+    assert nmhost.launcher("LDM_GUI_COMMAND", "ldm-gui") == [str(tmp_path / "Scripts" / f"ldm-gui{exe}")]
+    (tmp_path / f"ldm-gui{exe}").write_text("")  # a venv: right beside it
+    assert nmhost.launcher("LDM_GUI_COMMAND", "ldm-gui") == [str(tmp_path / f"ldm-gui{exe}")]

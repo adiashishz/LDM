@@ -162,6 +162,32 @@ def test_tray_tooltip_menu_and_countdown():
     assert not icon.running
 
 
+def test_tray_leaves_the_icon_alone_until_its_thread_has_shown_it():
+    """Showing the icon from the service's update and from the icon's own start at once breaks it."""
+    release = threading.Event()
+
+    class SlowIcon(FakeIcon):
+        def run(self, setup):
+            release.wait(5)
+            super().run(setup)
+
+    async def scenario():
+        tray = WindowsTray(lambda: (1, 0, 0, 1.0), print, print, print, print, make_icon=SlowIcon)
+        await tray.start()
+        tray.update()
+        before = (tray.icon.visible, tray.icon.title)
+        release.set()
+        await until(lambda: tray.icon.running)
+        tray.update()
+        after = (tray.icon.visible, tray.icon.title)
+        tray.close()
+        return before, after
+
+    before, after = asyncio.run(scenario())
+    assert before == (False, "LDM — No downloads running")
+    assert after == (True, "LDM — 1 downloading · 1 B/s")
+
+
 def test_tray_without_an_icon_still_runs():
     def no_icon(title, items):
         raise OSError("no taskbar")

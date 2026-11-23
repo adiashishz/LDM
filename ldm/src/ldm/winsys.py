@@ -220,6 +220,16 @@ RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 RUN_VALUE = "LDM"
 
 
+def beside_python(name: str) -> Path | None:
+    """`name`.exe of LDM's: next to the running Python (a venv's Scripts folder), or in the Scripts folder
+    next to it (pip without a venv)."""
+    folder = Path(sys.executable).parent
+    for candidate in (folder / f"{name}.exe", folder / "Scripts" / f"{name}.exe"):
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def _pythonw() -> str:
     """The Python without a console window, next to the running one (a venv's Scripts folder)."""
     folder = Path(sys.executable).parent
@@ -233,14 +243,14 @@ def service_command() -> list[str]:
 
 
 def gui_command() -> list[str]:
-    """How the service starts LDM's window: LDM_GUI_COMMAND (installers), `ldm-gui.exe` next to Python, or
+    """How the service starts LDM's window: LDM_GUI_COMMAND (installers), `ldm-gui.exe` beside Python, or
     the module itself."""
     from .nmhost import split_command
 
     if os.environ.get("LDM_GUI_COMMAND"):
         return split_command(os.environ["LDM_GUI_COMMAND"])
-    gui = Path(sys.executable).parent / "ldm-gui.exe"
-    return [str(gui)] if gui.exists() else [_pythonw(), "-m", "ldm.qt"]
+    gui = beside_python("ldm-gui")
+    return [str(gui)] if gui else [_pythonw(), "-m", "ldm.qt"]
 
 
 def open_window() -> None:
