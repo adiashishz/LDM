@@ -46,7 +46,9 @@ def pystray_icon(title: str, items: list[Item]) -> Any:
         return pystray.MenuItem(item.label, lambda icon, menu_item: item.action(), default=item.default,
                                 visible=lambda menu_item: item.visible())
 
-    return pystray.Icon("LDM", Image.open(ICON), title, pystray.Menu(*(entry(i) for i in items)))
+    with Image.open(ICON) as file:
+        image = file.copy()  # loaded now: Pillow's lazy loading isn't safe across the icon's threads
+    return pystray.Icon("LDM", image, title, pystray.Menu(*(entry(i) for i in items)))
 
 
 class WindowsTray:
@@ -71,6 +73,7 @@ class WindowsTray:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._task: asyncio.Task | None = None
         self._thread: threading.Thread | None = None
+        self._ready = threading.Event()  # the icon's thread has shown it: from then on update() may change it
 
     async def start(self) -> None:
         self._loop = asyncio.get_running_loop()
@@ -86,8 +89,12 @@ class WindowsTray:
 
     def _run(self, shown: bool) -> None:
         """The icon's own thread: only the icon's work here, nothing of the service's."""
+        def setup(icon) -> None:
+            icon.visible = shown
+            self._ready.set()
+
         try:
-            self.icon.run(setup=lambda icon: setattr(icon, "visible", shown))
+            self.icon.run(setup=setup)
         except Exception as e:
             log.warning("the tray icon stopped: %s", e)
 
@@ -113,7 +120,7 @@ class WindowsTray:
             await asyncio.sleep(UPDATE_INTERVAL)
 
     def update(self) -> None:
-        if self.icon is None:
+        if self.icon is None or not self._ready.is_set():  # (showing it from two threads at once fails)
             return
         enabled = self.enabled()
         if bool(self.icon.visible) != enabled:

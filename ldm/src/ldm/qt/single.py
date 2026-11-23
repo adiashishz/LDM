@@ -50,7 +50,12 @@ class SingleInstance(QObject):
 
             ctypes.windll.user32.AllowSetForegroundWindow(-1)  # ASFW_ANY
         socket.write(json.dumps({"links": links}).encode() + b"\n")
-        sent = socket.waitForBytesWritten(WRITE_MS)
+        socket.flush()
+        # Windows may write it right away, and then waitForBytesWritten() reports False: what counts is that
+        # nothing is left to write.
+        while socket.bytesToWrite() and socket.waitForBytesWritten(WRITE_MS):
+            pass
+        sent = socket.bytesToWrite() == 0
         socket.disconnectFromServer()
         if socket.state() != QLocalSocket.LocalSocketState.UnconnectedState:
             socket.waitForDisconnected(WRITE_MS)
