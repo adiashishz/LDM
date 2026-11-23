@@ -1,5 +1,6 @@
 import asyncio
 import random
+import re
 import time
 
 import pytest
@@ -92,9 +93,22 @@ def test_pause_and_resume_continues_where_it_stopped(tmp_path, http_server):
     saved = sum(p.done for p in store.load_parts(did))
     assert 0 < saved < len(data)
 
-    cfg.delay, cfg.slow_delay, cfg.bytes_sent = 0.0, 0.0, 0
+    # Counted from what the resumed download asks for: the paused connection's server thread may still be
+    # writing into its closed socket, so bytes_sent would count those too.
+    earlier = len(cfg.requests)
+    cfg.delay, cfg.slow_delay = 0.0, 0.0
     assert download(store, did).read_bytes() == data
-    assert cfg.bytes_sent < len(data)  # did not fetch everything again
+    asked = sum(requested_bytes(headers, len(data)) for headers in cfg.requests[earlier:])
+    assert asked < len(data)  # did not fetch everything again
+
+
+def requested_bytes(headers: dict[str, str], size: int) -> int:
+    """How many bytes a request asks for: its Range ("bytes=A-B" or "bytes=A-"), else the whole file."""
+    match = re.fullmatch(r"bytes=(\d+)-(\d*)", headers.get("Range", ""))
+    if not match:
+        return size
+    end = int(match.group(2)) if match.group(2) else size - 1
+    return min(end, size - 1) - int(match.group(1)) + 1
 
 
 def test_dropped_connections_are_retried(tmp_path, http_server):
