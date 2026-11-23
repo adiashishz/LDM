@@ -17,7 +17,7 @@ from dbus_fast import Message, MessageType, PropertyAccess, Variant
 from dbus_fast.aio import MessageBus
 from dbus_fast.service import ServiceInterface, dbus_property, method, signal
 
-from .format import human
+from .format import summary_text
 from .notify import GUI_ID, GUI_PATH
 
 log = logging.getLogger(__name__)
@@ -28,15 +28,6 @@ MENU_PATH = "/MenuBar"
 PORTAL = ("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop", "org.freedesktop.portal.Background")
 UPDATE_INTERVAL = 2.0
 
-
-def summary_text(running: int, done: int, total: int, speed: float) -> str:
-    if not running:
-        return "No downloads running"
-    parts = [f"{running} downloading"]
-    if total:
-        parts.append(f"{done * 100 // total}%")
-    parts.append(f"{human(speed)}/s")
-    return " · ".join(parts)
 
 
 class StatusItem(ServiceInterface):

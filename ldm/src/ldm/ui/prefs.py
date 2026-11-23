@@ -1,5 +1,7 @@
 """What the Preferences offer: choices, switches and number fields, with their labels (for any toolkit)."""
 
+import sys
+
 BACKUP_SCHEDULES = [("off", "Never"), ("daily", "Every day"), ("weekly", "Every week")]
 
 QUALITIES = [("best", "Best available"), (2160, "2160p (4K)"), (1440, "1440p"), (1080, "1080p"), (720, "720p"),
@@ -42,6 +44,14 @@ SYSTEM_SWITCHES = {
     "clipboard_watch": ("Offer to download copied links", "When LDM gets focus, and in the background "
                                                           "on desktops that allow it"),
 }
+if sys.platform == "win32":  # what these do on Windows; metered connections aren't detected there (yet)
+    del SYSTEM_SWITCHES["pause_on_metered"]
+    SYSTEM_SWITCHES["notify_when_closed"] = ("Notifications", "For finished and failed downloads (they need the "
+                                                              "tray icon)")
+    SYSTEM_SWITCHES["tray_icon"] = ("Show LDM in the tray", "Progress, Pause All, Resume All and Quit")
+    SYSTEM_SWITCHES["clipboard_watch"] = ("Offer to download copied links", "When LDM gets focus")
+
+PASSWORDS_WHERE = "Windows Credential Manager" if sys.platform == "win32" else "your keyring"
 
 NETWORK_SWITCHES = {
     "always_retry": ("Always retry", "Keep retrying failed downloads instead of stopping after the retries above"),

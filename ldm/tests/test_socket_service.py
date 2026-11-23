@@ -142,11 +142,12 @@ def test_service_without_dbus(tmp_path, http_server):
     async def scenario():
         ready = asyncio.Event()
         service = asyncio.create_task(serve(db_path=tmp_path / "a.db", stop=asyncio.Event(), ready=ready,
-                                            manager_options=options, manage_autostart=False, dbus=False))
+                                            manager_options=options, manage_autostart=False, dbus=False,
+                                            desktop=False))
         await ready.wait()
         with pytest.raises(AlreadyRunning):
             await serve(db_path=tmp_path / "b.db", stop=asyncio.Event(), manager_options=options,
-                        manage_autostart=False, dbus=False)
+                        manage_autostart=False, dbus=False, desktop=False)
         window = await connect_service("socket")
         told = asyncio.Event()
         window.on("Quit", told.set)

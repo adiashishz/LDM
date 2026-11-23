@@ -13,3 +13,6 @@ class Conditions:
     metered = False
     on_battery = False
     battery = 100.0
+
+    async def close(self) -> None:
+        """Stop watching (the system's monitors)."""

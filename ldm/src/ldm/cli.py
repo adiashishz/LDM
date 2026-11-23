@@ -80,7 +80,13 @@ def cmd_daemon(args) -> int:
     import logging
 
     from .daemon import AlreadyRunning, serve
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    if sys.stderr is None:  # started without a console (Windows' pythonw, at login): log to LDM's log folder
+        from . import paths
+
+        paths.log_dir().mkdir(parents=True, exist_ok=True)
+        sys.stderr = open(paths.log_dir() / "daemon.log", "a", encoding="utf-8", buffering=1)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+                        if sys.platform == "win32" else "%(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)  # one INFO line per request otherwise
     try:
         restart = asyncio.run(serve(db_path=args.db))

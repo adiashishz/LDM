@@ -255,8 +255,12 @@ def _remove_default_handler(home: Path, log: Callable[[str], None]) -> None:
 
 
 def set_autostart(enabled: bool) -> bool:
-    """Start the daemon at login (systemd user unit, or the Background portal in a Flatpak), or stop
-    doing so. Returns whether it worked."""
+    """Start the daemon at login (systemd user unit, the Background portal in a Flatpak, or on Windows the
+    Run key), or stop doing so. Returns whether it worked."""
+    if sys.platform == "win32":
+        from .winsys import set_autostart as windows_autostart
+
+        return windows_autostart(enabled)
     if sandbox.flatpak():
         return sandbox.request_autostart(enabled)
     return _systemctl("enable" if enabled else "disable", SYSTEMD_UNIT)

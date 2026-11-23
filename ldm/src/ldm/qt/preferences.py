@@ -12,8 +12,8 @@ from ..backup import file_name as backup_file_name
 from ..backup import is_encrypted
 from ..format import human, parse_rate
 from ..ui.prefs import (ADDING_SWITCHES, BACKUP_SCHEDULES, CONTAINERS, DNS_SERVERS, ENCRYPTION, FINISHED_SWITCHES,
-                        NETWORK_SWITCHES, PROXY_MODES, QUALITIES, SCHEDULE_SWITCHES, SPIN_SETTINGS, SYSTEM_SWITCHES,
-                        TORRENT_SPINS, TORRENT_SWITCHES, USER_AGENTS)
+                        NETWORK_SWITCHES, PASSWORDS_WHERE, PROXY_MODES, QUALITIES, SCHEDULE_SWITCHES, SPIN_SETTINGS,
+                        SYSTEM_SWITCHES, TORRENT_SPINS, TORRENT_SWITCHES, USER_AGENTS)
 from ..ui.states import FINISH_ACTIONS
 from ..ui.text import limit_text, short_path
 from .forms import Card, ComboRow, Dialog, EntryRow, Page, Row, ScheduleRows, SpinRow, SwitchRow
@@ -344,7 +344,7 @@ class PreferencesDialog(Dialog):
                                         "subdomains unless marked exact.")
         self.rules.add_head_control(self._add_button("Add rule", lambda: self._edit_rule(None)))
         self.logins = Card("Logins", "User names and passwords for sites that ask for them (HTTP login). "
-                                     "Passwords are kept in your keyring.")
+                                     f"Passwords are kept in {PASSWORDS_WHERE}.")
         self.logins.add_head_control(self._add_button("Add login", lambda: self._edit_login(None)))
         page.add(self.rules)
         page.add(self.logins)
