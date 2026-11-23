@@ -21,7 +21,7 @@ import sys
 import tempfile
 import time
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 # Keep in sync with ldm/busnames.py (checked by tests/test_nmhost.py).
 BUS_NAME = "io.github.adiashishz.LDM.Service"
 OBJECT_PATH = "/io/github/adiashishz/LDM/Manager1"

@@ -61,6 +61,16 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.5.0" date="2026-11-23">
+      <description>
+        <ul>
+          <li>LDM for Windows 10 and 11, as a preview: an installer for your user (no administrator rights) with yt-dlp, FFmpeg and Node.js included, a tray icon, notifications, and start at login</li>
+          <li>On Windows, the browser extension works in Firefox, Chrome, Edge and Brave, magnet links and .torrent files open in LDM, and the ldm command works in any terminal</li>
+          <li>New commands: ldm quit stops the download service and closes the window; ldm version shows which yt-dlp, libtorrent, FFmpeg and JavaScript runtime LDM uses</li>
+          <li>A torrent counts as finished only once all its data is written to disk</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.0" date="2026-11-16">
       <description>
         <ul>
