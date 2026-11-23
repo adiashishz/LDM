@@ -1,8 +1,9 @@
 ; LDM's Windows installer (Inno Setup 6). build.py runs:
 ;   ISCC /DVersion=<version> /DSource=<the PyInstaller bundle> /DIcon=<ldm.ico> /O<output folder> ldm.iss
 ; Per user, into %LOCALAPPDATA%\Programs\LDM: no administrator rights. After copying the files it registers
-; the browser bridge, magnet links, .torrent files and starting at login (`ldm install-browser-integration`);
-; the uninstaller stops LDM and removes those. Downloads, settings and the download list stay.
+; the browser bridge, magnet links, .torrent files and starting at login (`ldm install-browser-integration`),
+; and puts LDM's folder on the user's PATH (so `ldm` works in a terminal); the uninstaller stops LDM and
+; removes those. Downloads, settings and the download list stay.
 
 #ifndef Version
   #error Version is required (build.py passes it)
@@ -34,6 +35,8 @@ MinVersion=10.0
 ; LDM is asked to quit first (PrepareToInstall); whatever still holds a file is closed by Windows.
 CloseApplications=force
 RestartApplications=no
+; The user's PATH changes: tell running programs (new terminals see `ldm`).
+ChangesEnvironment=yes
 
 [InstallDelete]
 ; An update replaces the whole bundle: nothing of the old version's libraries may stay behind.
@@ -54,6 +57,9 @@ Filename: "{app}\ldm.exe"; Parameters: "quit"; Flags: runhidden waituntiltermina
 Filename: "{app}\ldm.exe"; Parameters: "install-browser-integration --uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveIntegration"
 
 [Code]
+const
+  EnvironmentKey = 'Environment';  // the user's environment variables (HKEY_CURRENT_USER)
+
 // An update: stop the running LDM (it saves every download's progress) before its files are replaced.
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
@@ -62,4 +68,46 @@ begin
   Result := '';
   if FileExists(ExpandConstant('{app}\ldm.exe')) then
     Exec(ExpandConstant('{app}\ldm.exe'), 'quit', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+// LDM's folder at the end of the user's PATH, once.
+procedure AddToPath(Folder: String);
+var
+  Path: String;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', Path) then
+    Path := '';
+  if Pos(';' + Uppercase(Folder) + ';', ';' + Uppercase(Path) + ';') > 0 then
+    exit;
+  if (Path <> '') and (Copy(Path, Length(Path), 1) <> ';') then
+    Path := Path + ';';
+  RegWriteExpandStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', Path + Folder);
+end;
+
+// ... and out of it again; the rest of the PATH stays as it is.
+procedure RemoveFromPath(Folder: String);
+var
+  Path: String;
+  At: Integer;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', Path) then
+    exit;
+  Path := ';' + Path + ';';
+  At := Pos(';' + Uppercase(Folder) + ';', Uppercase(Path));
+  if At = 0 then
+    exit;
+  Delete(Path, At, Length(Folder) + 1);
+  RegWriteExpandStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', Copy(Path, 2, Length(Path) - 2));
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    AddToPath(ExpandConstant('{app}'));
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    RemoveFromPath(ExpandConstant('{app}'));
 end;

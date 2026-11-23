@@ -39,7 +39,11 @@ release with all the files. Nothing is public until you publish the draft.
 
 6. **Check the draft** on GitHub (Releases): the notes, and that the files are there:
    `.rpm` (and `.src.rpm`), two `.deb` (Debian 13, Ubuntu 26.04), the `.flatpak`, `PKGBUILD` and `SRCINFO` for the AUR, the two
-   extension zips, and `SHA256SUMS`.
+   extension zips, the Windows installer `LDM-Setup-<version>.exe`, and `SHA256SUMS`.
+
+   While Windows is a preview, also try the draft's installer on a Windows 10 or 11 machine: install it, add a
+   download from the browser extension, open a magnet link, check the tray icon and a notification, then
+   uninstall. CI installs and uses it on Windows Server, but can't click through a real desktop.
 
 7. **Publish it.** Publishing also rebuilds the website with links to the new files.
 

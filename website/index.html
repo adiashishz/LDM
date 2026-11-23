@@ -134,7 +134,7 @@
         </a>
         <a class="button secondary" href="{{REPO}}">Source code</a>
       </div>
-      <p class="meta">Version {{VERSION}} · Fedora, Debian, Ubuntu, Arch and Flatpak · MIT license</p>
+      <p class="meta">Version {{VERSION}} · Fedora, Debian, Ubuntu, Arch, Flatpak and Windows (preview) · MIT license</p>
     </div>
     <div class="shot">
       <picture>
@@ -186,6 +186,7 @@
         <button role="tab" id="tab-debian" aria-controls="panel-debian" aria-selected="false" tabindex="-1">Debian</button>
         <button role="tab" id="tab-arch" aria-controls="panel-arch" aria-selected="false" tabindex="-1">Arch</button>
         <button role="tab" id="tab-flatpak" aria-controls="panel-flatpak" aria-selected="false" tabindex="-1">Flatpak</button>
+        <button role="tab" id="tab-windows" aria-controls="panel-windows" aria-selected="false" tabindex="-1">Windows</button>
       </div>
 
       <div class="card">
@@ -218,8 +219,14 @@
           <div class="downloads"><a href="{{DL}}/ldm-downloader-{{VERSION}}-x86_64.flatpak">Download .flatpak</a></div>
           <div class="terminal"><code>flatpak install --user ./ldm-downloader-{{VERSION}}-x86_64.flatpak</code><button type="button">Copy</button></div>
         </div>
+        <div class="panel" role="tabpanel" id="panel-windows" aria-labelledby="tab-windows" hidden>
+          <h3>Windows 10 and 11 (preview)</h3>
+          <p>Download the installer and run it: it installs LDM for your user (no administrator rights), with yt-dlp, FFmpeg and Node.js, and sets up the browser extension, magnet links and .torrent files. LDM on Windows is new: please <a href="{{REPO}}/issues">report problems</a>.</p>
+          <div class="downloads"><a href="{{DL}}/LDM-Setup-{{VERSION}}.exe">Download installer</a></div>
+          <p>The installer isn't signed yet, so Windows may say “Windows protected your PC”: choose <strong>More info</strong>, then <strong>Run anyway</strong>.</p>
+        </div>
       </div>
-      <p>Then, once: <code>ldm install-browser-integration</code> for magnet links and the browser extension
+      <p>On Linux, then once: <code>ldm install-browser-integration</code> for magnet links and the browser extension
         (as a Flatpak: <code>flatpak run --command=ldm io.github.adiashishz.LDM install-browser-integration</code>).
         Checksums are in <a href="{{DL}}/SHA256SUMS">SHA256SUMS</a>.</p>
     </div>
@@ -233,6 +240,7 @@
         <a class="card" href="{{DL}}/ldm-firefox-{{VERSION}}.zip"><strong>Firefox</strong><span>Download the zip, then about:debugging → Load Temporary Add-on</span></a>
         <a class="card" href="{{DL}}/ldm-chromium-{{VERSION}}.zip"><strong>Chrome</strong><span>Download and unzip, then Developer mode → Load unpacked</span></a>
         <a class="card" href="{{DL}}/ldm-chromium-{{VERSION}}.zip"><strong>Brave</strong><span>The Chrome zip: unzip, then Developer mode → Load unpacked</span></a>
+        <a class="card" href="{{DL}}/ldm-chromium-{{VERSION}}.zip"><strong>Edge</strong><span>The Chrome zip: unzip, then Developer mode → Load unpacked</span></a>
       </div>
     </div>
   </section>
@@ -277,6 +285,7 @@
       next.focus();
     });
   });
+  if (/Windows/.test(navigator.userAgent)) select(document.getElementById("tab-windows"));  // Windows visitors
   for (const button of document.querySelectorAll(".terminal button")) {
     button.addEventListener("click", async () => {
       const code = button.previousElementSibling;

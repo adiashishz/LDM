@@ -1,11 +1,13 @@
 """Smoke test of LDM's Windows installer (CI runs it after build.py): install it silently for this user, then
 - the bundle brings yt-dlp, libtorrent, ffmpeg and Node.js (`ldm version`);
-- the browser bridge, magnet links, .torrent files and starting at login are registered;
+- the browser bridge, magnet links, .torrent files and starting at login are registered, and LDM's folder is
+  on the user's PATH;
 - the service starts (ldm-service.exe) and a download through it finishes, from the command line and from
   the browser bridge;
 - the window opens and a second start hands its link to it;
 - `ldm quit` ends the service and the window;
-- uninstalling removes the programs and the registration (the user's downloads and settings stay).
+- uninstalling removes the programs, the registration and the PATH entry (the user's downloads and settings
+  stay).
 
     python smoke-test.py build\\windows\\LDM-Setup-<version>.exe
 
@@ -51,6 +53,12 @@ def value(key: str, name: str = "") -> str | None:
             return str(winreg.QueryValueEx(opened, name)[0])
     except OSError:
         return None
+
+
+def on_path() -> bool:
+    """LDM's folder is in the user's PATH (the installer adds it, so `ldm` works in a terminal)."""
+    folders = (value("Environment", "Path") or "").split(";")
+    return any(folder and Path(os.path.expandvars(folder)) == APP for folder in folders)
 
 
 def until(condition, timeout: float, what: str) -> None:
@@ -103,6 +111,7 @@ def registration() -> None:
     assert str(APP / "ldm-gui.exe") in (value(r"Software\Classes\LDM.magnet\shell\open\command") or "")
     assert str(APP / "ldm-service.exe") in (value(RUN_KEY, "LDM") or ""), value(RUN_KEY, "LDM")
     assert value(r"Software\RegisteredApplications", "LDM")
+    assert on_path(), f"LDM's folder isn't on the user's PATH: {value('Environment', 'Path')}"
 
 
 def downloads(env: dict, work: Path) -> subprocess.Popen:
@@ -153,6 +162,7 @@ def uninstall() -> None:
     assert value(r"Software\Classes\LDM.magnet") is None, "magnet links are still registered"
     assert value(RUN_KEY, "LDM") is None, "LDM still starts at login"
     assert value(r"Software\RegisteredApplications", "LDM") is None
+    assert not on_path(), f"LDM's folder is still on the user's PATH: {value('Environment', 'Path')}"
 
 
 def main() -> int:

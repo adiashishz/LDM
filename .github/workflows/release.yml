@@ -2,8 +2,8 @@
 #   1. the tag must match the version in every file;
 #   2. the whole CI runs: every package is built and install-tested on its distribution;
 #   3. the AUR PKGBUILD gets the checksum of GitHub's tarball of the tag, and is test-built from it;
-#   4. a DRAFT release collects the packages, the extension and SHA256SUMS, with the notes from the
-#      metainfo. Check it on GitHub, then publish it (publishing also updates the website).
+#   4. a DRAFT release collects the packages, the Windows installer, the extension and SHA256SUMS, with the
+#      notes from the metainfo. Check it on GitHub, then publish it (publishing also updates the website).
 # Run it by hand (Actions → Release → Run workflow) for a dry run: steps 1-2 only, no release.
 name: Release
 
@@ -92,6 +92,7 @@ jobs:
           # website's links use the names the release really has.
           for deb in artifacts/deb-*/*.deb; do name=$(basename "$deb"); cp "$deb" "release/${name//\~/.}"; done
           cp artifacts/flatpak/ldm.flatpak "release/ldm-downloader-$VERSION-x86_64.flatpak"
+          cp "artifacts/windows-installer/LDM-Setup-$VERSION.exe" release/
           cp artifacts/aur/PKGBUILD release/PKGBUILD
           cp artifacts/aur/.SRCINFO release/SRCINFO
           (cd extension && python3 build.py) && cp extension/dist/*.zip release/
