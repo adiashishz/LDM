@@ -1,3 +1,9 @@
+ldm-downloader (0.5.1-1) unstable; urgency=medium
+
+  * The Windows installer is half the size: about 100 MB instead of 195 MB
+
+ -- Aditya Ashish <adiashishz@gmail.com>  Mon, 23 Nov 2026 22:59:19 +0530
+
 ldm-downloader (0.5.0-1) unstable; urgency=medium
 
   * LDM for Windows 10 and 11, as a preview: an installer for your user (no administrator rights) with yt-dlp, FFmpeg and Node.js included, a tray icon, notifications, and start at login

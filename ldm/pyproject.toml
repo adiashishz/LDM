@@ -1,6 +1,6 @@
 [project]
 name = "ldm-downloader"  # the command and the Python module are `ldm`
-version = "0.5.0"
+version = "0.5.1"
 description = "Linux download manager (v1, Python)"
 requires-python = ">=3.11"
 license = "MIT"
