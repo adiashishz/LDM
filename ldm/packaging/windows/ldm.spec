@@ -7,7 +7,11 @@
 # tools folder (ffmpeg, ffprobe and node). build.py prepares those and runs this with LDM_BUILD set.
 #
 # yt-dlp is analysed from the pip copy, so the bundle gets what it needs (standard library modules, its
-# extras), and then its own modules are left out: a frozen copy would always be imported before the zip.
+# extras), and then its own modules are left out: the zip is what LDM imports, and updates.
+#
+# Size: the Python modules are files in _internal (noarchive), so the four programs share one copy instead of
+# each carrying its own archive; Qt's software OpenGL (the window is plain widgets) and Qt's translations
+# (LDM's text is English) are left out. build.py prints what's left, largest first.
 import os
 from pathlib import Path
 
@@ -36,12 +40,26 @@ DATAS = (
     + [(str(path), "tools") for path in sorted((WORK / "tools").iterdir())]
 )
 EXCLUDES = ["tkinter", "dbus_fast", "secretstorage", "gi"]
+LEFT_OUT_BINARIES = {"opengl32sw.dll"}  # Qt's software OpenGL renderer
+
+
+def parts(dest: str) -> list[str]:
+    return dest.replace("\\", "/").split("/")
+
+
+def kept(dest: str) -> bool:
+    """Whether a collected file stays in the bundle: not yt-dlp's modules (the zip is used), not Qt's
+    translations."""
+    path = parts(dest)
+    return path[0] != "yt_dlp" and not (path[0] == "PySide6" and "translations" in path)
 
 
 def analysis(script: str) -> Analysis:  # noqa: F821
     a = Analysis([str(HERE / script)], hiddenimports=HIDDEN, datas=DATAS, excludes=EXCLUDES,  # noqa: F821
-                 runtime_hooks=[str(HERE / "tools_path.py")], noarchive=False)
+                 runtime_hooks=[str(HERE / "tools_path.py")], noarchive=True)
     a.pure = [entry for entry in a.pure if entry[0] != "yt_dlp" and not entry[0].startswith("yt_dlp.")]
+    a.datas = [entry for entry in a.datas if kept(entry[0])]  # noarchive: the modules are .pyc files here
+    a.binaries = [entry for entry in a.binaries if parts(entry[0])[-1].lower() not in LEFT_OUT_BINARIES]
     return a
 
 
