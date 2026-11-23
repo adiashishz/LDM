@@ -107,6 +107,8 @@ def bundled_tools() -> None:
     assert lines["libtorrent"].startswith("libtorrent 2"), lines["libtorrent"]
     assert tools in lines["ffmpeg"], lines["ffmpeg"]
     assert "node" in lines["javascript"] and tools in lines["javascript"], lines["javascript"]
+    twice = sorted(path.name for path in (APP / "_internal").glob("av*.dll"))
+    assert not twice, f"ffmpeg's libraries are in the bundle twice (also outside tools): {twice}"
 
 
 def registration() -> None:

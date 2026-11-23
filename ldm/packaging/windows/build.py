@@ -112,7 +112,11 @@ def bundle() -> Path:
     subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--log-level", "WARN",
                     "--distpath", str(WORK / "dist"), "--workpath", str(WORK / "pyinstaller"),
                     str(HERE / "ldm.spec")], check=True, env=env)
-    return WORK / "dist" / "LDM"
+    source = WORK / "dist" / "LDM"
+    # The tools go in as they are, next to the bundle's own files (tools_path.py puts them on PATH); through
+    # PyInstaller, ffmpeg.exe's libraries would be collected a second time.
+    shutil.copytree(WORK / "tools", source / "_internal" / "tools")
+    return source
 
 
 def report(bundle: Path, top: int = 25) -> None:
